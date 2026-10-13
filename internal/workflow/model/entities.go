@@ -124,13 +124,16 @@ type WorkflowInstance struct {
 	Revision     int64
 	LeasedBy     string
 	LeaseExpiry  time.Time
-	Error        string
-	StartedAt    *time.Time
-	FinishedAt   *time.Time
-	CreatedBy    string
-	UpdatedBy    string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	// RunAt is the start_delay deadline of a waiting/delay park. The
+	// instance is claimable once it passes; nil means no deadline.
+	RunAt      *time.Time
+	Error      string
+	StartedAt  *time.Time
+	FinishedAt *time.Time
+	CreatedBy  string
+	UpdatedBy  string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 // HistoryCursor identifies a history row using its stable database ordering.

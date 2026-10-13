@@ -126,6 +126,15 @@ func TestWaitingReason(t *testing.T) {
 	}
 }
 
+func TestWaitingReasonDelay(t *testing.T) {
+	if model.WaitingReasonDelay != "delay" {
+		t.Errorf("delay reason = %q, want delay", model.WaitingReasonDelay)
+	}
+	if !model.ValidWaitingReason(model.WaitingReasonDelay) {
+		t.Error("ValidWaitingReason(delay) = false, want true")
+	}
+}
+
 func TestErrorSentinels(t *testing.T) {
 	if !errors.Is(model.ErrNotFound, model.ErrNotFound) {
 		t.Fatal("ErrNotFound must classify itself")

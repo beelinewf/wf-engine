@@ -29,6 +29,7 @@
     "Revision": 3,
     "LeasedBy": "",
     "LeaseExpiry": "<TS>",
+    "RunAt": null,
     "Error": "",
     "StartedAt": "<TS>",
     "FinishedAt": null,

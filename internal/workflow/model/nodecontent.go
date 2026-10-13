@@ -146,6 +146,14 @@ type NodeContent struct {
 	PostScript    *HookScript
 	PreScriptSet  bool
 	PostScriptSet bool
+	// StartDelay waits the given duration on arrival at the node (every
+	// type except input) before any of its behavior runs. StartDelaySet
+	// records whether the JSON key was present at all (including an
+	// explicit null), so materialization can distinguish "inherit the
+	// definition delay" (absent) from "disable it" (null) for nodes
+	// referencing a node definition.
+	StartDelay    time.Duration
+	StartDelaySet bool
 	// RetryOnRecovery requeues an interrupted external_call node instead of
 	// failing it when its worker lease expired (recovery). Script,
 	// condition, input, and group nodes always requeue. Pollers default to
@@ -300,6 +308,7 @@ type rawNode struct {
 	Metadata        map[string]any    `json:"metadata"`
 	PreScript       json.RawMessage   `json:"pre_script"`
 	PostScript      json.RawMessage   `json:"post_script"`
+	StartDelay      json.RawMessage   `json:"start_delay"`
 	StartNodeID     *string           `json:"start_node_id"`
 	Nodes           []json.RawMessage `json:"nodes"`
 	RetryOnRecovery *bool             `json:"retry_on_recovery"`
@@ -397,6 +406,15 @@ func parseRawNode(r *rawNode, limits NodeLimits) (*NodeContent, error) {
 	nc.PreScriptSet = preSet
 	nc.PostScript = post
 	nc.PostScriptSet = postSet
+	// start_delay is a lifecycle field like the hooks: it parses before
+	// the node_definition_id branch so referenced nodes may carry (or
+	// explicitly null) an occurrence override.
+	startDelay, startDelaySet, err := optionalCappedDuration(r.StartDelay, "start_delay", limits.MaxTimeout)
+	if err != nil {
+		return nil, err
+	}
+	nc.StartDelay = startDelay
+	nc.StartDelaySet = startDelaySet
 	onFailure, err := parseFailureRoute(r.OnFailure)
 	if err != nil {
 		return nil, err
@@ -534,6 +552,9 @@ func parseRawNode(r *rawNode, limits NodeLimits) (*NodeContent, error) {
 		nc.Timeout = limits.ConditionTimeout
 
 	case NodeTypeInput:
+		if nc.StartDelaySet {
+			return nil, errors.New("input node does not support start_delay")
+		}
 		if r.Channel == nil || strings.TrimSpace(*r.Channel) == "" {
 			return nil, errors.New("input node requires a channel")
 		}
@@ -935,9 +956,9 @@ func parseAllowedRoles(raw []string) ([]string, error) {
 // parseCustomNode resolves a custom node: it rejects every builtin
 // executable field, requires the config object, parses the timeout with
 // the standard cap, and delegates schema/validation to the node-owned
-// validator. Common fields (hooks, on_failure, output_property,
-// next_node, retry_on_recovery, metadata, input_data) were already parsed
-// by the caller.
+// validator. Common fields (hooks, start_delay, on_failure,
+// output_property, next_node, retry_on_recovery, metadata, input_data)
+// were already parsed by the caller.
 func parseCustomNode(nc *NodeContent, r *rawNode, limits NodeLimits) (*NodeContent, error) {
 	if r.Script != nil || r.Conditions != nil || r.Channel != nil || r.Validation != nil ||
 		r.Form != nil || r.HTTPConfig != nil || r.ExecutionConfig != nil ||
@@ -1094,6 +1115,34 @@ func nodeTimeout(raw json.RawMessage, limits NodeLimits) (time.Duration, error) 
 		return 0, fmt.Errorf("timeout %s exceeds the cap of %s", d, limits.MaxTimeout)
 	}
 	return d, nil
+}
+
+// optionalCappedDuration resolves an optional capped duration field:
+// absent or null is unset (0, false for absent; 0, true for null), an
+// explicit value must parse, be positive, and stay within cap. The
+// returned bool reports whether the JSON key was present at all.
+func optionalCappedDuration(raw json.RawMessage, name string, cap time.Duration) (time.Duration, bool, error) {
+	if len(raw) == 0 {
+		return 0, false, nil
+	}
+	if string(raw) == "null" {
+		return 0, true, nil
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return 0, true, fmt.Errorf("%s must be a duration string, got %s", name, raw)
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return 0, true, fmt.Errorf("invalid %s %q", name, s)
+	}
+	if d <= 0 {
+		return 0, true, fmt.Errorf("%s must be positive", name)
+	}
+	if d > cap {
+		return 0, true, fmt.Errorf("%s %s exceeds the cap of %s", name, d, cap)
+	}
+	return d, true, nil
 }
 
 // pollerDuration resolves a poller duration field: explicit positive value

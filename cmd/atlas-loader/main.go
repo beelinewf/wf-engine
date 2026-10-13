@@ -116,5 +116,9 @@ func foreignKeyDDL() string {
 	fmt.Fprintf(&b, "CREATE INDEX %q ON %q (%s) WHERE %s;\n",
 		"idx_workflow_instances_termination_pending", "workflow_instances",
 		"\"termination_pending\"", "\"termination_pending\" = TRUE")
+	// Partial index: only delay-parked waits are due for claiming.
+	fmt.Fprintf(&b, "CREATE INDEX %q ON %q (%s) WHERE %s;\n",
+		"idx_workflow_instances_delay", "workflow_instances",
+		"\"status\", \"waiting_reason\", \"run_at\"", "\"waiting_reason\" = 'delay'")
 	return b.String()
 }

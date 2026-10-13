@@ -96,9 +96,12 @@ const (
 	// instance: each resume wakes exactly one paused branch. Instance rows
 	// never carry it; they use the paused status instead.
 	WaitingReasonPaused WaitingReason = "paused"
+	// WaitingReasonDelay marks a waiting instance parked by a node's
+	// start_delay. It becomes claimable once run_at passes.
+	WaitingReasonDelay WaitingReason = "delay"
 )
 
 // ValidWaitingReason reports whether r is a known waiting reason.
 func ValidWaitingReason(r WaitingReason) bool {
-	return r == WaitingReasonRunnable || r == WaitingReasonInput || r == WaitingReasonParallel || r == WaitingReasonPaused
+	return r == WaitingReasonRunnable || r == WaitingReasonInput || r == WaitingReasonParallel || r == WaitingReasonPaused || r == WaitingReasonDelay
 }

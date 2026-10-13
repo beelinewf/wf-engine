@@ -46,6 +46,9 @@ type Checkpoint struct {
 	Context              json.RawMessage
 	Error                string
 	FinishedAt           *time.Time
+	// RunAt is the start_delay deadline a delay park commits; normal
+	// checkpoints leave it nil, which clears the column.
+	RunAt *time.Time
 	// History is appended atomically with the checkpoint when non-nil.
 	History *model.NodeContextHistory
 }
@@ -247,8 +250,9 @@ type InstanceRepository interface {
 	// Returns ErrInstanceNotFound when the source is missing.
 	MigrateInstance(ctx context.Context, u MigrateUpdate) error
 	// ClaimNext leases up to limit runnable instances (waiting with no
-	// active lease, or running with an expired lease) using FOR UPDATE SKIP
-	// LOCKED, moving them to running and fencing them to workerID.
+	// active lease, running with an expired lease, or delay-parked with a
+	// passed run_at) using FOR UPDATE SKIP LOCKED, moving them to running
+	// and fencing them to workerID.
 	ClaimNext(ctx context.Context, workerID string, lease time.Duration, limit int) ([]model.WorkflowInstance, error)
 	// Checkpoint commits a transition. It succeeds only while the worker
 	// still holds the lease at the expected revision; otherwise it returns
@@ -514,6 +518,7 @@ func (r *instanceRepo) RollbackInstance(ctx context.Context, u RollbackUpdate) (
 				"context":         jsonCol(u.Context, "{}"),
 				"error":           "",
 				"finished_at":     nil,
+				"run_at":          nil,
 				"revision":        gorm.Expr("revision + 1"),
 				"updated_at":      now,
 			})
@@ -749,9 +754,11 @@ func (r *instanceRepo) ClaimNext(ctx context.Context, workerID string, lease tim
 	var models []WorkflowInstanceModel
 	err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
 		Where(`(status = ? AND waiting_reason = ? AND (lease_expiry IS NULL OR lease_expiry < now()))
-		       OR (status = ? AND lease_expiry < now())`,
+		       OR (status = ? AND lease_expiry < now())
+		       OR (status = ? AND waiting_reason = ? AND (run_at IS NULL OR run_at <= now()) AND (lease_expiry IS NULL OR lease_expiry < now()))`,
 			string(model.WorkflowWaiting), string(model.WaitingReasonRunnable),
-			string(model.WorkflowRunning)).
+			string(model.WorkflowRunning),
+			string(model.WorkflowWaiting), string(model.WaitingReasonDelay)).
 		Order("updated_at").
 		Limit(limit).
 		Find(&models).Error
@@ -791,6 +798,7 @@ UPDATE workflow_instances
 SET status = ?, waiting_reason = ?, pause_requested = ?,
     frame = ?, counters = ?, context = ?, error = ?,
     leased_by = '', lease_expiry = NULL, finished_at = ?,
+    run_at = ?,
     revision = revision + 1, updated_at = now()
 WHERE id = ? AND revision = ? AND leased_by = ?`
 
@@ -816,7 +824,7 @@ func execInstanceCheckpointTx(ctx context.Context, tx *gorm.DB, c Checkpoint, fr
 	res := tx.Exec(checkpointSQL,
 		string(c.Status), string(c.WaitingReason), c.PauseRequested,
 		frame, counters, jsonCol(c.Context, "{}"), c.Error,
-		c.FinishedAt,
+		c.FinishedAt, c.RunAt,
 		c.InstanceID, c.Revision, c.WorkerID,
 	)
 	if res.Error != nil {

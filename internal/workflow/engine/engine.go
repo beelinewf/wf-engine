@@ -152,6 +152,15 @@ func (e *Engine) Process(ctx context.Context, w model.WorkflowInstance) error {
 	if err != nil {
 		return e.fail(ctx, sc, err)
 	}
+	if nc.StartDelay > 0 {
+		parked, err := e.maybeParkDelay(ctx, sc, &frame, counters, nc, cur)
+		if err != nil {
+			return err
+		}
+		if parked {
+			return nil
+		}
+	}
 	switch nc.Type {
 	case model.NodeTypeGroup:
 		return e.enterGroup(ctx, sc, g, &frame, counters, nc)
@@ -186,6 +195,31 @@ func (e *Engine) enterGroup(ctx context.Context, sc *execScope, g *workflowGraph
 		end:    preCtx,
 		nodeID: nc.ID,
 	})
+}
+
+// maybeParkDelay enforces a node's start_delay before any of its behavior
+// runs (pre hook, executor, group push). The first arrival parks the
+// instance as waiting/delay with run_at set to the deadline and releases
+// the lease; the claim after the deadline proceeds to execution. It
+// reports whether the transition parked (or is still early on a stale
+// claim) instead of executing.
+func (e *Engine) maybeParkDelay(ctx context.Context, sc *execScope, frame *model.Frame, counters model.Counters, nc *model.NodeContent, cur model.WorkflowInstance) (bool, error) {
+	now := e.now()
+	if cur.RunAt != nil {
+		if cur.RunAt.After(now) {
+			// A stale claim raced the deadline; the lease expires and
+			// the next ClaimNext redrives after run_at.
+			return true, nil
+		}
+		return false, nil
+	}
+	ctxMap, err := unmarshalContext(sc.contextRaw)
+	if err != nil {
+		return true, e.fail(ctx, sc, err)
+	}
+	deadline := now.Add(nc.StartDelay)
+	_ = e.appendEvent(ctx, sc, "node_delayed", map[string]any{"node_id": nc.ID, "run_at": deadline.UTC().Format(time.RFC3339Nano)})
+	return true, e.delayCheckpoint(ctx, sc, frame, counters, ctxMap, nc.ID, deadline)
 }
 
 // waitInput runs the input pre hook, creates the input node occurrence, and
@@ -854,6 +888,13 @@ const maxCheckpointAttempts = 3
 // terminal states onto the branch lifecycle and complete at the join
 // instead of checkpointing past it.
 func (e *Engine) checkpoint(ctx context.Context, sc *execScope, frame *model.Frame, counters model.Counters, ctxMap map[string]any, status model.WorkflowStatus, reason model.WaitingReason, errMsg string, finished *time.Time, commit *contextCommit) error {
+	return e.checkpointAt(ctx, sc, frame, counters, ctxMap, status, reason, errMsg, finished, commit, nil)
+}
+
+// checkpointAt commits the transition with an optional run_at deadline. A
+// nil deadline clears the column, which is what every normal checkpoint
+// does; only a delay park passes one.
+func (e *Engine) checkpointAt(ctx context.Context, sc *execScope, frame *model.Frame, counters model.Counters, ctxMap map[string]any, status model.WorkflowStatus, reason model.WaitingReason, errMsg string, finished *time.Time, commit *contextCommit, runAt *time.Time) error {
 	if sc.isBranch() {
 		return e.branchCheckpoint(ctx, sc, frame, counters, ctxMap, status, reason, errMsg)
 	}
@@ -884,6 +925,7 @@ func (e *Engine) checkpoint(ctx context.Context, sc *execScope, frame *model.Fra
 		Context:              ctxRaw,
 		Error:                errMsg,
 		FinishedAt:           finished,
+		RunAt:                runAt,
 		History:              history,
 	}
 	err = e.instances.Checkpoint(ctx, cp)
@@ -1040,6 +1082,18 @@ func (e *Engine) inputCheckpoint(ctx context.Context, sc *execScope, frame *mode
 		status = model.WorkflowPaused
 	}
 	return e.checkpoint(ctx, sc, frame, counters, ctxMap, status, model.WaitingReasonInput, "", nil, commit)
+}
+
+// delayCheckpoint parks the cursor waiting (or paused, honoring a deferred
+// pause or debug step-through) on a start_delay node with the given
+// deadline. The cursor and context are unchanged; the next claim after the
+// deadline re-enters the same node for real execution.
+func (e *Engine) delayCheckpoint(ctx context.Context, sc *execScope, frame *model.Frame, counters model.Counters, ctxMap map[string]any, nodeID string, deadline time.Time) error {
+	return e.checkpointAt(ctx, sc, frame, counters, ctxMap, e.nextStatus(sc), model.WaitingReasonDelay, "", nil, &contextCommit{
+		start:  ctxMap,
+		end:    ctxMap,
+		nodeID: nodeID,
+	}, &deadline)
 }
 
 type contextCommit struct {
