@@ -1163,6 +1163,7 @@ func TestParseStartDelayRejectsInput(t *testing.T) {
 		raw  string
 	}{
 		{"inline input", `{"type":"input","channel":"http","start_delay":"5s"}`},
+		{"inline input null", `{"type":"input","channel":"http","start_delay":null}`},
 		{"group child input", `{"type":"group","start_node_id":"11111111-1111-7111-8111-111111111111","nodes":[{"id":"11111111-1111-7111-8111-111111111111","type":"input","channel":"http","start_delay":"5s"}],"keys":{}}`},
 	}
 	for _, tc := range cases {

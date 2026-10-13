@@ -88,7 +88,9 @@ func (m *Materializer) materializeNode(ctx context.Context, n *model.NodeContent
 			merged.StartDelay = n.StartDelay
 			merged.StartDelaySet = true
 		}
-		if merged.Type == model.NodeTypeInput && merged.StartDelay > 0 {
+		// An input node never waits: reject an occurrence delay even when
+		// it is an explicit null, matching the inline parse rejection.
+		if merged.Type == model.NodeTypeInput && (merged.StartDelay > 0 || n.StartDelaySet) {
 			return nil, fmt.Errorf("%w: node %s is input which does not support start_delay",
 				model.ErrInvalid, n.ID)
 		}

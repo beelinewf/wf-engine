@@ -811,6 +811,17 @@ func TestStopCancelsParallelTree(t *testing.T) {
 	for _, b := range claimed {
 		byID[b.ID] = b
 	}
+	// One branch delay-parked: Stop must clear its deadline too.
+	delayed := byID[branches[1].ID]
+	delayFrame, _ := model.ParseFrame(delayed.Frame)
+	future := time.Now().UTC().Add(time.Hour)
+	if err := prepo.CheckpointBranch(ctx, repository.BranchCheckpoint{
+		BranchID: delayed.ID, WorkerID: "worker-1", Revision: delayed.Revision,
+		Status: model.ParallelBranchWaiting, WaitingReason: model.WaitingReasonDelay,
+		Frame: delayFrame, Context: delayed.Context, RunAt: &future,
+	}); err != nil {
+		t.Fatalf("CheckpointBranch() error = %v", err)
+	}
 	// A running branch attempt, as left by an interrupted worker.
 	attempt := model.NodeInstance{
 		ID: "01950000-0000-7000-8000-0000000000f2", WorkflowInstanceID: id,
@@ -827,6 +838,9 @@ func TestStopCancelsParallelTree(t *testing.T) {
 		got, _ := prepo.GetBranch(ctx, b.ID)
 		if got.Status != model.ParallelBranchCancelled || got.LeasedBy != "" {
 			t.Fatalf("branch %s = %+v", b.Name, got)
+		}
+		if got.RunAt != nil {
+			t.Errorf("branch %s run_at = %v, want nil after stop", b.Name, got.RunAt)
 		}
 	}
 	exGot, _ := prepo.GetExecution(ctx, ex.ID)

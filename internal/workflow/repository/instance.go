@@ -980,6 +980,7 @@ func (r *instanceRepo) Stop(ctx context.Context, id, reason string) (bool, error
 				"status":              string(model.WorkflowStopped),
 				"leased_by":           "",
 				"lease_expiry":        nil,
+				"run_at":              nil,
 				"termination_pending": pending,
 				"error":               reason,
 				"finished_at":         now,
@@ -1016,6 +1017,7 @@ func (r *instanceRepo) Stop(ctx context.Context, id, reason string) (bool, error
 					"status":       string(model.ParallelBranchCancelled),
 					"leased_by":    "",
 					"lease_expiry": nil,
+					"run_at":       nil,
 					"revision":     gorm.Expr("revision + 1"),
 					"updated_at":   now,
 				}).Error; err != nil {

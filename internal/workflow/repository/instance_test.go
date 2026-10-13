@@ -2494,6 +2494,9 @@ func TestStopDuringDelay(t *testing.T) {
 	if got.Status != model.WorkflowStopped {
 		t.Errorf("status = %s, want stopped", got.Status)
 	}
+	if got.RunAt != nil {
+		t.Errorf("run_at = %v, want nil after stop", got.RunAt)
+	}
 }
 
 func TestPauseResumePreservesDelayDeadline(t *testing.T) {
