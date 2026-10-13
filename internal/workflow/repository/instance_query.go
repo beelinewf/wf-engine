@@ -10,6 +10,9 @@ type InstanceListQuery struct {
 	IDs                  []string
 	WorkflowDefinitionID string
 	Statuses             []string
+	// Debug filters by step-through runs when non-nil; nil leaves the
+	// listing unfiltered.
+	Debug *bool
 	// CreatedBy scopes the listing to one owner. The service sets it from the
 	// authenticated principal, so a caller cannot widen the result set by
 	// naming another user: the field is not parsed from the query string.

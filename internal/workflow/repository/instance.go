@@ -406,6 +406,9 @@ func (r *instanceRepo) List(ctx context.Context, q InstanceListQuery) ([]model.W
 	if len(q.Statuses) > 0 {
 		query = query.Where("status IN ?", q.Statuses)
 	}
+	if q.Debug != nil {
+		query = query.Where("debug = ?", *q.Debug)
+	}
 	if q.CreatedBy != "" {
 		query = query.Where("created_by = ?", q.CreatedBy)
 	}

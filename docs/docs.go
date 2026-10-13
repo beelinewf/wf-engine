@@ -1271,6 +1271,12 @@ const docTemplate = `{
                         "description": "Statuses",
                         "name": "status",
                         "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Filter by step-through (debug) runs",
+                        "name": "debug",
+                        "in": "query"
                     }
                 ],
                 "responses": {

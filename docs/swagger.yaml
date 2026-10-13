@@ -1507,6 +1507,10 @@ paths:
           type: string
         name: status
         type: array
+      - description: Filter by step-through (debug) runs
+        in: query
+        name: debug
+        type: boolean
       produces:
       - application/json
       responses:

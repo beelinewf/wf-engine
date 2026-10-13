@@ -1786,6 +1786,25 @@ func TestInstanceServiceListDelegatesAndFilters(t *testing.T) {
 	if total != 3 || len(items) != 1 || items[0].ID != inst3.ID {
 		t.Errorf("page 2: total = %d items = [%s], want [%s]", total, itemIDs(items), inst3.ID)
 	}
+
+	// Debug delegates through to the repository: none of the three
+	// fixtures is a step-through run.
+	isDebug := true
+	_, total, err = svc.List(ctx, repository.InstanceListQuery{Page: 1, PerPage: 50, Order: "created_at", Debug: &isDebug}, auth.Principal{})
+	if err != nil {
+		t.Fatalf("List(debug) error = %v", err)
+	}
+	if total != 0 {
+		t.Errorf("debug=true: total = %d, want 0", total)
+	}
+	notDebug := false
+	_, total, err = svc.List(ctx, repository.InstanceListQuery{Page: 1, PerPage: 50, Order: "created_at", Debug: &notDebug}, auth.Principal{})
+	if err != nil {
+		t.Fatalf("List(not debug) error = %v", err)
+	}
+	if total != 3 {
+		t.Errorf("debug=false: total = %d, want 3", total)
+	}
 }
 
 func itemIDs(items []model.WorkflowInstance) string {

@@ -970,13 +970,16 @@ func TestInstanceListDelegatesParsedQuery(t *testing.T) {
 	svc := &fakeInstanceSvc{listTotal: 1}
 	r := NewRouter(Deps{Health: NewHealth(fakePinger{}), Instances: svc})
 	w := performJSON(r, http.MethodGet, "/v1/workflow/instance?page=2&per_page=10&order=-status"+
-		"&id="+instanceID+"&workflow_definition_id="+wfDefID+"&status=waiting&status=failed", "", nil)
+		"&id="+instanceID+"&workflow_definition_id="+wfDefID+"&status=waiting&status=failed&debug=true", "", nil)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (%s)", w.Code, w.Body.String())
 	}
 	q := svc.listQuery
 	if q.Page != 2 || q.PerPage != 10 || q.Order != "-status" {
 		t.Errorf("query page/per_page/order = %d/%d/%q, want 2/10/-status", q.Page, q.PerPage, q.Order)
+	}
+	if q.Debug == nil || !*q.Debug {
+		t.Errorf("query debug = %+v, want true", q)
 	}
 	if len(q.IDs) != 1 || q.IDs[0] != instanceID {
 		t.Errorf("query IDs = %v, want [%s]", q.IDs, instanceID)

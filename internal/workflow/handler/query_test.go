@@ -164,6 +164,35 @@ func TestParseInstanceListQueryFilters(t *testing.T) {
 	}
 }
 
+func TestParseInstanceListQueryDebugFilter(t *testing.T) {
+	c, _ := makeCtx("/v1/workflow/instance?debug=true")
+	q, err := ParseInstanceListQuery(c)
+	if err != nil {
+		t.Fatalf("ParseInstanceListQuery error = %v", err)
+	}
+	if q.Debug == nil || !*q.Debug {
+		t.Errorf("debug=true: got %+v", q)
+	}
+
+	c, _ = makeCtx("/v1/workflow/instance?debug=false")
+	q, err = ParseInstanceListQuery(c)
+	if err != nil {
+		t.Fatalf("ParseInstanceListQuery error = %v", err)
+	}
+	if q.Debug == nil || *q.Debug {
+		t.Errorf("debug=false: got %+v", q)
+	}
+
+	c, _ = makeCtx("/v1/workflow/instance")
+	q, err = ParseInstanceListQuery(c)
+	if err != nil {
+		t.Fatalf("ParseInstanceListQuery error = %v", err)
+	}
+	if q.Debug != nil {
+		t.Errorf("debug omitted: got %v, want nil (unfiltered)", *q.Debug)
+	}
+}
+
 func TestParseInstanceListQueryOrderAllowlist(t *testing.T) {
 	for _, order := range []string{
 		"id", "-id",
@@ -209,6 +238,7 @@ func TestParseInstanceListQueryInvalidValues(t *testing.T) {
 		"?status=",
 		"?status=done",
 		"?status=Running",
+		"?debug=maybe",
 	}
 	for _, suffix := range bad {
 		c, _ := makeCtx("/v1/workflow/instance" + suffix)

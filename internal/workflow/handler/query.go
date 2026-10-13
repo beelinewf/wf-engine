@@ -160,6 +160,9 @@ type InstanceListQuery struct {
 	IDs                  []string
 	WorkflowDefinitionID string
 	Statuses             []string
+	// Debug filters by step-through runs when non-nil; nil leaves the
+	// listing unfiltered.
+	Debug *bool
 }
 
 // ParseInstanceListQuery parses and validates a workflow instance list query.
@@ -203,6 +206,13 @@ func ParseInstanceListQuery(c *gin.Context) (*InstanceListQuery, error) {
 			}
 			q.Statuses = append(q.Statuses, s)
 		}
+	}
+	if v := c.Query("debug"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return nil, fmt.Errorf("query: debug must be a boolean, got %q", v)
+		}
+		q.Debug = &b
 	}
 	return q, nil
 }
