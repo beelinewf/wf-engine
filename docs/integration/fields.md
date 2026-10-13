@@ -144,10 +144,10 @@ Cross-type fields:
   of a definition shares one gate. See the input gates below.
 - `pre_script` / `post_script`: `{script (required, non-blank), timeout?}`. Any node type. Explicit `null` disables an
   inherited definition hook on `node_definition_id` references; omitted inherits.
-- `start_delay`: Go duration (`"15s"`). Any node type except `input` (→ `422`). On arrival the instance parks as
-  `waiting` with reason `delay` until arrival + delay, without holding a worker, then executes; every visit (including
-  loop iterations) waits again. Explicit `null` on a `node_definition_id` reference disables an inherited definition
-  delay; omitted inherits.
+- `start_delay`: Go duration (`"15s"`). Any node type except `input` (→ `422`). On arrival the instance — or the
+  branch, when the node runs on a parallel branch — parks as `waiting` with reason `delay` until arrival + delay,
+  without holding a worker, then executes; every visit (including loop iterations) waits again. Explicit `null` on a
+  `node_definition_id` reference disables an inherited definition delay; omitted inherits.
 - `node_definition_id` reference: carries only graph fields (`id`, `name` override, `next_node`, `output_property`,
   `on_failure`, `keys` for groups, hooks, `start_delay`, `metadata`, `retry_on_recovery`). Inline executable fields (`script`,
   `conditions`, `channel`, `http_config`, `nodes`, poller blocks) → `422`. Optional `type` must match the referenced

@@ -1548,3 +1548,210 @@ func TestFailBranchFailsPausedParent(t *testing.T) {
 		t.Fatalf("parent error = %q, want leaf failure", got.Error)
 	}
 }
+
+// parkBranchForDelay claims one branch and parks it waiting/delay with the
+// given deadline, returning the parked row.
+func parkBranchForDelay(t *testing.T, db *gorm.DB, runAt *time.Time) model.ParallelBranch {
+	t.Helper()
+	ctx := context.Background()
+	repo := repository.NewParallelRepository(db)
+	claimed, err := repo.ClaimNextBranches(ctx, "worker-1", time.Minute, 10)
+	if err != nil || len(claimed) == 0 {
+		t.Fatalf("claim = %v, err %v", claimed, err)
+	}
+	b := claimed[0]
+	if err := repo.CheckpointBranch(ctx, repository.BranchCheckpoint{
+		BranchID:      b.ID,
+		WorkerID:      "worker-1",
+		Revision:      b.Revision,
+		Status:        model.ParallelBranchWaiting,
+		WaitingReason: model.WaitingReasonDelay,
+		Frame:         model.NewFrame(parallelTestNodeA),
+		Counters:      model.Counters{},
+		Context:       json.RawMessage(`{"v":1}`),
+		RunAt:         runAt,
+	}); err != nil {
+		t.Fatalf("CheckpointBranch() error = %v", err)
+	}
+	got, err := repo.GetBranch(ctx, b.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return *got
+}
+
+func TestClaimNextBranchesSkipsFutureDelay(t *testing.T) {
+	db := setupTestDB(t)
+	seedInstanceFixture(t, db)
+	truncateParallel(t, db)
+	ctx := context.Background()
+	id := "01950000-0000-7000-8000-0000000000d1"
+	insertLeasedInstance(t, db, id)
+
+	repo := repository.NewParallelRepository(db)
+	if _, _, err := repo.Fork(ctx, parallelFork(id)); err != nil {
+		t.Fatalf("Fork() error = %v", err)
+	}
+	future := time.Now().UTC().Add(time.Hour)
+	parked := parkBranchForDelay(t, db, &future)
+	if parked.RunAt == nil {
+		t.Fatal("parked branch run_at = nil, want deadline")
+	}
+
+	claimed, err := repo.ClaimNextBranches(ctx, "worker-1", time.Minute, 10)
+	if err != nil {
+		t.Fatalf("ClaimNextBranches() error = %v", err)
+	}
+	for _, b := range claimed {
+		if b.ID == parked.ID {
+			t.Error("claimed delay-parked branch before its run_at")
+		}
+	}
+}
+
+func TestClaimNextBranchesClaimsDueDelay(t *testing.T) {
+	db := setupTestDB(t)
+	seedInstanceFixture(t, db)
+	truncateParallel(t, db)
+	ctx := context.Background()
+	id := "01950000-0000-7000-8000-0000000000d2"
+	insertLeasedInstance(t, db, id)
+
+	repo := repository.NewParallelRepository(db)
+	f := parallelFork(id)
+	f.Branches = []repository.ForkBranch{
+		{Name: "solo", BranchIndex: 0, StartNodeID: parallelTestNodeA, Frame: model.NewFrame(parallelTestNodeA), Context: json.RawMessage(`{"v":1}`)},
+	}
+	if _, _, err := repo.Fork(ctx, f); err != nil {
+		t.Fatalf("Fork() error = %v", err)
+	}
+	past := time.Now().UTC().Add(-time.Minute)
+	parked := parkBranchForDelay(t, db, &past)
+
+	claimed, err := repo.ClaimNextBranches(ctx, "worker-1", time.Minute, 10)
+	if err != nil {
+		t.Fatalf("ClaimNextBranches() error = %v", err)
+	}
+	if len(claimed) != 1 || claimed[0].ID != parked.ID {
+		t.Fatalf("claimed = %v, want the due delay-parked branch", claimed)
+	}
+}
+
+func TestCheckpointBranchWritesAndClearsRunAt(t *testing.T) {
+	db := setupTestDB(t)
+	seedInstanceFixture(t, db)
+	truncateParallel(t, db)
+	ctx := context.Background()
+	id := "01950000-0000-7000-8000-0000000000d3"
+	insertLeasedInstance(t, db, id)
+
+	repo := repository.NewParallelRepository(db)
+	f := parallelFork(id)
+	f.Branches = []repository.ForkBranch{
+		{Name: "solo", BranchIndex: 0, StartNodeID: parallelTestNodeA, Frame: model.NewFrame(parallelTestNodeA), Context: json.RawMessage(`{"v":1}`)},
+	}
+	if _, _, err := repo.Fork(ctx, f); err != nil {
+		t.Fatalf("Fork() error = %v", err)
+	}
+	deadline := time.Now().UTC().Add(-time.Second).Truncate(time.Millisecond)
+	parked := parkBranchForDelay(t, db, &deadline)
+	if parked.RunAt == nil || !parked.RunAt.Equal(deadline) {
+		t.Fatalf("run_at = %v, want %v", parked.RunAt, deadline)
+	}
+
+	claimed, err := repo.ClaimNextBranches(ctx, "worker-1", time.Minute, 10)
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("reclaim = %v, err %v", claimed, err)
+	}
+	b := claimed[0]
+	if err := repo.CheckpointBranch(ctx, repository.BranchCheckpoint{
+		BranchID:      b.ID,
+		WorkerID:      "worker-1",
+		Revision:      b.Revision,
+		Status:        model.ParallelBranchWaiting,
+		WaitingReason: model.WaitingReasonRunnable,
+		Frame:         model.NewFrame(parallelTestNodeA),
+		Counters:      model.Counters{},
+		Context:       json.RawMessage(`{"v":1}`),
+	}); err != nil {
+		t.Fatalf("CheckpointBranch() error = %v", err)
+	}
+	stored, err := repo.GetBranch(ctx, b.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.RunAt != nil {
+		t.Errorf("run_at = %v, want cleared by normal branch checkpoint", stored.RunAt)
+	}
+}
+
+func TestForkClearsRunAt(t *testing.T) {
+	db := setupTestDB(t)
+	seedInstanceFixture(t, db)
+	truncateParallel(t, db)
+	ctx := context.Background()
+	id := "01950000-0000-7000-8000-0000000000d4"
+	w := newTestInstance(id, model.WorkflowRunning, model.WaitingReasonRunnable)
+	w.LeasedBy = "worker-1"
+	w.LeaseExpiry = time.Now().UTC().Add(time.Minute)
+	stale := time.Now().UTC().Add(-time.Minute)
+	w.RunAt = &stale
+	insertInstance(t, db, w)
+
+	repo := repository.NewParallelRepository(db)
+	if _, _, err := repo.Fork(ctx, parallelFork(id)); err != nil {
+		t.Fatalf("Fork() error = %v", err)
+	}
+	got, err := repository.NewInstanceRepository(db).GetByID(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.WaitingReason != model.WaitingReasonParallel {
+		t.Fatalf("waiting_reason = %q, want parallel", got.WaitingReason)
+	}
+	if got.RunAt != nil {
+		t.Errorf("run_at = %v, want cleared by fork", got.RunAt)
+	}
+}
+
+func TestNestedForkClearsOwnerRunAt(t *testing.T) {
+	db := setupTestDB(t)
+	seedInstanceFixture(t, db)
+	truncateParallel(t, db)
+	ctx := context.Background()
+	id := "01950000-0000-7000-8000-0000000000d5"
+	insertLeasedInstance(t, db, id)
+
+	repo := repository.NewParallelRepository(db)
+	if _, _, err := repo.Fork(ctx, parallelFork(id)); err != nil {
+		t.Fatalf("Fork() error = %v", err)
+	}
+	stale := time.Now().UTC().Add(-time.Minute)
+	owner := parkBranchForDelay(t, db, &stale)
+	claimed, err := repo.ClaimNextBranches(ctx, "worker-1", time.Minute, 10)
+	if err != nil || len(claimed) == 0 {
+		t.Fatalf("reclaim = %v, err %v", claimed, err)
+	}
+	var running *model.ParallelBranch
+	for i := range claimed {
+		if claimed[i].ID == owner.ID {
+			running = &claimed[i]
+		}
+	}
+	if running == nil {
+		t.Fatal("owner branch not reclaimed after its deadline")
+	}
+	if _, _, err := repo.Fork(ctx, nestedForkFor(id, *running)); err != nil {
+		t.Fatalf("nested Fork() error = %v", err)
+	}
+	got, err := repo.GetBranch(ctx, owner.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.WaitingReason != model.WaitingReasonParallel {
+		t.Fatalf("waiting_reason = %q, want parallel", got.WaitingReason)
+	}
+	if got.RunAt != nil {
+		t.Errorf("owner run_at = %v, want cleared by nested fork", got.RunAt)
+	}
+}

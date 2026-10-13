@@ -104,6 +104,15 @@ func (e *Engine) ProcessBranch(ctx context.Context, b model.ParallelBranch) erro
 	if err != nil {
 		return e.fail(ctx, sc, err)
 	}
+	if nc.StartDelay > 0 {
+		parked, err := e.maybeParkDelay(ctx, sc, &frame, counters, nc, cur.RunAt)
+		if err != nil {
+			return err
+		}
+		if parked {
+			return nil
+		}
+	}
 	switch nc.Type {
 	case model.NodeTypeGroup:
 		return e.enterGroup(ctx, sc, g, &frame, counters, nc)

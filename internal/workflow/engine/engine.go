@@ -153,7 +153,7 @@ func (e *Engine) Process(ctx context.Context, w model.WorkflowInstance) error {
 		return e.fail(ctx, sc, err)
 	}
 	if nc.StartDelay > 0 {
-		parked, err := e.maybeParkDelay(ctx, sc, &frame, counters, nc, cur)
+		parked, err := e.maybeParkDelay(ctx, sc, &frame, counters, nc, cur.RunAt)
 		if err != nil {
 			return err
 		}
@@ -203,10 +203,10 @@ func (e *Engine) enterGroup(ctx context.Context, sc *execScope, g *workflowGraph
 // the lease; the claim after the deadline proceeds to execution. It
 // reports whether the transition parked (or is still early on a stale
 // claim) instead of executing.
-func (e *Engine) maybeParkDelay(ctx context.Context, sc *execScope, frame *model.Frame, counters model.Counters, nc *model.NodeContent, cur model.WorkflowInstance) (bool, error) {
+func (e *Engine) maybeParkDelay(ctx context.Context, sc *execScope, frame *model.Frame, counters model.Counters, nc *model.NodeContent, runAt *time.Time) (bool, error) {
 	now := e.now()
-	if cur.RunAt != nil {
-		if cur.RunAt.After(now) {
+	if runAt != nil {
+		if runAt.After(now) {
 			// A stale claim raced the deadline; the lease expires and
 			// the next ClaimNext redrives after run_at.
 			return true, nil
@@ -896,7 +896,7 @@ func (e *Engine) checkpoint(ctx context.Context, sc *execScope, frame *model.Fra
 // does; only a delay park passes one.
 func (e *Engine) checkpointAt(ctx context.Context, sc *execScope, frame *model.Frame, counters model.Counters, ctxMap map[string]any, status model.WorkflowStatus, reason model.WaitingReason, errMsg string, finished *time.Time, commit *contextCommit, runAt *time.Time) error {
 	if sc.isBranch() {
-		return e.branchCheckpoint(ctx, sc, frame, counters, ctxMap, status, reason, errMsg)
+		return e.branchCheckpoint(ctx, sc, frame, counters, ctxMap, status, reason, errMsg, runAt)
 	}
 	var history *model.NodeContextHistory
 	var err error
@@ -987,7 +987,7 @@ func (e *Engine) checkpointAt(ctx context.Context, sc *execScope, frame *model.F
 // branchCheckpoint commits one branch transition: failures fail the branch
 // (and its execution), arrivals at the join complete through the barrier,
 // and every other step checkpoints as waiting.
-func (e *Engine) branchCheckpoint(ctx context.Context, sc *execScope, frame *model.Frame, counters model.Counters, ctxMap map[string]any, status model.WorkflowStatus, reason model.WaitingReason, errMsg string) error {
+func (e *Engine) branchCheckpoint(ctx context.Context, sc *execScope, frame *model.Frame, counters model.Counters, ctxMap map[string]any, status model.WorkflowStatus, reason model.WaitingReason, errMsg string, runAt *time.Time) error {
 	if status == model.WorkflowFailed {
 		failed := sc.branchIdentity()
 		failed["error"] = errMsg
@@ -1060,6 +1060,7 @@ func (e *Engine) branchCheckpoint(ctx context.Context, sc *execScope, frame *mod
 		BranchID: sc.branchID, WorkerID: sc.leasedBy, Revision: sc.revision,
 		Status: model.ParallelBranchWaiting, WaitingReason: nextBranchReason(sc, reason),
 		Frame: *frame, Counters: counters, Context: ctxRaw, Error: errMsg,
+		RunAt: runAt,
 	})
 	if errors.Is(err, repository.ErrLeaseLost) {
 		return nil

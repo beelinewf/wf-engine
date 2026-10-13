@@ -300,3 +300,158 @@ func TestDelayGateReparksLoop(t *testing.T) {
 		t.Error("loop re-arrival run_at = nil, want a fresh deadline")
 	}
 }
+
+const (
+	delayBranchID    = "dddddddd-dddd-7ddd-8ddd-dddddddddddd"
+	delayExecutionID = "eeeeeeee-eeee-7eee-8eee-eeeeeeeeeee1"
+	delayNodeEnd     = "eeeeeeee-eeee-7eee-8eee-eeeeeeeeeee2"
+)
+
+// delayFakeParallel is a scriptable ParallelRepository for branch delay-gate
+// tests. Branch checkpoints apply to the canned row.
+type delayFakeParallel struct {
+	repository.ParallelRepository
+	branch      model.ParallelBranch
+	execution   model.ParallelExecution
+	checkpoints []repository.BranchCheckpoint
+}
+
+func (f *delayFakeParallel) GetBranch(_ context.Context, _ string) (*model.ParallelBranch, error) {
+	b := f.branch
+	return &b, nil
+}
+
+func (f *delayFakeParallel) GetExecution(_ context.Context, _ string) (*model.ParallelExecution, error) {
+	ex := f.execution
+	return &ex, nil
+}
+
+func (f *delayFakeParallel) CheckpointBranch(_ context.Context, c repository.BranchCheckpoint) error {
+	f.checkpoints = append(f.checkpoints, c)
+	f.branch.Status = c.Status
+	f.branch.WaitingReason = c.WaitingReason
+	f.branch.RunAt = c.RunAt
+	frameRaw, _ := c.Frame.JSON()
+	f.branch.Frame = frameRaw
+	f.branch.Revision++
+	return nil
+}
+
+func (f *delayFakeInstances) GetRunningBranchNodeInstance(_ context.Context, _ string) (*model.NodeInstance, error) {
+	return nil, repository.ErrNodeInstanceNotFound
+}
+
+func (f *delayFakeInstances) GetBranchNodeInstanceByNode(_ context.Context, _, _ string) (*model.NodeInstance, error) {
+	return nil, repository.ErrNodeInstanceNotFound
+}
+
+// delayBranchEngine builds an engine over branch fakes with a controllable
+// clock.
+func delayBranchEngine(inst *delayFakeInstances, par *delayFakeParallel, loader WorkflowLoader, now time.Time) *Engine {
+	e := NewEngine(inst, par,
+		executor.NewExecutors(executor.Limits{}, nil, executor.Dependencies{}),
+		executor.NewHookRunner(nil),
+		model.DefaultLimits(), loader, "test", model.LeanOptions{})
+	e.now = func() time.Time { return now }
+	return e
+}
+
+func delayBranchAt(nodeID string) model.ParallelBranch {
+	frameRaw, _ := model.NewFrame(nodeID).JSON()
+	return model.ParallelBranch{
+		ID:                  delayBranchID,
+		ParallelExecutionID: delayExecutionID,
+		InstanceID:          delayInstanceID,
+		Name:                "a",
+		Status:              model.ParallelBranchRunning,
+		WaitingReason:       model.WaitingReasonRunnable,
+		Frame:               frameRaw,
+		Context:             json.RawMessage(`{}`),
+		Counters:            json.RawMessage(`{}`),
+		Revision:            3,
+		LeasedBy:            "worker-1",
+	}
+}
+
+func delayBranchExecution() model.ParallelExecution {
+	return model.ParallelExecution{
+		ID:         delayExecutionID,
+		InstanceID: delayInstanceID,
+		Depth:      1,
+		EndNodeID:  delayNodeEnd,
+		Status:     model.ParallelWaitingForBranches,
+	}
+}
+
+func TestDelayGateBranchParksBeforeExecution(t *testing.T) {
+	t0 := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+	content := `{"start_node_id":"` + delayNodeA + `","nodes":[
+		{"id":"` + delayNodeA + `","type":"script","script":"return 1;","next_node":"` + delayNodeB + `","start_delay":"15s"},
+		{"id":"` + delayNodeB + `","type":"script","script":"return 2;"}
+	]}`
+	inst := &delayFakeInstances{inst: delayInstanceAt(delayNodeA)}
+	par := &delayFakeParallel{branch: delayBranchAt(delayNodeA), execution: delayBranchExecution()}
+	e := delayBranchEngine(inst, par, delayLoader(t, content), t0)
+
+	if err := e.ProcessBranch(context.Background(), par.branch); err != nil {
+		t.Fatalf("ProcessBranch() error = %v", err)
+	}
+	if len(par.checkpoints) != 1 {
+		t.Fatalf("branch checkpoints = %d, want 1 park", len(par.checkpoints))
+	}
+	cp := par.checkpoints[0]
+	if cp.Status != model.ParallelBranchWaiting || cp.WaitingReason != model.WaitingReasonDelay {
+		t.Errorf("park = %s/%q, want waiting/delay", cp.Status, cp.WaitingReason)
+	}
+	if cp.RunAt == nil || !cp.RunAt.Equal(t0.Add(15*time.Second)) {
+		t.Errorf("run_at = %v, want t0+15s", cp.RunAt)
+	}
+	if len(inst.inserted) != 0 {
+		t.Errorf("attempts inserted = %d, want none before the deadline", len(inst.inserted))
+	}
+	types := inst.eventTypes()
+	if types["node_delayed"] != 1 {
+		t.Errorf("node_delayed events = %d, want 1", types["node_delayed"])
+	}
+	if types["node_started"] != 0 {
+		t.Error("node_started fired during park, want it only on real execution")
+	}
+}
+
+func TestDelayGateBranchExecutesAfterDeadline(t *testing.T) {
+	t0 := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+	content := `{"start_node_id":"` + delayNodeA + `","nodes":[
+		{"id":"` + delayNodeA + `","type":"script","script":"return 1;","next_node":"` + delayNodeB + `","start_delay":"15s"},
+		{"id":"` + delayNodeB + `","type":"script","script":"return 2;"}
+	]}`
+	branch := delayBranchAt(delayNodeA)
+	branch.WaitingReason = model.WaitingReasonDelay
+	past := t0.Add(-time.Second)
+	branch.RunAt = &past
+	inst := &delayFakeInstances{inst: delayInstanceAt(delayNodeA)}
+	par := &delayFakeParallel{branch: branch, execution: delayBranchExecution()}
+	e := delayBranchEngine(inst, par, delayLoader(t, content), t0)
+
+	if err := e.ProcessBranch(context.Background(), par.branch); err != nil {
+		t.Fatalf("ProcessBranch() error = %v", err)
+	}
+	if len(inst.inserted) != 1 {
+		t.Fatalf("attempts inserted = %d, want 1 execution", len(inst.inserted))
+	}
+	if inst.eventTypes()["node_started"] != 1 {
+		t.Errorf("node_started events = %d, want 1", inst.eventTypes()["node_started"])
+	}
+	if len(par.checkpoints) != 1 {
+		t.Fatalf("branch checkpoints = %d, want 1", len(par.checkpoints))
+	}
+	cp := par.checkpoints[0]
+	if cp.Status != model.ParallelBranchWaiting || cp.WaitingReason != model.WaitingReasonRunnable {
+		t.Errorf("checkpoint = %s/%q, want waiting/runnable", cp.Status, cp.WaitingReason)
+	}
+	if cp.RunAt != nil {
+		t.Errorf("run_at = %v, want cleared after execution", cp.RunAt)
+	}
+	if cp.Frame.CurrentNodeID != delayNodeB {
+		t.Errorf("cursor = %s, want advanced to %s", cp.Frame.CurrentNodeID, delayNodeB)
+	}
+}

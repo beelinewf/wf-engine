@@ -120,5 +120,9 @@ func foreignKeyDDL() string {
 	fmt.Fprintf(&b, "CREATE INDEX %q ON %q (%s) WHERE %s;\n",
 		"idx_workflow_instances_delay", "workflow_instances",
 		"\"status\", \"waiting_reason\", \"run_at\"", "\"waiting_reason\" = 'delay'")
+	// Partial index: the branch-side twin for delay-parked branches.
+	fmt.Fprintf(&b, "CREATE INDEX %q ON %q (%s) WHERE %s;\n",
+		"idx_parallel_branches_delay", "parallel_branches",
+		"\"status\", \"waiting_reason\", \"run_at\"", "\"waiting_reason\" = 'delay'")
 	return b.String()
 }

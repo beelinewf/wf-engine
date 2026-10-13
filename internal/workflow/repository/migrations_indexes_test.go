@@ -64,6 +64,10 @@ func TestMigrationIndexes(t *testing.T) {
 			`"idx_workflow_instances_delay"`,
 			`"status"`, `"waiting_reason"`, `"run_at"`, `WHERE`, `waiting_reason = 'delay'`,
 		}},
+		{"idx_parallel_branches_delay", []string{
+			`"idx_parallel_branches_delay"`,
+			`"status"`, `"waiting_reason"`, `"run_at"`, `WHERE`, `waiting_reason = 'delay'`,
+		}},
 	}
 	for _, w := range want {
 		pos := 0
