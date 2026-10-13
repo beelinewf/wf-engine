@@ -81,6 +81,19 @@ func (m *Materializer) materializeNode(ctx context.Context, n *model.NodeContent
 			merged.PostScript = n.PostScript
 			merged.PostScriptSet = true
 		}
+		// Start delay: an omitted occurrence delay inherits the
+		// definition's; an explicit value replaces it; an explicit null
+		// disables it.
+		if n.StartDelaySet {
+			merged.StartDelay = n.StartDelay
+			merged.StartDelaySet = true
+		}
+		// An input node never waits: reject an occurrence delay even when
+		// it is an explicit null, matching the inline parse rejection.
+		if merged.Type == model.NodeTypeInput && (merged.StartDelay > 0 || n.StartDelaySet) {
+			return nil, fmt.Errorf("%w: node %s is input which does not support start_delay",
+				model.ErrInvalid, n.ID)
+		}
 		merged.NextNode = n.NextNode
 		if strings.TrimSpace(n.OutputProperty) != "" {
 			merged.OutputProperty = n.OutputProperty

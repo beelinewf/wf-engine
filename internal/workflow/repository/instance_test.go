@@ -2318,3 +2318,236 @@ func TestGetLiveBranchNodeInstanceByNode(t *testing.T) {
 		t.Fatalf("unknown node err = %v, want ErrNodeInstanceNotFound", err)
 	}
 }
+
+func TestClaimNextSkipsFutureDelay(t *testing.T) {
+	db := setupTestDB(t)
+	seedInstanceFixture(t, db)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	future := newTestInstance("66666666-6666-7666-8666-666666666666", model.WorkflowWaiting, model.WaitingReasonDelay)
+	deadline := now.Add(time.Hour)
+	future.RunAt = &deadline
+	insertInstance(t, db, future)
+
+	claimed, err := repository.NewInstanceRepository(db).ClaimNext(ctx, "worker-1", time.Minute, 10)
+	if err != nil {
+		t.Fatalf("ClaimNext() error = %v", err)
+	}
+	for _, w := range claimed {
+		if w.ID == future.ID {
+			t.Error("claimed delay-parked instance before its run_at")
+		}
+	}
+}
+
+func TestClaimNextClaimsDueDelay(t *testing.T) {
+	db := setupTestDB(t)
+	seedInstanceFixture(t, db)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	due := newTestInstance("77777777-7777-7777-8777-777777777777", model.WorkflowWaiting, model.WaitingReasonDelay)
+	past := now.Add(-time.Minute)
+	due.RunAt = &past
+	insertInstance(t, db, due)
+	// A delay park without a deadline stays claimable, like a runnable row.
+	unstamped := newTestInstance("99999999-9999-7999-8999-999999999991", model.WorkflowWaiting, model.WaitingReasonDelay)
+	insertInstance(t, db, unstamped)
+
+	claimed, err := repository.NewInstanceRepository(db).ClaimNext(ctx, "worker-1", time.Minute, 10)
+	if err != nil {
+		t.Fatalf("ClaimNext() error = %v", err)
+	}
+	got := map[string]bool{}
+	for _, w := range claimed {
+		got[w.ID] = true
+	}
+	if !got[due.ID] {
+		t.Error("did not claim delay-parked instance after its run_at")
+	}
+	if !got[unstamped.ID] {
+		t.Error("did not claim delay-parked instance with NULL run_at")
+	}
+}
+
+func TestCheckpointWritesAndClearsRunAt(t *testing.T) {
+	db := setupTestDB(t)
+	seedInstanceFixture(t, db)
+	ctx := context.Background()
+	insertInstance(t, db, newTestInstance("11111111-1111-7111-8111-111111111111", model.WorkflowWaiting, ""))
+	repo := repository.NewInstanceRepository(db)
+	claimed, err := repo.ClaimNext(ctx, "worker-1", time.Minute, 10)
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("claim = %v, err %v", claimed, err)
+	}
+	w := claimed[0]
+
+	deadline := time.Now().UTC().Add(-time.Second).Truncate(time.Millisecond)
+	cp := repository.Checkpoint{
+		InstanceID:     w.ID,
+		WorkerID:       "worker-1",
+		Revision:       w.Revision,
+		Status:         model.WorkflowWaiting,
+		WaitingReason:  model.WaitingReasonDelay,
+		Frame:          model.NewFrame("node-2"),
+		Counters:       model.Counters{Total: 1, Nodes: map[string]int{"node-1": 1}},
+		Context:        json.RawMessage(`{"x":1}`),
+		RunAt:          &deadline,
+		PauseRequested: false,
+	}
+	if err := repo.Checkpoint(ctx, cp); err != nil {
+		t.Fatalf("Checkpoint() error = %v", err)
+	}
+	stored, err := repo.GetByID(ctx, w.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.RunAt == nil || !stored.RunAt.Equal(deadline) {
+		t.Fatalf("run_at = %v, want %v", stored.RunAt, deadline)
+	}
+	if stored.WaitingReason != model.WaitingReasonDelay {
+		t.Fatalf("waiting_reason = %q, want delay", stored.WaitingReason)
+	}
+
+	// The deadline passed, so the row is claimable; a normal checkpoint
+	// clears run_at.
+	reclaimed, err := repo.ClaimNext(ctx, "worker-1", time.Minute, 10)
+	if err != nil || len(reclaimed) != 1 {
+		t.Fatalf("reclaim = %v, err %v", reclaimed, err)
+	}
+	cp = repository.Checkpoint{
+		InstanceID:     w.ID,
+		WorkerID:       "worker-1",
+		Revision:       reclaimed[0].Revision,
+		Status:         model.WorkflowWaiting,
+		WaitingReason:  model.WaitingReasonRunnable,
+		Frame:          model.NewFrame("node-2"),
+		Counters:       model.Counters{Total: 1, Nodes: map[string]int{"node-1": 1}},
+		Context:        json.RawMessage(`{"x":1}`),
+		PauseRequested: false,
+	}
+	if err := repo.Checkpoint(ctx, cp); err != nil {
+		t.Fatalf("Checkpoint() error = %v", err)
+	}
+	stored, err = repo.GetByID(ctx, w.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.RunAt != nil {
+		t.Errorf("run_at = %v, want cleared by normal checkpoint", stored.RunAt)
+	}
+}
+
+func TestRollbackInstanceClearsRunAt(t *testing.T) {
+	db := setupTestDB(t)
+	seedInstanceFixture(t, db)
+	ctx := context.Background()
+	repo := repository.NewInstanceRepository(db)
+
+	id := "11111111-1111-7111-8111-111111111111"
+	w := newTestInstance(id, model.WorkflowPaused, model.WaitingReasonDelay)
+	deadline := time.Now().UTC().Add(time.Hour)
+	w.RunAt = &deadline
+	insertInstance(t, db, w)
+
+	got, err := repo.RollbackInstance(ctx, repository.RollbackUpdate{
+		InstanceID:    id,
+		Frame:         model.NewFrame("22222222-2222-7222-8222-222222222222"),
+		Context:       json.RawMessage(`{"before":1}`),
+		Actor:         fixtureUserID,
+		Reason:        "retry with fresh delay",
+		FromNode:      "44444444-4444-7444-8444-444444444444",
+		ToNode:        "22222222-2222-7222-8222-222222222222",
+		ToOccurrence:  "55555555-5555-7555-8555-555555555555",
+		WaitingReason: model.WaitingReasonRunnable,
+	})
+	if err != nil {
+		t.Fatalf("RollbackInstance() error = %v", err)
+	}
+	if got.RunAt != nil {
+		t.Errorf("run_at = %v, want cleared by rollback", got.RunAt)
+	}
+}
+
+func TestStopDuringDelay(t *testing.T) {
+	db := setupTestDB(t)
+	seedInstanceFixture(t, db)
+	ctx := context.Background()
+	repo := repository.NewInstanceRepository(db)
+
+	id := "11111111-1111-7111-8111-111111111111"
+	w := newTestInstance(id, model.WorkflowWaiting, model.WaitingReasonDelay)
+	deadline := time.Now().UTC().Add(time.Hour)
+	w.RunAt = &deadline
+	insertInstance(t, db, w)
+
+	pending, err := repo.Stop(ctx, id, "operator stop")
+	if err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+	if pending {
+		t.Error("pending = true, want false for a parked instance")
+	}
+	got, err := repo.GetByID(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != model.WorkflowStopped {
+		t.Errorf("status = %s, want stopped", got.Status)
+	}
+	if got.RunAt != nil {
+		t.Errorf("run_at = %v, want nil after stop", got.RunAt)
+	}
+}
+
+func TestPauseResumePreservesDelayDeadline(t *testing.T) {
+	db := setupTestDB(t)
+	seedInstanceFixture(t, db)
+	ctx := context.Background()
+	repo := repository.NewInstanceRepository(db)
+
+	id := "11111111-1111-7111-8111-111111111111"
+	w := newTestInstance(id, model.WorkflowWaiting, model.WaitingReasonDelay)
+	deadline := time.Now().UTC().Add(time.Hour).Truncate(time.Millisecond)
+	w.RunAt = &deadline
+	insertInstance(t, db, w)
+
+	deferred, err := repo.Pause(ctx, id)
+	if err != nil {
+		t.Fatalf("Pause() error = %v", err)
+	}
+	if deferred {
+		t.Error("deferred = true, want immediate pause of a parked instance")
+	}
+	paused, err := repo.GetByID(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if paused.Status != model.WorkflowPaused || paused.WaitingReason != model.WaitingReasonDelay {
+		t.Errorf("paused = %s/%q, want paused/delay", paused.Status, paused.WaitingReason)
+	}
+	if paused.RunAt == nil || !paused.RunAt.Equal(deadline) {
+		t.Errorf("paused run_at = %v, want preserved %v", paused.RunAt, deadline)
+	}
+
+	if err := repo.Resume(ctx, id); err != nil {
+		t.Fatalf("Resume() error = %v", err)
+	}
+	resumed, err := repo.GetByID(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resumed.Status != model.WorkflowWaiting || resumed.WaitingReason != model.WaitingReasonDelay {
+		t.Errorf("resumed = %s/%q, want waiting/delay", resumed.Status, resumed.WaitingReason)
+	}
+	if resumed.RunAt == nil || !resumed.RunAt.Equal(deadline) {
+		t.Errorf("resumed run_at = %v, want preserved %v", resumed.RunAt, deadline)
+	}
+
+	claimed, err := repo.ClaimNext(ctx, "worker-1", time.Minute, 10)
+	if err != nil {
+		t.Fatalf("ClaimNext() error = %v", err)
+	}
+	if len(claimed) != 0 {
+		t.Errorf("claimed = %d, want none before the preserved deadline", len(claimed))
+	}
+}

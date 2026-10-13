@@ -6,6 +6,7 @@ import (
 	"errors"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/simpwf/workflow-engine/internal/workflow/model"
 	"github.com/simpwf/workflow-engine/internal/workflow/repository"
@@ -615,5 +616,91 @@ func TestMaterializeOccurrenceOnFailureRejectsUnsupportedDefinitionType(t *testi
 	}
 	if _, err := svc.Materialize(context.Background(), wc); !errors.Is(err, model.ErrInvalid) {
 		t.Errorf("Materialize() error = %v, want ErrInvalid for script definition with occurrence on_failure", err)
+	}
+}
+
+// delayedNodeDef is a reusable script definition carrying a start_delay,
+// used to exercise occurrence inherit/replace/disable rules.
+const delayedNodeDef = `{"type":"script","script":"return 1;","start_delay":"20s"}`
+
+func materializeDelayed(t *testing.T, occurrenceJSON string) *model.NodeContent {
+	t.Helper()
+	ndRepo := newFakeNodeRepo()
+	ndRepo.defs[nodeDefA] = model.NodeDefinition{
+		ID: nodeDefA, Name: "delayed", Version: 1, LineageID: lineageID,
+		Type: "script", Content: json.RawMessage(delayedNodeDef),
+	}
+	svc := newWorkflowService(newFakeWorkflowRepo(), ndRepo)
+	content := `{"start_node_id":"aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa","nodes":[` + occurrenceJSON + `]}`
+	wc, err := model.ParseWorkflowContent([]byte(content), testLimits)
+	if err != nil {
+		t.Fatalf("ParseWorkflowContent() error = %v", err)
+	}
+	merged, err := svc.Materialize(context.Background(), wc)
+	if err != nil {
+		t.Fatalf("Materialize() error = %v", err)
+	}
+	return merged.Nodes[0]
+}
+
+func TestMaterializeStartDelayOmittedInheritsDefinition(t *testing.T) {
+	first := materializeDelayed(t, `{"id":"aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa","node_definition_id":"`+nodeDefA+`"}`)
+	if first.StartDelay != 20*time.Second {
+		t.Errorf("start_delay = %v, want inherited 20s", first.StartDelay)
+	}
+}
+
+func TestMaterializeStartDelayValueReplacesDefinition(t *testing.T) {
+	first := materializeDelayed(t, `{"id":"aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa","node_definition_id":"`+nodeDefA+`","start_delay":"5s"}`)
+	if first.StartDelay != 5*time.Second {
+		t.Errorf("start_delay = %v, want occurrence override 5s", first.StartDelay)
+	}
+}
+
+func TestMaterializeStartDelayNullDisablesDefinition(t *testing.T) {
+	first := materializeDelayed(t, `{"id":"aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa","node_definition_id":"`+nodeDefA+`","start_delay":null}`)
+	if first.StartDelay != 0 {
+		t.Errorf("start_delay = %v, want 0 after explicit null", first.StartDelay)
+	}
+	if !first.StartDelaySet {
+		t.Error("start_delay presence flag not recorded for explicit null")
+	}
+}
+
+func TestMaterializeStartDelayRejectsInputDefinition(t *testing.T) {
+	ndRepo := newFakeNodeRepo()
+	ndRepo.defs[nodeDefA] = model.NodeDefinition{
+		ID: nodeDefA, Name: "shared-input", Version: 1, LineageID: lineageID,
+		Type: "input", Content: json.RawMessage(`{"type":"input","channel":"http"}`),
+	}
+	svc := newWorkflowService(newFakeWorkflowRepo(), ndRepo)
+	content := `{"start_node_id":"aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa","nodes":[
+		{"id":"aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa","node_definition_id":"` + nodeDefA + `","start_delay":"5s"}
+	]}`
+	wc, err := model.ParseWorkflowContent([]byte(content), testLimits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Materialize(context.Background(), wc); !errors.Is(err, model.ErrInvalid) {
+		t.Errorf("Materialize() error = %v, want ErrInvalid for input definition with occurrence start_delay", err)
+	}
+}
+
+func TestMaterializeStartDelayNullOnInputDefinitionRejects(t *testing.T) {
+	ndRepo := newFakeNodeRepo()
+	ndRepo.defs[nodeDefA] = model.NodeDefinition{
+		ID: nodeDefA, Name: "shared-input", Version: 1, LineageID: lineageID,
+		Type: "input", Content: json.RawMessage(`{"type":"input","channel":"http"}`),
+	}
+	svc := newWorkflowService(newFakeWorkflowRepo(), ndRepo)
+	content := `{"start_node_id":"aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa","nodes":[
+		{"id":"aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa","node_definition_id":"` + nodeDefA + `","start_delay":null}
+	]}`
+	wc, err := model.ParseWorkflowContent([]byte(content), testLimits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Materialize(context.Background(), wc); !errors.Is(err, model.ErrInvalid) {
+		t.Errorf("Materialize() error = %v, want ErrInvalid for input definition with explicit null start_delay", err)
 	}
 }

@@ -64,6 +64,9 @@ type BranchCheckpoint struct {
 	Counters      model.Counters
 	Context       json.RawMessage
 	Error         string
+	// RunAt is the start_delay deadline a delay park commits; normal
+	// checkpoints leave it nil, which clears the column.
+	RunAt *time.Time
 }
 
 // ParallelRepository is the durable state store for parallel executions and
@@ -95,8 +98,9 @@ type ParallelRepository interface {
 	// termination cancels out to in-flight branch workers.
 	ListBranchIDs(ctx context.Context, instanceID string) ([]string, error)
 	// ClaimNextBranches leases up to limit runnable branches (pending,
-	// waiting with no active lease, or running with an expired lease)
-	// using FOR UPDATE SKIP LOCKED, moving them to running.
+	// waiting with no active lease, running with an expired lease, or
+	// delay-parked with a passed run_at) using FOR UPDATE SKIP LOCKED,
+	// moving them to running.
 	ClaimNextBranches(ctx context.Context, workerID string, lease time.Duration, limit int) ([]model.ParallelBranch, error)
 	// CheckpointBranch commits a branch transition. It succeeds only while
 	// the worker still holds the lease at the expected revision; otherwise
@@ -156,7 +160,7 @@ func NewParallelRepository(db *gorm.DB) ParallelRepository {
 const forkParentSQL = `
 UPDATE workflow_instances
 SET status = ?, waiting_reason = ?, frame = ?, counters = ?, context = ?,
-    leased_by = '', lease_expiry = NULL,
+    leased_by = '', lease_expiry = NULL, run_at = NULL,
     revision = revision + 1, updated_at = now()
 WHERE id = ? AND revision = ? AND leased_by = ?`
 
@@ -213,6 +217,7 @@ func (r *parallelRepo) Fork(ctx context.Context, f ForkParallel) (*model.Paralle
 			res := tx.Exec(branchCheckpointSQL,
 				string(model.ParallelBranchWaiting), string(model.WaitingReasonParallel),
 				frame, counters, jsonCol(f.Context, "{}"), "",
+				nil,
 				*f.ParentBranchID, f.Revision, f.WorkerID,
 			)
 			if res.Error != nil {
@@ -354,10 +359,12 @@ func (r *parallelRepo) ClaimNextBranches(ctx context.Context, workerID string, l
 	err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
 		Where(`status = ?
 		       OR (status = ? AND waiting_reason = ? AND (lease_expiry IS NULL OR lease_expiry < now()))
-		       OR (status = ? AND lease_expiry < now())`,
+		       OR (status = ? AND lease_expiry < now())
+		       OR (status = ? AND waiting_reason = ? AND (run_at IS NULL OR run_at <= now()) AND (lease_expiry IS NULL OR lease_expiry < now()))`,
 			string(model.ParallelBranchPending),
 			string(model.ParallelBranchWaiting), string(model.WaitingReasonRunnable),
-			string(model.ParallelBranchRunning)).
+			string(model.ParallelBranchRunning),
+			string(model.ParallelBranchWaiting), string(model.WaitingReasonDelay)).
 		Order("updated_at").
 		Limit(limit).
 		Find(&models).Error
@@ -392,7 +399,7 @@ func (r *parallelRepo) ClaimNextBranches(ctx context.Context, workerID string, l
 const branchCheckpointSQL = `
 UPDATE parallel_branches
 SET status = ?, waiting_reason = ?, frame = ?, counters = ?, context = ?, error = ?,
-    leased_by = '', lease_expiry = NULL,
+    leased_by = '', lease_expiry = NULL, run_at = ?,
     revision = revision + 1, updated_at = now()
 WHERE id = ? AND revision = ? AND leased_by = ?`
 
@@ -407,6 +414,7 @@ func (r *parallelRepo) CheckpointBranch(ctx context.Context, c BranchCheckpoint)
 	}
 	res := r.db.WithContext(ctx).Exec(branchCheckpointSQL,
 		string(c.Status), string(c.WaitingReason), frame, counters, jsonCol(c.Context, "{}"), c.Error,
+		c.RunAt,
 		c.BranchID, c.Revision, c.WorkerID,
 	)
 	if res.Error != nil {
@@ -832,6 +840,7 @@ func (r *parallelRepo) JoinBranchParallel(ctx context.Context, j JoinBranchCheck
 		c := j.BranchCheckpoint
 		res := tx.Exec(branchCheckpointSQL,
 			string(c.Status), string(c.WaitingReason), frame, counters, jsonCol(c.Context, "{}"), c.Error,
+			c.RunAt,
 			c.BranchID, c.Revision, c.WorkerID,
 		)
 		if res.Error != nil {

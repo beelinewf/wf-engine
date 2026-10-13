@@ -1120,3 +1120,75 @@ func TestParseInputNodeBlankOutputPropertyAllowed(t *testing.T) {
 		t.Errorf("output_property = %q, want trimmed", nc.OutputProperty)
 	}
 }
+
+func TestParseStartDelayValid(t *testing.T) {
+	nc := mustParseContent(t, `{"type":"script","script":"return 1;","start_delay":"15s"}`)
+	if nc.StartDelay != 15*time.Second || !nc.StartDelaySet {
+		t.Errorf("start_delay = %v/%v, want 15s/true", nc.StartDelay, nc.StartDelaySet)
+	}
+	nc = mustParseContent(t, `{"type":"script","script":"return 1;"}`)
+	if nc.StartDelay != 0 || nc.StartDelaySet {
+		t.Errorf("absent start_delay = %v/%v, want 0/false", nc.StartDelay, nc.StartDelaySet)
+	}
+}
+
+func TestParseStartDelayRejectsInvalid(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"not a duration", `{"type":"script","script":"x","start_delay":"soon"}`, "start_delay"},
+		{"not a string", `{"type":"script","script":"x","start_delay":15}`, "start_delay"},
+		{"zero", `{"type":"script","script":"x","start_delay":"0s"}`, "positive"},
+		{"negative", `{"type":"script","script":"x","start_delay":"-5s"}`, "positive"},
+		{"over cap", `{"type":"script","script":"x","start_delay":"10m"}`, "cap"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := model.ParseNodeContent([]byte(tc.raw), testLimits)
+			if err == nil {
+				t.Fatalf("error = nil, want %q rejection", tc.want)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error = %q, want substring %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseStartDelayRejectsInput(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+	}{
+		{"inline input", `{"type":"input","channel":"http","start_delay":"5s"}`},
+		{"inline input null", `{"type":"input","channel":"http","start_delay":null}`},
+		{"group child input", `{"type":"group","start_node_id":"11111111-1111-7111-8111-111111111111","nodes":[{"id":"11111111-1111-7111-8111-111111111111","type":"input","channel":"http","start_delay":"5s"}],"keys":{}}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := model.ParseNodeContent([]byte(tc.raw), testLimits)
+			if err == nil {
+				t.Fatalf("error = nil, want input start_delay rejection")
+			}
+			if !strings.Contains(err.Error(), "start_delay") {
+				t.Errorf("error = %q, want start_delay rejection", err)
+			}
+		})
+	}
+}
+
+func TestParseStartDelayNullRecordsPresence(t *testing.T) {
+	nc := mustParseContent(t, `{"type":"script","script":"x","start_delay":null}`)
+	if nc.StartDelay != 0 || !nc.StartDelaySet {
+		t.Errorf("null start_delay = %v/%v, want 0/true", nc.StartDelay, nc.StartDelaySet)
+	}
+}
+
+func TestParseStartDelayAllowedOnReference(t *testing.T) {
+	nc := mustParseContent(t, `{"node_definition_id":"11111111-1111-7111-8111-111111111111","start_delay":"5s"}`)
+	if nc.StartDelay != 5*time.Second || !nc.StartDelaySet {
+		t.Errorf("reference start_delay = %v/%v, want 5s/true", nc.StartDelay, nc.StartDelaySet)
+	}
+}

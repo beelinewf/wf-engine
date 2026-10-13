@@ -92,8 +92,8 @@ Transports: `http`, `redis`, `rabbitmq` (any combination, at least one). Event n
 
 Go duration strings (`"30s"`, `"5m"`, `"2s"`). Must parse and be positive. Node `timeout` is additionally capped by
 `engine.max_node_timeout` (defaults: default `30s`, cap `5m`, conditions/inputs fixed at `condition_timeout` `5s`, not
-settable). Poller `delay` (default `5s`), `request_timeout` (default `30s`), `max_wait_time` (default `5m`), and
-status-update `retry_delay` (default `5s`) are never capped by the engine max.
+settable). `start_delay` is capped by the same max. Poller `delay` (default `5s`), `request_timeout` (default `30s`),
+`max_wait_time` (default `5m`), and status-update `retry_delay` (default `5s`) are never capped by the engine max.
 
 ## Cron schedules
 
@@ -144,8 +144,12 @@ Cross-type fields:
   of a definition shares one gate. See the input gates below.
 - `pre_script` / `post_script`: `{script (required, non-blank), timeout?}`. Any node type. Explicit `null` disables an
   inherited definition hook on `node_definition_id` references; omitted inherits.
+- `start_delay`: Go duration (`"15s"`). Any node type except `input` (→ `422`). On arrival the instance — or the
+  branch, when the node runs on a parallel branch — parks as `waiting` with reason `delay` until arrival + delay,
+  without holding a worker, then executes; every visit (including loop iterations) waits again. Explicit `null` on a
+  `node_definition_id` reference disables an inherited definition delay; omitted inherits.
 - `node_definition_id` reference: carries only graph fields (`id`, `name` override, `next_node`, `output_property`,
-  `on_failure`, `keys` for groups, hooks, `metadata`, `retry_on_recovery`). Inline executable fields (`script`,
+  `on_failure`, `keys` for groups, hooks, `start_delay`, `metadata`, `retry_on_recovery`). Inline executable fields (`script`,
   `conditions`, `channel`, `http_config`, `nodes`, poller blocks) → `422`. Optional `type` must match the referenced
   definition.
 - `timeout`: omitted/null = engine default. `branches` is parallel-only: a required object on `parallel_start`,

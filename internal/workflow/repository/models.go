@@ -185,6 +185,7 @@ type WorkflowInstanceModel struct {
 	Revision             int64          `gorm:"column:revision;not null;default:0"`
 	LeasedBy             string         `gorm:"column:leased_by;not null;default:''"`
 	LeaseExpiry          *time.Time     `gorm:"column:lease_expiry;index:idx_workflow_instances_claim,priority:3"`
+	RunAt                *time.Time     `gorm:"column:run_at"`
 	Error                string         `gorm:"column:error;not null;default:''"`
 	StartedAt            *time.Time     `gorm:"column:started_at"`
 	FinishedAt           *time.Time     `gorm:"column:finished_at"`
@@ -337,6 +338,7 @@ type ParallelBranchModel struct {
 	Revision            int64          `gorm:"column:revision;not null;default:0"`
 	LeasedBy            string         `gorm:"column:leased_by;not null;default:''"`
 	LeaseExpiry         *time.Time     `gorm:"column:lease_expiry;index"`
+	RunAt               *time.Time     `gorm:"column:run_at"`
 	Error               string         `gorm:"column:error;not null;default:''"`
 	CreatedAt           time.Time      `gorm:"column:created_at;not null"`
 	UpdatedAt           time.Time      `gorm:"column:updated_at;not null"`

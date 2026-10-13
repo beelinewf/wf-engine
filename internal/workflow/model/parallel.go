@@ -556,7 +556,10 @@ type ParallelBranch struct {
 	Revision            int64
 	LeasedBy            string
 	LeaseExpiry         time.Time
-	Error               string
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
+	// RunAt is the start_delay deadline of a waiting/delay park. The
+	// branch is claimable once it passes; nil means no deadline.
+	RunAt     *time.Time
+	Error     string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
