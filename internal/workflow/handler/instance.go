@@ -65,6 +65,7 @@ func (h *InstanceHandler) Create(c *gin.Context) {
 // @Param id query []string false "Instance IDs"
 // @Param workflow_definition_id query string false "Workflow definition ID"
 // @Param status query []string false "Statuses"
+// @Param debug query bool false "Filter by step-through (debug) runs"
 // @Success 200 {object} ListResponse[InstanceSummaryResponse]
 // @Failure 401,403,400,500 {object} Problem
 // @Security ApiKeyAuth
@@ -583,6 +584,7 @@ func toInstanceListQuery(q *InstanceListQuery) repository.InstanceListQuery {
 		IDs:                  q.IDs,
 		WorkflowDefinitionID: q.WorkflowDefinitionID,
 		Statuses:             q.Statuses,
+		Debug:                q.Debug,
 	}
 }
 

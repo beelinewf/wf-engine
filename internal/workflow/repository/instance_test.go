@@ -1661,6 +1661,65 @@ func TestInstanceListStatusFilter(t *testing.T) {
 	}
 }
 
+func TestInstanceListDebugFilter(t *testing.T) {
+	db := setupTestDB(t)
+	seedInstanceFixture(t, db)
+	ctx := context.Background()
+	base := time.Now().UTC()
+
+	normal := instanceWithTime("11111111-1111-7111-8111-111111111111", model.WorkflowWaiting, fixtureWorkflowDefID, base)
+	debugRun := instanceWithTime("22222222-2222-7222-8222-222222222222", model.WorkflowFinished, fixtureWorkflowDefID, base.Add(time.Second))
+	debugRun.Debug = true
+	insertInstance(t, db, normal)
+	insertInstance(t, db, debugRun)
+
+	repo := repository.NewInstanceRepository(db)
+	isDebug := true
+	items, total, err := repo.List(ctx, repository.InstanceListQuery{
+		Page: 1, PerPage: 50, Order: "created_at", Debug: &isDebug,
+	})
+	if err != nil {
+		t.Fatalf("List(debug) error = %v", err)
+	}
+	if total != 1 || len(items) != 1 || items[0].ID != debugRun.ID {
+		t.Errorf("debug=true: total = %d items = %v, want only %s", total, instanceIDs(items), debugRun.ID)
+	}
+
+	notDebug := false
+	items, total, err = repo.List(ctx, repository.InstanceListQuery{
+		Page: 1, PerPage: 50, Order: "created_at", Debug: &notDebug,
+	})
+	if err != nil {
+		t.Fatalf("List(not debug) error = %v", err)
+	}
+	if total != 1 || len(items) != 1 || items[0].ID != normal.ID {
+		t.Errorf("debug=false: total = %d items = %v, want only %s", total, instanceIDs(items), normal.ID)
+	}
+
+	// Debug combines with the other filters.
+	items, total, err = repo.List(ctx, repository.InstanceListQuery{
+		Page: 1, PerPage: 50, Order: "created_at",
+		Statuses: []string{"waiting"}, Debug: &isDebug,
+	})
+	if err != nil {
+		t.Fatalf("List(debug+status) error = %v", err)
+	}
+	if total != 0 || len(items) != 0 {
+		t.Errorf("debug=true+status=waiting: total = %d items = %v, want none", total, instanceIDs(items))
+	}
+
+	// Omitted debug leaves the listing unfiltered.
+	items, total, err = repo.List(ctx, repository.InstanceListQuery{
+		Page: 1, PerPage: 50, Order: "created_at",
+	})
+	if err != nil {
+		t.Fatalf("List(all) error = %v", err)
+	}
+	if total != 2 || len(items) != 2 {
+		t.Errorf("no debug filter: total = %d items = %v, want both", total, instanceIDs(items))
+	}
+}
+
 func TestInstanceListNoMatches(t *testing.T) {
 	db := setupTestDB(t)
 	seedInstanceFixture(t, db)

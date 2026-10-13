@@ -151,6 +151,7 @@ definition edits never affect running instances.
 | `id`                     | Repeatable UUID, max 100.                                                                                       |
 | `workflow_definition_id` | Single UUID.                                                                                                    |
 | `status`                 | Repeatable enum: `waiting`, `running`, `paused`, `finished`, `failed`, `stopped`.                                           |
+| `debug`                  | Single boolean: `true` → only step-through runs, `false` → only normal runs, omitted → both.                               |
 
 Bad param → `400`. Items are compact summaries: no `context`, frame, counters, or node detail. Each item carries
 the `debug` step-through flag. Nullables

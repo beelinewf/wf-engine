@@ -423,9 +423,9 @@ paths:
       summary: List workflow instances
       description: |
         Paginated compact instance summaries. Filters combine: repeated id,
-        one workflow_definition_id, repeated status. Ordering is allowlisted
-        (id, workflow_definition_id, status, created_at, updated_at) with an
-        optional leading "-" for descending.
+        one workflow_definition_id, repeated status, optional debug. Ordering
+        is allowlisted (id, workflow_definition_id, status, created_at,
+        updated_at) with an optional leading "-" for descending.
       parameters:
         - $ref: "#/components/parameters/Page"
         - $ref: "#/components/parameters/PerPage"
@@ -433,6 +433,7 @@ paths:
         - $ref: "#/components/parameters/ID"
         - $ref: "#/components/parameters/WorkflowDefinitionID"
         - $ref: "#/components/parameters/InstanceStatus"
+        - $ref: "#/components/parameters/Debug"
       responses:
         "403": { $ref: "#/components/responses/Forbidden" }
         "200":
@@ -1037,6 +1038,11 @@ components:
         description: Repeatable status filter
       style: form
       explode: true
+    Debug:
+      name: debug
+      in: query
+      required: false
+      schema: { type: boolean, description: "true: only step-through runs; false: only normal runs; omitted: both" }
     CreatedFrom:
       name: created_from
       in: query
