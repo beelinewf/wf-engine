@@ -788,6 +788,44 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         "422": { $ref: "#/components/responses/Unprocessable" }
+  /v1/workflow/instance/{id}/migrate:
+    post:
+      tags: [Controls]
+      operationId: migrateWorkflow
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      summary: Migrate a paused, failed, or input-parked instance to a newer definition
+      description: |
+        Starts a fresh run on a newer definition of the same lineage at a
+        caller-supplied start node, carrying the source's context over
+        (context_patch deep-merged, fresh env/secret snapshots applied
+        last), and stops the source atomically in the same transaction. The
+        runs link both ways (migrated_from/superseded_by, visible on the
+        status view); history is not copied. The start node must sit in the
+        target graph outside any parallel region's interior. The
+        replacement starts paused by default for inspect-fix-resume. No
+        idempotency key in v1: on timeout, retry (409) and read the new id
+        from the source's superseded_by.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MigrateRequest" }
+      parameters:
+        - $ref: "#/components/parameters/InstanceID"
+      responses:
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "201":
+          description: Migrated (replacement created, source stopped)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MigrateResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
   /v1/workflow/schedules:
     post:
       tags: [Schedules]
@@ -1397,6 +1435,16 @@ components:
         waiting_reason: { type: string, nullable: true }
         pause_requested: { type: boolean }
         termination_pending: { type: boolean }
+        migrated_from:
+          type: string
+          format: uuid
+          nullable: true
+          description: Source instance id when this run was created by a definition migration, else null
+        superseded_by:
+          type: string
+          format: uuid
+          nullable: true
+          description: Replacement instance id after this run was migrated, else null
         current_group_id: { type: string, format: uuid, nullable: true }
         current_node_id: { type: string, format: uuid, nullable: true }
         current_node_instance_id:
@@ -1585,6 +1633,47 @@ components:
       properties:
         status: { type: string, enum: [paused] }
         current_node_id: { type: string, format: uuid }
+    MigrateRequest:
+      type: object
+      required: [workflow_definition_id, start_node_id]
+      properties:
+        workflow_definition_id:
+          type: string
+          format: uuid
+          description: Target definition id; must share the source lineage at a higher version
+        start_node_id:
+          type: string
+          format: uuid
+          description: Node in the target graph to start from; must not sit strictly inside a parallel region
+        context_patch:
+          type: object
+          description: Deep-merged over the carried source context (arrays replaced); fresh env/secret snapshots still win
+        start_paused:
+          type: boolean
+          default: true
+          description: Park the replacement paused for inspect-fix-resume
+        reason:
+          type: string
+          description: Optional audit annotation recorded on both sides' events
+    MigrateInstance:
+      type: object
+      required: [id, workflow_definition_id, status, waiting_reason, current_node_id, migrated_from, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        workflow_definition_id: { type: string, format: uuid }
+        status: { type: string }
+        waiting_reason: { type: string, nullable: true }
+        current_node_id: { type: string, format: uuid, nullable: true }
+        migrated_from: { type: string, format: uuid, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    MigrateResponse:
+      type: object
+      required: [instance, source_instance_id, source_status]
+      properties:
+        instance: { $ref: "#/components/schemas/MigrateInstance" }
+        source_instance_id: { type: string, format: uuid }
+        source_status: { type: string, enum: [stopped] }
     NodeDebug:
       type: object
       required:

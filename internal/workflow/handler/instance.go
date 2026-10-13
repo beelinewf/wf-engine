@@ -123,6 +123,8 @@ func (h *InstanceHandler) Status(c *gin.Context) {
 		WaitingReason:         waitingReason,
 		PauseRequested:        inst.PauseRequested,
 		TerminationPending:    inst.TerminationPending,
+		MigratedFrom:          nullableString(inst.MigratedFrom),
+		SupersededBy:          nullableString(inst.SupersededBy),
 		CurrentGroupID:        nullableString(inst.CurrentGroupID),
 		CurrentNodeID:         nullableString(inst.CurrentNodeID),
 		CurrentNodeInstanceID: nodeInstanceIDString(inst.ID, d.CurrentNodeInstanceID),
@@ -431,6 +433,58 @@ func (h *InstanceHandler) Rollback(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, RollbackResponse{Status: string(res.Status), CurrentNodeID: res.CurrentNodeID})
+}
+
+// Migrate handles POST /v1/workflow/instance/{id}/migrate.
+//
+// @Summary Migrate a paused, failed, or input-parked instance to a newer definition
+// @Tags workflow-instances
+// @Accept json
+// @Produce json
+// @Param id path string true "Source instance ID"
+// @Param request body MigrateRequest true "Migration target"
+// @Success 201 {object} MigrateResponse
+// @Failure 401,403,400,404,409,422,500 {object} Problem
+// @Security ApiKeyAuth
+// @Security BearerAuth
+// @Router /v1/workflow/instance/{id}/migrate [post]
+func (h *InstanceHandler) Migrate(c *gin.Context) {
+	var req MigrateRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.WorkflowDefinitionID == "" || req.StartNodeID == "" {
+		WriteProblem(c, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	startPaused := req.StartPaused == nil || *req.StartPaused
+	res, err := h.svc.Migrate(c.Request.Context(), service.MigrateRequest{
+		SourceInstanceID:     c.Param("id"),
+		WorkflowDefinitionID: req.WorkflowDefinitionID,
+		StartNodeID:          req.StartNodeID,
+		ContextPatch:         req.ContextPatch,
+		StartPaused:          startPaused,
+		Reason:               req.Reason,
+		Principal:            requestPrincipal(c),
+		Actor:                principalActor(c),
+	})
+	if err != nil {
+		WriteError(c, err)
+		return
+	}
+	nxt := res.Instance
+	cursor, _ := model.ParseFrame(nxt.Frame)
+	c.JSON(http.StatusCreated, MigrateResponse{
+		Instance: MigrateInstanceResponse{
+			ID:                   nxt.ID,
+			WorkflowDefinitionID: nxt.WorkflowDefinitionID,
+			Status:               string(nxt.Status),
+			WaitingReason:        nullableString(string(nxt.WaitingReason)),
+			CurrentNodeID:        nullableString(cursor.CurrentNodeID),
+			MigratedFrom:         nullableString(nxt.MigratedFrom),
+			CreatedAt:            nxt.CreatedAt,
+			UpdatedAt:            nxt.UpdatedAt,
+		},
+		SourceInstanceID: c.Param("id"),
+		SourceStatus:     string(res.SourceStatus),
+	})
 }
 
 // toNodeOccurrenceResponses maps the service nodes view onto the openapi

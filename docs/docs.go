@@ -1722,6 +1722,96 @@ const docTemplate = `{
                 }
             }
         },
+        "/v1/workflow/instance/{id}/migrate": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    },
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "workflow-instances"
+                ],
+                "summary": "Migrate a paused, failed, or input-parked instance to a newer definition",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Source instance ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Migration target",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_workflow_handler.MigrateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/internal_workflow_handler.MigrateResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_workflow_handler.Problem"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_workflow_handler.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/internal_workflow_handler.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_workflow_handler.Problem"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/internal_workflow_handler.Problem"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/internal_workflow_handler.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_workflow_handler.Problem"
+                        }
+                    }
+                }
+            }
+        },
         "/v1/workflow/instance/{id}/pause": {
             "post": {
                 "security": [
@@ -2833,6 +2923,9 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
+                "migrated_from": {
+                    "type": "string"
+                },
                 "nodes": {
                     "type": "object",
                     "additionalProperties": {
@@ -2855,6 +2948,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "status": {
+                    "type": "string"
+                },
+                "superseded_by": {
                     "type": "string"
                 },
                 "termination_pending": {
@@ -3033,6 +3129,69 @@ const docTemplate = `{
                 },
                 "total_pages": {
                     "type": "integer"
+                }
+            }
+        },
+        "internal_workflow_handler.MigrateInstanceResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "current_node_id": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "migrated_from": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "waiting_reason": {
+                    "type": "string"
+                },
+                "workflow_definition_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_workflow_handler.MigrateRequest": {
+            "type": "object",
+            "properties": {
+                "context_patch": {
+                    "type": "object"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "start_node_id": {
+                    "type": "string"
+                },
+                "start_paused": {
+                    "type": "boolean"
+                },
+                "workflow_definition_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_workflow_handler.MigrateResponse": {
+            "type": "object",
+            "properties": {
+                "instance": {
+                    "$ref": "#/definitions/internal_workflow_handler.MigrateInstanceResponse"
+                },
+                "source_instance_id": {
+                    "type": "string"
+                },
+                "source_status": {
+                    "type": "string"
                 }
             }
         },

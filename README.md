@@ -354,6 +354,7 @@ the one action it needs:
 | `instances:update-context`       | context replacement                              |
 | `input:deliver`                  | the input endpoint gate                          |
 | `instances:control`              | pause, resume, stop, rollback                    |
+| `instances:migrate`              | definition migration of a running instance       |
 | `statistics:read`                | the statistics summary                           |
 | `roles:read`                     | the role catalog                                 |
 

@@ -46,6 +46,7 @@ const (
 	// list one of its roles.
 	ActionInputDeliver     = "input:deliver"
 	ActionInstancesControl = "instances:control"
+	ActionInstancesMigrate = "instances:migrate"
 	ActionStatisticsRead   = "statistics:read"
 	ActionRolesRead        = "roles:read"
 	ActionSchedulesRead    = "schedules:read"
@@ -227,6 +228,7 @@ func KnownActions() []string {
 		ActionInstancesUpdateContext,
 		ActionInputDeliver,
 		ActionInstancesControl,
+		ActionInstancesMigrate,
 		ActionStatisticsRead,
 		ActionRolesRead,
 		ActionSchedulesRead,

@@ -51,6 +51,7 @@ auth:
       - "instances:update-context"
       - "input:deliver"
       - "instances:control"
+      - "instances:migrate"
       - "statistics:read"
       - "roles:read"
       - "schedules:read"
