@@ -316,6 +316,11 @@ func Load(opts ...Option) (*Config, error) {
 		}
 		cfg.Auth.RolePermissions = catalog
 	}
+	// auth.enabled is the master switch: with it off, OIDC is forced off so
+	// a stray auth.oidc.enabled cannot protect /v1 or trip OIDC validation.
+	if !cfg.Auth.Enabled {
+		cfg.Auth.OIDC.Enabled = false
+	}
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}

@@ -200,7 +200,8 @@ auth:
   # Actions: definitions:read, definitions:write, secrets:read,
   # secrets:write, instances:create, instances:read,
   # instances:update-context, input:deliver, instances:control,
-  # statistics:read, roles:read, schedules:read, schedules:write.
+  # instances:migrate, statistics:read, roles:read, schedules:read,
+  # schedules:write.
   role_permissions:
     admin:
       - "definitions:read"
@@ -212,6 +213,7 @@ auth:
       - "instances:update-context"
       - "input:deliver"
       - "instances:control"
+      - "instances:migrate"
       - "statistics:read"
       - "roles:read"
       - "schedules:read"

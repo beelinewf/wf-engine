@@ -183,6 +183,7 @@ func NewRouter(deps Deps) *gin.Engine {
 		gate(group, auth.ActionInstancesControl, http.MethodPost, "/:id/resume", instances.Resume)
 		gate(group, auth.ActionInstancesControl, http.MethodPost, "/:id/stop", instances.Stop)
 		gate(group, auth.ActionInstancesControl, http.MethodPost, "/:id/rollback", instances.Rollback)
+		gate(group, auth.ActionInstancesMigrate, http.MethodPost, "/:id/migrate", instances.Migrate)
 	}
 
 	if deps.Schedules != nil {

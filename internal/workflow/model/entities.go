@@ -115,16 +115,22 @@ type WorkflowInstance struct {
 	Frame                json.RawMessage
 	Context              json.RawMessage
 	Counters             json.RawMessage
-	Revision             int64
-	LeasedBy             string
-	LeaseExpiry          time.Time
-	Error                string
-	StartedAt            *time.Time
-	FinishedAt           *time.Time
-	CreatedBy            string
-	UpdatedBy            string
-	CreatedAt            time.Time
-	UpdatedAt            time.Time
+	// MigratedFrom is the source instance id when this run was created by
+	// a definition migration; empty otherwise.
+	MigratedFrom string
+	// SupersededBy is the replacement instance id after this run was
+	// migrated; empty unless this run is a stopped migration source.
+	SupersededBy string
+	Revision     int64
+	LeasedBy     string
+	LeaseExpiry  time.Time
+	Error        string
+	StartedAt    *time.Time
+	FinishedAt   *time.Time
+	CreatedBy    string
+	UpdatedBy    string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 // HistoryCursor identifies a history row using its stable database ordering.

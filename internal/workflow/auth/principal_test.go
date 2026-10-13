@@ -16,7 +16,7 @@ var testCatalog = auth.NewCatalog(map[string][]string{
 		auth.ActionSecretsRead, auth.ActionSecretsWrite,
 		auth.ActionInstancesCreate, auth.ActionInstancesRead,
 		auth.ActionInstancesUpdateContext, auth.ActionInputDeliver,
-		auth.ActionInstancesControl, auth.ActionStatisticsRead,
+		auth.ActionInstancesControl, auth.ActionInstancesMigrate, auth.ActionStatisticsRead,
 		auth.ActionRolesRead,
 	},
 	"finance": {auth.ActionInstancesRead, auth.ActionInputDeliver},
@@ -246,6 +246,16 @@ func TestKnownActionsIncludesSchedules(t *testing.T) {
 	}
 	if !known[auth.ActionSchedulesRead] || !known[auth.ActionSchedulesWrite] {
 		t.Errorf("KnownActions() = %v, want schedules:read and schedules:write", auth.KnownActions())
+	}
+}
+
+func TestKnownActionsIncludesMigrate(t *testing.T) {
+	known := map[string]bool{}
+	for _, action := range auth.KnownActions() {
+		known[action] = true
+	}
+	if !known[auth.ActionInstancesMigrate] {
+		t.Errorf("KnownActions() = %v, want instances:migrate", auth.KnownActions())
 	}
 }
 

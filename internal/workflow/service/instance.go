@@ -254,6 +254,38 @@ type RollbackResult struct {
 	GroupStack    []string
 }
 
+// MigrateRequest moves a paused, failed, or input-parked instance onto a
+// newer definition of the same lineage, starting a fresh run at
+// StartNodeID with the source's user context carried over.
+type MigrateRequest struct {
+	SourceInstanceID     string
+	WorkflowDefinitionID string
+	StartNodeID          string
+	// ContextPatch deep-merges over the carried source context (objects
+	// merge, arrays and scalars replace). Empty or null means no patch; a
+	// present patch must decode to a JSON object.
+	ContextPatch json.RawMessage
+	// StartPaused parks the replacement paused for inspect-fix-resume. The
+	// handler defaults an absent flag to true; the service takes it
+	// literally.
+	StartPaused bool
+	// Reason is an audit annotation recorded on both sides' events.
+	Reason string
+	// Principal is the caller. A nil Principal is the service principal
+	// (API token, broker, or internal caller), which bypasses the object
+	// check exactly as it bypasses the endpoint gate.
+	Principal *auth.Principal
+	// Actor is the users.id uuid recorded on the migration. Empty falls back
+	// to the resolved principal's user id and then to the service default.
+	Actor string
+}
+
+// MigrateResult reports the replacement run and the stopped source.
+type MigrateResult struct {
+	Instance     model.WorkflowInstance
+	SourceStatus model.WorkflowStatus
+}
+
 // Canceller interrupts the local in-flight transition of an instance. The
 // engine implements it via its cancellation registry; a nil Canceller
 // disables local cancellation (cross-replica propagation still works
@@ -330,6 +362,15 @@ type InstanceService interface {
 	// rollback: targeting the park itself is a no-op, any other target
 	// supersedes (closes) it atomically in the same transaction.
 	Rollback(ctx context.Context, req RollbackRequest) (*RollbackResult, error)
+	// Migrate moves a paused, failed, or input-parked instance onto a
+	// newer definition of the same lineage, starting a fresh run at
+	// StartNodeID with the source's context carried over. The source is
+	// stopped atomically in the same transaction and linked both ways
+	// (migrated_from/superseded_by); its history and error stay behind.
+	// The start node must sit in the target graph outside any parallel
+	// region's interior. The replacement starts paused when StartPaused
+	// parks it for inspection, waiting otherwise.
+	Migrate(ctx context.Context, req MigrateRequest) (*MigrateResult, error)
 }
 
 type instanceService struct {
@@ -1595,6 +1636,167 @@ func (s *instanceService) Rollback(ctx context.Context, req RollbackRequest) (*R
 	return &RollbackResult{Status: rolled.Status, CurrentNodeID: newFrame.CurrentNodeID, GroupStack: newFrame.GroupStack}, nil
 }
 
+func (s *instanceService) Migrate(ctx context.Context, req MigrateRequest) (*MigrateResult, error) {
+	if strings.TrimSpace(req.SourceInstanceID) == "" {
+		return nil, fmt.Errorf("%w: source instance id is required", model.ErrInvalid)
+	}
+	if strings.TrimSpace(req.WorkflowDefinitionID) == "" {
+		return nil, fmt.Errorf("%w: workflow_definition_id is required", model.ErrInvalid)
+	}
+	if strings.TrimSpace(req.StartNodeID) == "" {
+		return nil, fmt.Errorf("%w: start_node_id is required", model.ErrInvalid)
+	}
+	inst, err := s.instance(ctx, req.SourceInstanceID)
+	if err != nil {
+		return nil, err
+	}
+	if err := authorizeInstance(inst, s.requestPrincipal(req.Principal)); err != nil {
+		return nil, err
+	}
+
+	switch {
+	case inst.Status == model.WorkflowRunning:
+		return nil, fmt.Errorf("%w: instance %s is running; pause first", model.ErrConflict, req.SourceInstanceID)
+	case inst.Status == model.WorkflowPaused, inst.Status == model.WorkflowFailed,
+		inst.Status == model.WorkflowWaiting && inst.WaitingReason == model.WaitingReasonInput:
+	default:
+		return nil, fmt.Errorf("%w: instance %s is not paused, failed, or input-parked", model.ErrConflict, req.SourceInstanceID)
+	}
+	if inst.TerminationPending {
+		return nil, fmt.Errorf("%w: instance %s has termination pending", model.ErrConflict, req.SourceInstanceID)
+	}
+
+	targetDef, err := s.wfDefs.GetByID(ctx, req.WorkflowDefinitionID)
+	if err != nil {
+		return nil, err
+	}
+	sourceDef, err := s.wfDefs.GetByID(ctx, inst.WorkflowDefinitionID)
+	if err != nil {
+		return nil, err
+	}
+	if targetDef.LineageID != sourceDef.LineageID {
+		return nil, fmt.Errorf("%w: definition %s is not in the source lineage", model.ErrInvalid, req.WorkflowDefinitionID)
+	}
+	if targetDef.Version <= sourceDef.Version {
+		return nil, fmt.Errorf("%w: definition %s must be newer than version %d", model.ErrInvalid, req.WorkflowDefinitionID, sourceDef.Version)
+	}
+
+	wc, err := s.materializer.Resolve(ctx, targetDef.ID)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := findNode(wc.Nodes, req.StartNodeID); err != nil {
+		return nil, fmt.Errorf("%w: start node %q is not in the target definition", model.ErrInvalid, req.StartNodeID)
+	}
+	if _, interior := model.ParallelInterior(wc)[req.StartNodeID]; interior {
+		return nil, fmt.Errorf("%w: start node %q is inside a parallel region", model.ErrInvalid, req.StartNodeID)
+	}
+	stack, err := groupStack(wc, req.StartNodeID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", model.ErrInvalid, err)
+	}
+
+	carried, err := unmarshalJSON(inst.Context)
+	if err != nil {
+		return nil, fmt.Errorf("migrate: source context is not a JSON object: %v", err)
+	}
+	if len(req.ContextPatch) != 0 && string(req.ContextPatch) != "null" {
+		patch, ok := decodeContextObject(req.ContextPatch)
+		if !ok {
+			return nil, fmt.Errorf("%w: context_patch must be a JSON object", model.ErrInvalid)
+		}
+		deepMerge(carried, patch)
+	}
+	// Fresh snapshots apply last with Create precedence, so a patch key
+	// can neither smuggle a credential value nor pin a stale one.
+	carried["env"] = envsnapshot.Merge(envsnapshot.StripDenied(carried["env"]), envsnapshot.Snapshot(envsnapshot.Prefix))
+	var secretSnapshot map[string]string
+	if s.secrets != nil {
+		secretSnapshot, err = s.secrets.GetAll(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
+	mergeSecretSnapshot(carried, secretSnapshot)
+	contextRaw, err := json.Marshal(carried)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", model.ErrInvalid, err)
+	}
+
+	frameRaw, err := model.Frame{CurrentNodeID: req.StartNodeID, GroupStack: stack}.JSON()
+	if err != nil {
+		return nil, err
+	}
+	now := nowUTC()
+	actor := s.requestActor(req.Principal, req.Actor)
+	contextMode := model.ContextModeFull
+	if wc.ContextMode != nil {
+		contextMode = *wc.ContextMode
+	} else if s.leanOptions.LeanContextDefault {
+		contextMode = model.ContextModeLean
+	}
+	status := model.WorkflowWaiting
+	if req.StartPaused {
+		status = model.WorkflowPaused
+	}
+	w := model.WorkflowInstance{
+		ID:                   mustNewID(),
+		WorkflowDefinitionID: targetDef.ID,
+		ContextMode:          contextMode,
+		Debug:                false,
+		Status:               status,
+		WaitingReason:        model.WaitingReasonRunnable,
+		Frame:                frameRaw,
+		Context:              contextRaw,
+		Counters:             mustMarshal(model.Counters{}),
+		MigratedFrom:         inst.ID,
+		CreatedBy:            actor,
+		UpdatedBy:            actor,
+		CreatedAt:            now,
+		UpdatedAt:            now,
+	}
+	if err := s.instances.MigrateInstance(ctx, repository.MigrateUpdate{
+		New:            w,
+		SourceID:       inst.ID,
+		SourceRevision: inst.Revision,
+		Actor:          actor,
+		NewEventData: mustMarshal(map[string]string{
+			"workflow_definition_id": targetDef.ID,
+			"migrated_from":          inst.ID,
+			"source_definition_id":   inst.WorkflowDefinitionID,
+			"reason":                 req.Reason,
+		}),
+		SourceEventData: mustMarshal(map[string]string{
+			"new_instance_id":        w.ID,
+			"workflow_definition_id": targetDef.ID,
+			"start_node_id":          req.StartNodeID,
+			"reason":                 req.Reason,
+		}),
+	}); err != nil {
+		if errors.Is(err, repository.ErrInstanceNotFound) {
+			return nil, fmt.Errorf("%w: instance %s", model.ErrNotFound, req.SourceInstanceID)
+		}
+		if errors.Is(err, repository.ErrStatusConflict) {
+			return nil, fmt.Errorf("%w: instance %s is no longer migratable (concurrent transition won)", model.ErrConflict, req.SourceInstanceID)
+		}
+		return nil, err
+	}
+	if contextMode == model.ContextModeLean {
+		anchor := leanAnchorRow(contextRaw)
+		anchor.WorkflowInstanceID = w.ID
+		if err := s.instances.AppendHistory(ctx, *anchor); err != nil {
+			return nil, err
+		}
+	}
+	// The source was never running, so nothing local needs interrupting in
+	// the common case; Cancel is a no-op then, and fences an in-flight
+	// branch worker when the source carried live parallel rows.
+	if s.cancels != nil {
+		s.cancels.Cancel(inst.ID)
+	}
+	return &MigrateResult{Instance: w, SourceStatus: model.WorkflowStopped}, nil
+}
+
 // hasLiveParallel reports whether an instance has a parallel execution
 // still waiting for branches or for its join. Completed, failed, and
 // cancelled executions are history and never block rollback.
@@ -2339,6 +2541,21 @@ func unmarshalJSON(raw json.RawMessage) (map[string]any, error) {
 		return nil, fmt.Errorf("service: parse context: %w", err)
 	}
 	return m, nil
+}
+
+// deepMerge overlays patch onto dst in place: objects merge recursively,
+// arrays and scalars replace. A patch key set to null clears the carried
+// value to null rather than deleting it.
+func deepMerge(dst, patch map[string]any) {
+	for k, v := range patch {
+		pv, pok := v.(map[string]any)
+		dv, dok := dst[k].(map[string]any)
+		if pok && dok {
+			deepMerge(dv, pv)
+			continue
+		}
+		dst[k] = v
+	}
 }
 
 func cloneContext(m map[string]any) (map[string]any, error) {

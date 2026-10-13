@@ -70,6 +70,9 @@ func (f *fakeInstanceService) Stop(context.Context, service.ControlRequest) (*se
 func (f *fakeInstanceService) Rollback(context.Context, service.RollbackRequest) (*service.RollbackResult, error) {
 	return nil, nil
 }
+func (f *fakeInstanceService) Migrate(context.Context, service.MigrateRequest) (*service.MigrateResult, error) {
+	return nil, nil
+}
 
 // fakeRedisSubscriber captures the subscribe pattern so tests can verify
 // the subscription target.

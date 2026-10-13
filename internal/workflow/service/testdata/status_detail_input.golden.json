@@ -19,6 +19,8 @@
     "Counters": {
       "total": 0
     },
+    "MigratedFrom": "",
+    "SupersededBy": "",
     "Revision": 2,
     "LeasedBy": "",
     "LeaseExpiry": "<TS>",

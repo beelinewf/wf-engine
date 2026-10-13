@@ -20,6 +20,17 @@ fail() {
 command -v curl >/dev/null 2>&1 || fail "curl is required"
 command -v jq >/dev/null 2>&1 || fail "jq is required"
 
+# api_curl wraps curl with the optional API-key header: when SIMPWF_API_TOKEN
+# is set, requests authenticate as the service principal, otherwise this is
+# plain curl (no-auth deployments keep working unchanged).
+api_curl() {
+  if [[ -n "${SIMPWF_API_TOKEN:-}" ]]; then
+    curl -H "X-Api-Token: $SIMPWF_API_TOKEN" "$@"
+  else
+    curl "$@"
+  fi
+}
+
 echo "seed-openrouter: prereqs: SIMPWF_OPENROUTER_KEY in server env, openrouter.ai allowlisted" >&2
 
 node_definitions=$(cat <<'JSON'
@@ -104,7 +115,7 @@ while IFS= read -r key; do
   payload=$(jq -ce --arg key "$key" '.[$key]' <<<"$node_definitions") \
     || fail "read node definition $key"
 
-  response=$(curl -fsS -X POST \
+  response=$(api_curl -fsS -X POST \
     -H 'Content-Type: application/json' \
     --data-binary "$payload" \
     "$BASE_URL/v1/node/definition") \
@@ -133,7 +144,7 @@ workflow_payload=$(jq -ce --argjson ids "$node_definition_ids" '
   )
 ' <<<"$workflow_template") || fail "build workflow definition payload"
 
-workflow_response=$(curl -fsS -X POST \
+workflow_response=$(api_curl -fsS -X POST \
   -H 'Content-Type: application/json' \
   --data-binary "$workflow_payload" \
   "$BASE_URL/v1/workflow/definition") \

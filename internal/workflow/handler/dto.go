@@ -193,6 +193,8 @@ type InstanceStatusResponse struct {
 	WaitingReason         *string                           `json:"waiting_reason"`
 	PauseRequested        bool                              `json:"pause_requested"`
 	TerminationPending    bool                              `json:"termination_pending"`
+	MigratedFrom          *string                           `json:"migrated_from"`
+	SupersededBy          *string                           `json:"superseded_by"`
 	CurrentGroupID        *string                           `json:"current_group_id"`
 	CurrentNodeID         *string                           `json:"current_node_id"`
 	CurrentNodeInstanceID *string                           `json:"current_node_instance_id"`
@@ -318,6 +320,38 @@ type RollbackRequest struct {
 type RollbackResponse struct {
 	Status        string `json:"status"`
 	CurrentNodeID string `json:"current_node_id"`
+}
+
+// MigrateRequest is the POST .../migrate body. ContextPatch deep-merges
+// over the carried source context (arrays replaced); StartPaused defaults
+// to true, parking the replacement for inspect-fix-resume. Reason is an
+// audit annotation recorded on both sides' events.
+type MigrateRequest struct {
+	WorkflowDefinitionID string          `json:"workflow_definition_id"`
+	StartNodeID          string          `json:"start_node_id"`
+	ContextPatch         json.RawMessage `json:"context_patch,omitempty" swaggertype:"object"`
+	StartPaused          *bool           `json:"start_paused,omitempty"`
+	Reason               string          `json:"reason,omitempty"`
+}
+
+// MigrateInstanceResponse is the replacement run in the 201 body: identity,
+// status, cursor, and the migration link back to its source.
+type MigrateInstanceResponse struct {
+	ID                   string    `json:"id"`
+	WorkflowDefinitionID string    `json:"workflow_definition_id"`
+	Status               string    `json:"status"`
+	WaitingReason        *string   `json:"waiting_reason"`
+	CurrentNodeID        *string   `json:"current_node_id"`
+	MigratedFrom         *string   `json:"migrated_from"`
+	CreatedAt            time.Time `json:"created_at"`
+	UpdatedAt            time.Time `json:"updated_at"`
+}
+
+// MigrateResponse is the POST .../migrate 201 body.
+type MigrateResponse struct {
+	Instance         MigrateInstanceResponse `json:"instance"`
+	SourceInstanceID string                  `json:"source_instance_id"`
+	SourceStatus     string                  `json:"source_status"`
 }
 
 // NodeDebugResponse mirrors api/openapi.yaml. Occurrences that never ran use

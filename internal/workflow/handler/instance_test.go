@@ -51,6 +51,9 @@ type fakeInstanceSvc struct {
 	rollbackRes     *service.RollbackResult
 	rollbackErr     error
 	rollbackReq     *service.RollbackRequest
+	migrateRes      *service.MigrateResult
+	migrateErr      error
+	migrateReq      *service.MigrateRequest
 	listQuery       repository.InstanceListQuery
 	listItems       []model.WorkflowInstance
 	listTotal       int64
@@ -102,6 +105,10 @@ func (f *fakeInstanceSvc) Stop(_ context.Context, req service.ControlRequest) (*
 func (f *fakeInstanceSvc) Rollback(_ context.Context, req service.RollbackRequest) (*service.RollbackResult, error) {
 	f.rollbackReq = &req
 	return f.rollbackRes, f.rollbackErr
+}
+func (f *fakeInstanceSvc) Migrate(_ context.Context, req service.MigrateRequest) (*service.MigrateResult, error) {
+	f.migrateReq = &req
+	return f.migrateRes, f.migrateErr
 }
 func (f *fakeInstanceSvc) List(_ context.Context, q repository.InstanceListQuery, _ auth.Principal) ([]model.WorkflowInstance, int64, error) {
 	f.listQuery = q

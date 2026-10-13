@@ -349,3 +349,50 @@ func TestParseParallelStartRejectsTooManyBranches(t *testing.T) {
 		t.Fatalf("expected too-many-branches error, got nil")
 	}
 }
+
+func TestParallelInterior(t *testing.T) {
+	wc, err := model.ParseWorkflowContent([]byte(validParallelDoc()), model.NodeLimits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	interior := model.ParallelInterior(wc)
+	for _, id := range []string{parallelAID, parallelBID} {
+		if _, ok := interior[id]; !ok {
+			t.Errorf("%s is not interior, want interior", id)
+		}
+	}
+	for _, id := range []string{parallelStartID, parallelEndID, parallelAfterID} {
+		if _, ok := interior[id]; ok {
+			t.Errorf("%s is interior, want boundary/outside", id)
+		}
+	}
+}
+
+func TestParallelInteriorChainedAndGrouped(t *testing.T) {
+	mid := "01950000-0000-7000-8000-000000000006"
+	group := "01950000-0000-7000-8000-000000000007"
+	doc := parallelWorkflowDoc(group,
+		`{"id": "`+group+`", "type": "group", "start_node_id": "`+parallelStartID+`", "nodes": [`+
+			`{"id": "`+parallelStartID+`", "type": "parallel_start", "branches": {"a": "`+parallelAID+`", "b": "`+parallelBID+`"}, "parallel_end_node_id": "`+parallelEndID+`"},`+
+			`{"id": "`+parallelAID+`", "type": "script", "script": "context.a = 1", "next_node": "`+parallelEndID+`"},`+
+			`{"id": "`+parallelBID+`", "type": "script", "script": "context.b = 1", "next_node": "`+mid+`"},`+
+			`{"id": "`+mid+`", "type": "script", "script": "context.m = 1", "next_node": "`+parallelEndID+`"},`+
+			`{"id": "`+parallelEndID+`", "type": "parallel_end", "combining_script": "context.x = 1"}`+
+			`]}`,
+	)
+	wc, err := model.ParseWorkflowContent([]byte(doc), model.NodeLimits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	interior := model.ParallelInterior(wc)
+	for _, id := range []string{parallelAID, parallelBID, mid} {
+		if _, ok := interior[id]; !ok {
+			t.Errorf("%s is not interior, want interior", id)
+		}
+	}
+	for _, id := range []string{group, parallelStartID, parallelEndID} {
+		if _, ok := interior[id]; ok {
+			t.Errorf("%s is interior, want boundary/outside", id)
+		}
+	}
+}

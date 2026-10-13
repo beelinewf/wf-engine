@@ -263,6 +263,117 @@ func (idx *parallelTreeIndex) walkBranch(s *NodeContent, branch string, parents 
 	return nil
 }
 
+// ParallelInterior returns the ids of nodes strictly inside a parallel
+// region: every node reachable from a parallel_start's branch targets
+// without passing through the region's join, minus the parallel_start and
+// parallel_end boundaries themselves. Starting a fresh run at a boundary
+// is fine (a start forks anew); starting inside one would reach the join
+// with no execution to complete. The walk mirrors walkBranch (conditions,
+// groups, on-failure edges, nested starts) but never fails: a path that
+// cannot advance simply ends.
+func ParallelInterior(wc *WorkflowContent) map[string]struct{} {
+	idx := indexParallelTree(wc)
+	interior := map[string]struct{}{}
+	boundary := map[string]struct{}{}
+	var starts []*NodeContent
+	var collect func(nodes []*NodeContent)
+	collect = func(nodes []*NodeContent) {
+		for _, nc := range nodes {
+			switch {
+			case nc.Type == NodeTypeParallelStart && !parallelUnresolved(nc):
+				starts = append(starts, nc)
+				boundary[nc.ID] = struct{}{}
+				boundary[nc.ParallelEndNodeID] = struct{}{}
+			case nc.Type == NodeTypeParallelEnd:
+				boundary[nc.ID] = struct{}{}
+			}
+			if nc.Group != nil {
+				collect(nc.Group.Nodes)
+			}
+		}
+	}
+	collect(wc.Nodes)
+	for _, s := range starts {
+		for _, target := range s.ParallelBranches {
+			idx.collectBranch(s, target, interior)
+		}
+	}
+	for id := range boundary {
+		delete(interior, id)
+	}
+	return interior
+}
+
+func (idx *parallelTreeIndex) collectBranch(s *NodeContent, target string, interior map[string]struct{}) {
+	end := s.ParallelEndNodeID
+	base := idx.base[s.ID]
+	visited := map[string]bool{}
+	work := []parallelCursor{{node: target, stack: append([]string(nil), base...)}}
+	advance := func(work []parallelCursor, next string, stack []string) []parallelCursor {
+		stack = append([]string(nil), stack...)
+		for next == "" && len(stack) > len(base) {
+			groupID := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			g, ok := idx.byID[groupID]
+			if !ok {
+				return work
+			}
+			next = g.NextNode
+		}
+		if next == "" {
+			return work
+		}
+		return append(work, parallelCursor{node: next, stack: stack})
+	}
+	for len(work) > 0 {
+		c := work[len(work)-1]
+		work = work[:len(work)-1]
+		if c.node == end {
+			continue
+		}
+		key := c.node + "\x00" + strings.Join(c.stack, "\x00")
+		if visited[key] {
+			continue
+		}
+		visited[key] = true
+		nc, ok := idx.byID[c.node]
+		if !ok {
+			continue
+		}
+		interior[c.node] = struct{}{}
+		if parallelOpaque(nc) {
+			continue
+		}
+		switch nc.Type {
+		case NodeTypeParallelStart:
+			if nc.ID == s.ID {
+				continue
+			}
+			work = append(work, parallelCursor{node: nc.ParallelEndNodeID, stack: append([]string(nil), c.stack...)})
+		case NodeTypeConditions:
+			scopeKeys := idx.keys[idx.scope[nc.ID]]
+			for _, cond := range nc.Conditions {
+				if cond.Key == "" {
+					work = advance(work, "", c.stack)
+					continue
+				}
+				target, ok := scopeKeys[cond.Key]
+				if !ok {
+					continue
+				}
+				work = advance(work, target, c.stack)
+			}
+		case NodeTypeGroup:
+			work = append(work, parallelCursor{node: nc.Group.StartNodeID, stack: append(append([]string(nil), c.stack...), nc.ID)})
+		default:
+			work = advance(work, nc.NextNode, c.stack)
+		}
+		if nc.OnFailure != nil {
+			work = advance(work, nc.OnFailure.NextNode, c.stack)
+		}
+	}
+}
+
 // parallelOpaque reports whether a definition-referencing node hides its
 // routing until materialization. Other def-ref types route over the
 // occurrence's own graph fields and stay walkable.

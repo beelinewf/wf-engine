@@ -180,6 +180,8 @@ type WorkflowInstanceModel struct {
 	Frame                datatypes.JSON `gorm:"column:frame;type:jsonb;not null;default:'{}'"`
 	Context              datatypes.JSON `gorm:"column:context;type:jsonb;not null;default:'{}'"`
 	Counters             datatypes.JSON `gorm:"column:counters;type:jsonb;not null;default:'{}'"`
+	MigratedFrom         *string        `gorm:"column:migrated_from;type:uuid"`
+	SupersededBy         *string        `gorm:"column:superseded_by;type:uuid"`
 	Revision             int64          `gorm:"column:revision;not null;default:0"`
 	LeasedBy             string         `gorm:"column:leased_by;not null;default:''"`
 	LeaseExpiry          *time.Time     `gorm:"column:lease_expiry;index:idx_workflow_instances_claim,priority:3"`

@@ -129,6 +129,22 @@ type RollbackUpdate struct {
 	SupersededNode       string
 }
 
+// MigrateUpdate atomically creates a migration replacement instance and
+// stops its source. New is the fully-built replacement row (cursor, carried
+// context, fresh counters, status from start_paused, migrated_from set).
+// SourceRevision is the revision the caller loaded, so a concurrent
+// transition wins the fence instead of being silently carried over.
+// NewEventData and SourceEventData are the caller-built instance_created
+// and instance_migrated audit payloads; Actor signs both events.
+type MigrateUpdate struct {
+	New             model.WorkflowInstance
+	SourceID        string
+	SourceRevision  int64
+	Actor           string
+	NewEventData    json.RawMessage
+	SourceEventData json.RawMessage
+}
+
 var errDeliveryExists = errors.New("repository: input delivery already exists")
 
 func newRepoID() string {
@@ -217,6 +233,19 @@ type InstanceRepository interface {
 	// ErrStatusConflict when it is not paused/failed, has termination
 	// pending, or lost a concurrent race.
 	RollbackInstance(ctx context.Context, u RollbackUpdate) (*model.WorkflowInstance, error)
+	// MigrateInstance atomically stops a migration source and inserts its
+	// replacement. The source must be paused, failed, or input-parked
+	// waiting at SourceRevision: a concurrent transition yields
+	// ErrStatusConflict. The source moves to stopped with its lease
+	// cleared, finished_at set, superseded_by linked, and its error
+	// preserved. Live parallel branches and executions cancel like Stop
+	// (setting termination_pending while a branch runs), and any live
+	// parent-scope attempt is superseded (stopped, cancelled) in the same
+	// transaction. The replacement row and both audit events
+	// (instance_created on the new side, instance_migrated on the old)
+	// commit together. No status-update outbox rows are enqueued.
+	// Returns ErrInstanceNotFound when the source is missing.
+	MigrateInstance(ctx context.Context, u MigrateUpdate) error
 	// ClaimNext leases up to limit runnable instances (waiting with no
 	// active lease, or running with an expired lease) using FOR UPDATE SKIP
 	// LOCKED, moving them to running and fencing them to workerID.
@@ -574,6 +603,134 @@ func (r *instanceRepo) RollbackInstance(ctx context.Context, u RollbackUpdate) (
 		return nil, err
 	}
 	return r.GetByID(ctx, u.InstanceID)
+}
+
+func (r *instanceRepo) MigrateInstance(ctx context.Context, u MigrateUpdate) error {
+	now := time.Now().UTC()
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&WorkflowInstanceModel{}).
+			Where("id = ? AND revision = ? AND termination_pending = ? AND (status IN ? OR (status = ? AND waiting_reason = ?))",
+				u.SourceID,
+				u.SourceRevision,
+				false,
+				[]string{string(model.WorkflowPaused), string(model.WorkflowFailed)},
+				string(model.WorkflowWaiting),
+				string(model.WaitingReasonInput)).
+			Updates(map[string]any{
+				"status":        string(model.WorkflowStopped),
+				"leased_by":     "",
+				"lease_expiry":  nil,
+				"finished_at":   now,
+				"superseded_by": u.New.ID,
+				"revision":      gorm.Expr("revision + 1"),
+				"updated_at":    now,
+			})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			var m WorkflowInstanceModel
+			if err := tx.Where("id = ?", u.SourceID).First(&m).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return ErrInstanceNotFound
+				}
+				return err
+			}
+			return ErrStatusConflict
+		}
+		// Cancel the source's parallel rows exactly like Stop: live
+		// branches and executions cancel (lease clears fence in-flight
+		// workers), and running branch attempts stop so the termination
+		// sweep can settle. In-flight branch workers make termination
+		// pending.
+		var runningBranches int64
+		if err := tx.Model(&ParallelBranchModel{}).
+			Where("instance_id = ? AND status = ?", u.SourceID, string(model.ParallelBranchRunning)).
+			Count(&runningBranches).Error; err != nil {
+			return err
+		}
+		if runningBranches > 0 {
+			if err := tx.Model(&WorkflowInstanceModel{}).Where("id = ?", u.SourceID).
+				Update("termination_pending", true).Error; err != nil {
+				return err
+			}
+		}
+		if err := tx.Model(&ParallelBranchModel{}).
+			Where("instance_id = ? AND status IN ?", u.SourceID, []string{
+				string(model.ParallelBranchPending),
+				string(model.ParallelBranchRunning),
+				string(model.ParallelBranchWaiting),
+			}).
+			Updates(map[string]any{
+				"status":       string(model.ParallelBranchCancelled),
+				"leased_by":    "",
+				"lease_expiry": nil,
+				"revision":     gorm.Expr("revision + 1"),
+				"updated_at":   now,
+			}).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&ParallelExecutionModel{}).
+			Where("instance_id = ? AND status IN ?", u.SourceID, []string{
+				string(model.ParallelWaitingForBranches),
+				string(model.ParallelReadyToJoin),
+			}).
+			Updates(map[string]any{
+				"status":     string(model.ParallelExecutionCancelled),
+				"updated_at": now,
+			}).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&NodeInstanceModel{}).
+			Where("workflow_instance_id = ? AND branch_id IS NOT NULL AND status = ?", u.SourceID, string(model.NodeRunning)).
+			Updates(map[string]any{
+				"status":     string(model.NodeStopped),
+				"cancelled":  true,
+				"stopped_at": now,
+				"error":      "instance stopped",
+				"updated_at": now,
+			}).Error; err != nil {
+			return err
+		}
+		// Supersede the source's live parent-scope park, if any, mirroring
+		// rollback: the abandoned run ends stopped, so its park closes
+		// with it and a stale late delivery fails its running guard.
+		if err := tx.Model(&NodeInstanceModel{}).
+			Where("workflow_instance_id = ? AND branch_id IS NULL AND status = ?", u.SourceID, string(model.NodeRunning)).
+			Updates(map[string]any{
+				"status":     string(model.NodeStopped),
+				"cancelled":  true,
+				"error":      "superseded by migrate",
+				"stopped_at": now,
+				"updated_at": now,
+			}).Error; err != nil {
+			return err
+		}
+		createdRow := WorkflowInstanceToModel(u.New)
+		if err := tx.Create(&createdRow).Error; err != nil {
+			return err
+		}
+		created := WorkflowInstanceEventToModel(model.WorkflowInstanceEvent{
+			ID:                 newRepoID(),
+			WorkflowInstanceID: u.New.ID,
+			Type:               "instance_created",
+			Data:               u.NewEventData,
+			CreatedBy:          u.Actor,
+			CreatedAt:          now,
+		})
+		if err := tx.Create(&created).Error; err != nil {
+			return err
+		}
+		migrated := WorkflowInstanceEventToModel(model.WorkflowInstanceEvent{
+			ID:                 newRepoID(),
+			WorkflowInstanceID: u.SourceID,
+			Type:               "instance_migrated",
+			Data:               u.SourceEventData,
+			CreatedBy:          u.Actor,
+			CreatedAt:          now,
+		})
+		return tx.Create(&migrated).Error
+	})
 }
 
 func (r *instanceRepo) ClaimNext(ctx context.Context, workerID string, lease time.Duration, limit int) ([]model.WorkflowInstance, error) {
