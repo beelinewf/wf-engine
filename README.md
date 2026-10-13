@@ -298,6 +298,9 @@ with `Authorization: Bearer <jwt>`.
 The engine validates each token itself: discovery from the issuer, JWKS
 signature check, `iss`, `aud`, and `exp` with a configurable
 `auth.oidc.clock_skew`. No session, no cookie, no callback route.
+`auth.enabled` is the master switch: when it is false, `auth.oidc.enabled`
+is forced off, so a stray OIDC setting can neither protect `/v1` nor trip
+startup validation.
 
 ```bash
 curl http://localhost:9999/v1/auth/config
