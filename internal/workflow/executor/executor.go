@@ -134,6 +134,7 @@ func NewExecutors(limits Limits, funcs *jsfunc.Registry, deps Dependencies) map[
 		model.NodeTypeExternalCall: &ExternalCallExecutor{http: httpEx, cmd: NewCommandExecutor(limits.ExecAllowlist, limits.MaxOutputBytes)},
 		model.NodeTypeOutput:       &OutputExecutor{publisher: deps.Output},
 		model.NodeTypePoller:       pollerEx,
+		model.NodeTypeDelay:        &DelayExecutor{},
 	}
 	customs, err := BuildCustomExecutors(CustomDeps{Limits: limits, HTTP: httpEx, Funcs: funcs})
 	if err != nil {

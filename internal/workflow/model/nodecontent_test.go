@@ -1192,3 +1192,111 @@ func TestParseStartDelayAllowedOnReference(t *testing.T) {
 		t.Errorf("reference start_delay = %v/%v, want 5s/true", nc.StartDelay, nc.StartDelaySet)
 	}
 }
+
+func TestParseDelayNodeValid(t *testing.T) {
+	nc := mustParseContent(t, `{"type":"delay","delay":"15s"}`)
+	if nc.Type != model.NodeTypeDelay {
+		t.Errorf("type = %s, want delay", nc.Type)
+	}
+	if nc.Delay != 15*time.Second {
+		t.Errorf("delay = %v, want 15s", nc.Delay)
+	}
+	if !nc.RetryOnRecovery {
+		t.Error("retry_on_recovery = false, want default true")
+	}
+	if nc.Timeout != 5*time.Second {
+		t.Errorf("timeout = %v, want condition timeout 5s", nc.Timeout)
+	}
+	if nc.ArrivalWait() != 15*time.Second {
+		t.Errorf("arrival wait = %v, want 15s", nc.ArrivalWait())
+	}
+}
+
+func TestParseDelayNodeRequiresDelay(t *testing.T) {
+	for _, raw := range []string{
+		`{"type":"delay"}`,
+		`{"type":"delay","delay":null}`,
+	} {
+		_, err := model.ParseNodeContent([]byte(raw), testLimits)
+		if err == nil {
+			t.Errorf("ParseNodeContent(%s) error = nil, want required-delay rejection", raw)
+		} else if !strings.Contains(err.Error(), "requires a delay") {
+			t.Errorf("ParseNodeContent(%s) error = %q, want required-delay rejection", raw, err)
+		}
+	}
+}
+
+func TestParseDelayNodeRejectsInvalid(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"not a duration", `{"type":"delay","delay":"soon"}`, "delay"},
+		{"not a string", `{"type":"delay","delay":15}`, "delay"},
+		{"zero", `{"type":"delay","delay":"0s"}`, "positive"},
+		{"negative", `{"type":"delay","delay":"-5s"}`, "positive"},
+		{"over cap", `{"type":"delay","delay":"10m"}`, "cap"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := model.ParseNodeContent([]byte(tc.raw), testLimits)
+			if err == nil {
+				t.Fatalf("error = nil, want %q rejection", tc.want)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error = %q, want substring %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseDelayNodeRejectsStartDelay(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+	}{
+		{"inline delay", `{"type":"delay","delay":"5s","start_delay":"5s"}`},
+		{"inline delay null", `{"type":"delay","delay":"5s","start_delay":null}`},
+		{"group child delay", `{"type":"group","start_node_id":"11111111-1111-7111-8111-111111111111","nodes":[{"id":"11111111-1111-7111-8111-111111111111","type":"delay","delay":"5s","start_delay":"5s"}],"keys":{}}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := model.ParseNodeContent([]byte(tc.raw), testLimits)
+			if err == nil {
+				t.Fatalf("error = nil, want delay start_delay rejection")
+			}
+			if !strings.Contains(err.Error(), "start_delay") {
+				t.Errorf("error = %q, want start_delay rejection", err)
+			}
+		})
+	}
+}
+
+func TestParseDelayNodeReferenceRejectsInlineDelay(t *testing.T) {
+	_, err := model.ParseNodeContent(
+		[]byte(`{"node_definition_id":"11111111-1111-7111-8111-111111111111","delay":"5s"}`),
+		testLimits,
+	)
+	if err == nil {
+		t.Fatal("error = nil, want inline-executable-fields rejection")
+	}
+	if !strings.Contains(err.Error(), "inline executable fields") {
+		t.Errorf("error = %q, want inline-executable-fields rejection", err)
+	}
+}
+
+func TestArrivalWait(t *testing.T) {
+	delayed := mustParseContent(t, `{"type":"delay","delay":"15s"}`)
+	if delayed.ArrivalWait() != 15*time.Second {
+		t.Errorf("delay arrival wait = %v, want 15s", delayed.ArrivalWait())
+	}
+	script := mustParseContent(t, `{"type":"script","script":"return 1;","start_delay":"20s"}`)
+	if script.ArrivalWait() != 20*time.Second {
+		t.Errorf("script arrival wait = %v, want 20s", script.ArrivalWait())
+	}
+	plain := mustParseContent(t, `{"type":"script","script":"return 1;"}`)
+	if plain.ArrivalWait() != 0 {
+		t.Errorf("plain arrival wait = %v, want 0", plain.ArrivalWait())
+	}
+}

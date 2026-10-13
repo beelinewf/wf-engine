@@ -104,7 +104,7 @@ func (e *Engine) ProcessBranch(ctx context.Context, b model.ParallelBranch) erro
 	if err != nil {
 		return e.fail(ctx, sc, err)
 	}
-	if nc.StartDelay > 0 {
+	if nc.ArrivalWait() > 0 {
 		parked, err := e.maybeParkDelay(ctx, sc, &frame, counters, nc, cur.RunAt)
 		if err != nil {
 			return err

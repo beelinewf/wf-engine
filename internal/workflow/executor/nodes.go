@@ -130,6 +130,15 @@ func (e *InputExecutor) Validate(ctx context.Context, req Request) (*ValidationR
 	return &ValidationResult{Valid: true}, nil
 }
 
+// DelayExecutor completes a delay node after the engine has enforced its
+// wait: the arrival park in Process is the whole behavior, so execution is
+// a no-op producing a null output.
+type DelayExecutor struct{}
+
+func (e *DelayExecutor) Execute(_ context.Context, _ Request) (*Result, error) {
+	return &Result{Output: nil}, nil
+}
+
 // ExternalCallExecutor dispatches external_call nodes to the HTTP or command
 // executor based on which configuration the node carries.
 type ExternalCallExecutor struct {

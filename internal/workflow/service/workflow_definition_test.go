@@ -704,3 +704,27 @@ func TestMaterializeStartDelayNullOnInputDefinitionRejects(t *testing.T) {
 		t.Errorf("Materialize() error = %v, want ErrInvalid for input definition with explicit null start_delay", err)
 	}
 }
+
+func TestMaterializeStartDelayRejectsDelayDefinition(t *testing.T) {
+	ndRepo := newFakeNodeRepo()
+	ndRepo.defs[nodeDefA] = model.NodeDefinition{
+		ID: nodeDefA, Name: "shared-delay", Version: 1, LineageID: lineageID,
+		Type: "delay", Content: json.RawMessage(`{"type":"delay","delay":"15s"}`),
+	}
+	svc := newWorkflowService(newFakeWorkflowRepo(), ndRepo)
+	for _, occurrence := range []string{
+		`"start_delay":"5s"`,
+		`"start_delay":null`,
+	} {
+		content := `{"start_node_id":"aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa","nodes":[
+			{"id":"aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa","node_definition_id":"` + nodeDefA + `",` + occurrence + `}
+		]}`
+		wc, err := model.ParseWorkflowContent([]byte(content), testLimits)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := svc.Materialize(context.Background(), wc); !errors.Is(err, model.ErrInvalid) {
+			t.Errorf("Materialize() error = %v, want ErrInvalid for delay definition with occurrence %s", err, occurrence)
+		}
+	}
+}
