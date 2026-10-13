@@ -1006,3 +1006,20 @@ engine:
 		})
 	}
 }
+
+// auth.enabled is the master switch: with it off, a stray
+// SIMPWF_AUTH_OIDC_ENABLED=true is ignored and forced off, so /v1 stays
+// open and the OIDC issuer/client validation does not trip the boot.
+func TestLoadAuthDisabledForcesOIDCOff(t *testing.T) {
+	setenv(t, "SIMPWF_INFRA_POSTGRESQL_DSN", testDSN)
+	setenv(t, "SIMPWF_AUTH_ENABLED", "false")
+	setenv(t, "SIMPWF_AUTH_OIDC_ENABLED", "true")
+
+	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	if err != nil {
+		t.Fatalf("Load() error = %v, want OIDC ignored when auth is disabled", err)
+	}
+	if cfg.Auth.OIDC.Enabled {
+		t.Error("auth.oidc.enabled = true, want false when auth.enabled is false")
+	}
+}

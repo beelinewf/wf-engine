@@ -90,18 +90,28 @@ func TestInstanceMigrateDefaultsStartPaused(t *testing.T) {
 func TestInstanceMigrateInvalidBody(t *testing.T) {
 	// A non-object patch binds fine here and is the service's 422, so it
 	// is not in this table.
-	for name, body := range map[string]string{
-		"empty":         ``,
-		"garbage":       `{{{`,
-		"missing def":   `{"start_node_id":"` + migrateStartID + `"}`,
-		"missing start": `{"workflow_definition_id":"` + migrateDefID + `"}`,
+	for name, tc := range map[string]struct {
+		body string
+		want string
+	}{
+		"empty":         {``, "invalid request body"},
+		"garbage":       {`{{{`, "invalid request body"},
+		"missing def":   {`{"start_node_id":"` + migrateStartID + `"}`, "workflow_definition_id is required"},
+		"missing start": {`{"workflow_definition_id":"` + migrateDefID + `"}`, "start_node_id is required"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			svc := &fakeInstanceSvc{migrateRes: migrateResult()}
 			r := NewRouter(Deps{Health: NewHealth(fakePinger{}), Instances: svc})
-			w := performJSON(r, http.MethodPost, "/v1/workflow/instance/"+instanceID+"/migrate", body, nil)
+			w := performJSON(r, http.MethodPost, "/v1/workflow/instance/"+instanceID+"/migrate", tc.body, nil)
 			if w.Code != http.StatusBadRequest {
-				t.Errorf("status = %d, want 400", w.Code)
+				t.Fatalf("status = %d, want 400", w.Code)
+			}
+			var prob Problem
+			if err := json.Unmarshal(w.Body.Bytes(), &prob); err != nil {
+				t.Fatal(err)
+			}
+			if prob.Detail != tc.want {
+				t.Errorf("detail = %q, want %q", prob.Detail, tc.want)
 			}
 		})
 	}

@@ -450,8 +450,16 @@ func (h *InstanceHandler) Rollback(c *gin.Context) {
 // @Router /v1/workflow/instance/{id}/migrate [post]
 func (h *InstanceHandler) Migrate(c *gin.Context) {
 	var req MigrateRequest
-	if err := c.ShouldBindJSON(&req); err != nil || req.WorkflowDefinitionID == "" || req.StartNodeID == "" {
+	if err := c.ShouldBindJSON(&req); err != nil {
 		WriteProblem(c, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.WorkflowDefinitionID == "" {
+		WriteProblem(c, http.StatusBadRequest, "workflow_definition_id is required")
+		return
+	}
+	if req.StartNodeID == "" {
+		WriteProblem(c, http.StatusBadRequest, "start_node_id is required")
 		return
 	}
 	startPaused := req.StartPaused == nil || *req.StartPaused
