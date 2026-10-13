@@ -418,6 +418,104 @@ func TestDelayGateBranchParksBeforeExecution(t *testing.T) {
 	}
 }
 
+func TestDelayNodeParksBeforeExecution(t *testing.T) {
+	t0 := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+	content := `{"start_node_id":"` + delayNodeA + `","nodes":[
+		{"id":"` + delayNodeA + `","type":"delay","delay":"15s"}
+	]}`
+	fake := &delayFakeInstances{inst: delayInstanceAt(delayNodeA)}
+	e := delayEngine(fake, delayLoader(t, content), t0)
+
+	if err := e.Process(context.Background(), fake.inst); err != nil {
+		t.Fatalf("Process() error = %v", err)
+	}
+	if len(fake.checkpoints) != 1 {
+		t.Fatalf("checkpoints = %d, want 1 park", len(fake.checkpoints))
+	}
+	cp := fake.checkpoints[0]
+	if cp.Status != model.WorkflowWaiting || cp.WaitingReason != model.WaitingReasonDelay {
+		t.Errorf("park = %s/%q, want waiting/delay", cp.Status, cp.WaitingReason)
+	}
+	if cp.RunAt == nil || !cp.RunAt.Equal(t0.Add(15*time.Second)) {
+		t.Errorf("run_at = %v, want t0+15s", cp.RunAt)
+	}
+	if len(fake.inserted) != 0 {
+		t.Errorf("attempts inserted = %d, want none before the deadline", len(fake.inserted))
+	}
+	types := fake.eventTypes()
+	if types["node_delayed"] != 1 {
+		t.Errorf("node_delayed events = %d, want 1", types["node_delayed"])
+	}
+	if types["node_started"] != 0 {
+		t.Error("node_started fired during park, want it only on real execution")
+	}
+}
+
+func TestDelayNodeExecutesAfterDeadline(t *testing.T) {
+	t0 := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+	content := `{"start_node_id":"` + delayNodeA + `","nodes":[
+		{"id":"` + delayNodeA + `","type":"delay","delay":"15s"}
+	]}`
+	inst := delayInstanceAt(delayNodeA)
+	inst.WaitingReason = model.WaitingReasonDelay
+	past := t0.Add(-time.Second)
+	inst.RunAt = &past
+	fake := &delayFakeInstances{inst: inst}
+	e := delayEngine(fake, delayLoader(t, content), t0)
+
+	if err := e.Process(context.Background(), fake.inst); err != nil {
+		t.Fatalf("Process() error = %v", err)
+	}
+	if len(fake.inserted) != 1 {
+		t.Fatalf("attempts inserted = %d, want 1 execution", len(fake.inserted))
+	}
+	if got := string(fake.inserted[0].Output); got != "null" {
+		t.Errorf("attempt output = %s, want null", got)
+	}
+	types := fake.eventTypes()
+	if types["node_started"] != 1 {
+		t.Errorf("node_started events = %d, want 1", types["node_started"])
+	}
+	if len(fake.checkpoints) != 1 {
+		t.Fatalf("checkpoints = %d, want 1", len(fake.checkpoints))
+	}
+	cp := fake.checkpoints[0]
+	if cp.Status != model.WorkflowFinished {
+		t.Errorf("status = %s, want finished", cp.Status)
+	}
+	if cp.RunAt != nil {
+		t.Errorf("run_at = %v, want cleared after execution", cp.RunAt)
+	}
+}
+
+func TestDelayNodeBranchParksBeforeExecution(t *testing.T) {
+	t0 := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+	content := `{"start_node_id":"` + delayNodeA + `","nodes":[
+		{"id":"` + delayNodeA + `","type":"delay","delay":"15s","next_node":"` + delayNodeB + `"},
+		{"id":"` + delayNodeB + `","type":"script","script":"return 2;"}
+	]}`
+	inst := &delayFakeInstances{inst: delayInstanceAt(delayNodeA)}
+	par := &delayFakeParallel{branch: delayBranchAt(delayNodeA), execution: delayBranchExecution()}
+	e := delayBranchEngine(inst, par, delayLoader(t, content), t0)
+
+	if err := e.ProcessBranch(context.Background(), par.branch); err != nil {
+		t.Fatalf("ProcessBranch() error = %v", err)
+	}
+	if len(par.checkpoints) != 1 {
+		t.Fatalf("branch checkpoints = %d, want 1 park", len(par.checkpoints))
+	}
+	cp := par.checkpoints[0]
+	if cp.Status != model.ParallelBranchWaiting || cp.WaitingReason != model.WaitingReasonDelay {
+		t.Errorf("park = %s/%q, want waiting/delay", cp.Status, cp.WaitingReason)
+	}
+	if cp.RunAt == nil || !cp.RunAt.Equal(t0.Add(15*time.Second)) {
+		t.Errorf("run_at = %v, want t0+15s", cp.RunAt)
+	}
+	if len(inst.inserted) != 0 {
+		t.Errorf("attempts inserted = %d, want none before the deadline", len(inst.inserted))
+	}
+}
+
 func TestDelayGateBranchExecutesAfterDeadline(t *testing.T) {
 	t0 := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
 	content := `{"start_node_id":"` + delayNodeA + `","nodes":[

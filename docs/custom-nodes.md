@@ -8,7 +8,7 @@ One-time engine change; new node = new subpackage under
 Workflow JSON: `{"type":"<name>","config":{...}}` plus standard common
 fields (`id`, `name`, `timeout`, `input_data`, `output_property`,
 `next_node`, `on_failure`, `retry_on_recovery`, `pre_script`,
-`post_script`, `metadata`). Only `type`+`config` custom.
+`post_script`, `start_delay`, `metadata`). Only `type`+`config` custom.
 
 Leaf package (`pkg/customnode/<name>/<name>.go`):
 
@@ -55,7 +55,7 @@ https://json-schema.org/draft/2020-12/schema`).
 
 Do NOT describe the outer node fields (`type`, `id`, `name`, `timeout`,
 `output_property`, `next_node`, `on_failure`, `retry_on_recovery`,
-`pre_script`, `post_script`, `metadata`, `input_data`). The engine wraps
+`pre_script`, `post_script`, `start_delay`, `metadata`, `input_data`). The engine wraps
 your config sub-schema into the full node envelope automatically at
 registration time, enforcing `type: "<name>"` as a const and exposing
 the shared common fields while forbidding builtin executable fields.

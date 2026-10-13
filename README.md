@@ -64,7 +64,8 @@ status notifications. Both stay fully disabled when their DSN is absent.
   `output` (publish a context value to Redis or RabbitMQ, returns a
   receipt), nested `group`, `external_call` (outbound HTTP or allowlisted
   command), and `poller` (active wait over HTTP, Redis, or RabbitMQ until
-  an `until` predicate matches), plus `parallel_start`/`parallel_end` for
+  an `until` predicate matches), `delay` (explicit timed wait, the node
+  form of `start_delay`), plus `parallel_start`/`parallel_end` for
   fork/join branches with snapshot isolation and a scripted merge.
 - Lifecycle hooks: optional `pre_script`/`post_script` context transforms
   on every node type, run in the same sandbox.
@@ -233,6 +234,7 @@ uses; `config.e2e-oidc.yaml` is a working example.
 | `poller`         | Repeats HTTP/Redis/RabbitMQ reads until `until` returns `true`                     | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | `parallel_start` | Forks named branches from a frozen parent snapshot, parks on the join              | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | `parallel_end`   | Barrier join: runs `combining_script` over branch contexts, continues past         | [ARCHITECTURE.md](ARCHITECTURE.md) |
+| `delay`          | Explicit timed wait on arrival, then continues at `next_node`                      | [docs/integration/fields.md](docs/integration/fields.md) |
 
 Every node type accepts `pre_script`/`post_script` hooks. Hook return
 values are ignored; only context mutations persist. Script return values

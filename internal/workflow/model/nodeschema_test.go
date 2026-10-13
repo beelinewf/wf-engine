@@ -12,7 +12,7 @@ const draft2020 = "https://json-schema.org/draft/2020-12/schema"
 
 var builtinTypes = []string{
 	"script", "conditions", "input", "group", "external_call", "output", "poller",
-	"parallel_start", "parallel_end",
+	"parallel_start", "parallel_end", "delay",
 }
 
 // decodeSchema unmarshals a node schema into a generic document.
@@ -103,6 +103,7 @@ func TestNodeSchemaRequiredPerType(t *testing.T) {
 		"poller":         {"type"},
 		"parallel_start": {"type", "branches", "parallel_end_node_id"},
 		"parallel_end":   {"type", "combining_script"},
+		"delay":          {"type", "delay"},
 	}
 	for nodeType, want := range cases {
 		raw, ok := model.NodeSchema(nodeType)
@@ -299,6 +300,7 @@ func TestNodeSchemaAcceptsValidContent(t *testing.T) {
 		"group":          `{"type":"group","start_node_id":"aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa","nodes":[{"type":"script","script":"return 1;","id":"aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa"}]}`,
 		"parallel_start": `{"type":"parallel_start","branches":{"a":"aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa","b":"bbbbbbbb-bbbb-7bbb-8bbb-bbbbbbbbbbbb"},"parallel_end_node_id":"cccccccc-cccc-7ccc-8ccc-cccccccccccc"}`,
 		"parallel_end":   `{"type":"parallel_end","combining_script":"context.x = 1;"}`,
+		"delay":          `{"type":"delay","delay":"15s"}`,
 	}
 	for nodeType, content := range cases {
 		raw, _ := model.NodeSchema(nodeType)

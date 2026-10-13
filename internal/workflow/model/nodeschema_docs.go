@@ -297,3 +297,24 @@ const parallelEndNodeSchemaJSON = `{
   "required": ["type", "combining_script"],
   "additionalProperties": false
 }`
+
+const delayNodeSchemaJSON = `{
+  "title": "simpwf delay node",
+  "description": "Waits the configured duration on arrival, then completes. The explicit form of start_delay, which delay nodes do not accept. Go parsers stay authoritative.",
+  "type": "object",
+  "properties": {
+    "type": { "const": "delay" },
+    "delay": { "$ref": "#/$defs/duration" },
+    "input_data": { "type": "string", "description": "Context path selecting the value exposed to the node as input." },
+    "output_property": { "$ref": "#/$defs/contextKey" },
+    "next_node": { "$ref": "#/$defs/nodeId" },
+    "retry_on_recovery": { "type": "boolean", "default": true, "description": "Delay waits are idempotent and requeue by default when the worker lease expires." },
+    "id": { "$ref": "#/$defs/nodeId" },
+    "name": { "type": "string" },
+    "metadata": { "type": "object", "description": "Opaque metadata; never read by the engine." },
+    "pre_script": { "$ref": "#/$defs/hook" },
+    "post_script": { "$ref": "#/$defs/hook" }
+  },
+  "required": ["type", "delay"],
+  "additionalProperties": false
+}`

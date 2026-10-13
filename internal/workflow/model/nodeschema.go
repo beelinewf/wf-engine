@@ -113,6 +113,7 @@ func mustBuildBuiltinNodeSchemas() map[string]json.RawMessage {
 		string(NodeTypePoller):        pollerNodeSchemaJSON,
 		string(NodeTypeParallelStart): parallelStartNodeSchemaJSON,
 		string(NodeTypeParallelEnd):   parallelEndNodeSchemaJSON,
+		string(NodeTypeDelay):         delayNodeSchemaJSON,
 	}
 	docs := make(map[string]map[string]any, len(authored))
 	for nodeType, raw := range authored {
@@ -212,6 +213,7 @@ func groupChildRefs() []any {
 		map[string]any{"$ref": "#/$defs/" + string(NodeTypePoller) + "Node"},
 		map[string]any{"$ref": "#/$defs/" + string(NodeTypeParallelStart) + "Node"},
 		map[string]any{"$ref": "#/$defs/" + string(NodeTypeParallelEnd) + "Node"},
+		map[string]any{"$ref": "#/$defs/" + string(NodeTypeDelay) + "Node"},
 		map[string]any{"$ref": "#/$defs/customNode"},
 	}
 }
@@ -222,6 +224,7 @@ func builtinTypeNames() []string {
 		string(NodeTypeScript), string(NodeTypeConditions), string(NodeTypeInput),
 		string(NodeTypeGroup), string(NodeTypeExternalCall), string(NodeTypeOutput),
 		string(NodeTypePoller), string(NodeTypeParallelStart), string(NodeTypeParallelEnd),
+		string(NodeTypeDelay),
 	}
 }
 

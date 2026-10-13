@@ -26,6 +26,7 @@ const (
 	NodeTypePoller        NodeType = "poller"
 	NodeTypeParallelStart NodeType = "parallel_start"
 	NodeTypeParallelEnd   NodeType = "parallel_end"
+	NodeTypeDelay         NodeType = "delay"
 )
 
 // maxAllowedRoles bounds an input node's role gate. See parseAllowedRoles.
@@ -45,7 +46,7 @@ const (
 func ValidNodeType(t string) bool {
 	switch NodeType(t) {
 	case NodeTypeScript, NodeTypeConditions, NodeTypeInput, NodeTypeGroup, NodeTypeExternalCall, NodeTypeOutput, NodeTypePoller,
-		NodeTypeParallelStart, NodeTypeParallelEnd:
+		NodeTypeParallelStart, NodeTypeParallelEnd, NodeTypeDelay:
 		return true
 	default:
 		_, ok := LookupCustomType(t)
@@ -101,13 +102,16 @@ type NodeContent struct {
 	NodeDefinitionID string
 	Name             string
 	Timeout          time.Duration
-	InputData        *string           // script: context path to feed the script
-	Script           string            // script
-	Conditions       []Condition       // conditions
-	Channel          string            // input
-	ContextPath      string            // output: source context path
-	Validation       *ValidationScript // input
-	Form             *InputForm        // input: dynamic form contract (schema + ui hints)
+	// Delay is the explicit wait of a delay node, enforced on arrival
+	// like start_delay before any of the node's behavior runs.
+	Delay       time.Duration
+	InputData   *string           // script: context path to feed the script
+	Script      string            // script
+	Conditions  []Condition       // conditions
+	Channel     string            // input
+	ContextPath string            // output: source context path
+	Validation  *ValidationScript // input
+	Form        *InputForm        // input: dynamic form contract (schema + ui hints)
 	// AllowedRoles is the input node's second authorization gate. It is
 	// checked against the caller's live token roles after the endpoint
 	// permission, so a role may hold input:deliver and still be refused by
@@ -147,7 +151,7 @@ type NodeContent struct {
 	PreScriptSet  bool
 	PostScriptSet bool
 	// StartDelay waits the given duration on arrival at the node (every
-	// type except input) before any of its behavior runs. StartDelaySet
+	// type except input and delay) before any of its behavior runs. StartDelaySet
 	// records whether the JSON key was present at all (including an
 	// explicit null), so materialization can distinguish "inherit the
 	// definition delay" (absent) from "disable it" (null) for nodes
@@ -156,8 +160,8 @@ type NodeContent struct {
 	StartDelaySet bool
 	// RetryOnRecovery requeues an interrupted external_call node instead of
 	// failing it when its worker lease expired (recovery). Script,
-	// condition, input, and group nodes always requeue. Pollers default to
-	// true when omitted.
+	// condition, input, and group nodes always requeue. Pollers and delay
+	// nodes default to true when omitted.
 	RetryOnRecovery bool
 	PollerHTTP      *PollerHTTPConfig     // poller
 	PollerRedis     *PollerRedisConfig    // poller
@@ -177,6 +181,16 @@ type NodeContent struct {
 	// taken from NodeLimits.ConditionTimeout. It is not capped like node
 	// timeouts.
 	PredicateTimeout time.Duration
+}
+
+// ArrivalWait reports the wait enforced on arrival at the node before any
+// of its behavior runs: delay on a delay node, start_delay on every other
+// type. Delay nodes reject start_delay, so the two never stack.
+func (n *NodeContent) ArrivalWait() time.Duration {
+	if n.Type == NodeTypeDelay {
+		return n.Delay
+	}
+	return n.StartDelay
 }
 
 // Condition is one branch of a conditions node.
@@ -309,6 +323,7 @@ type rawNode struct {
 	PreScript       json.RawMessage   `json:"pre_script"`
 	PostScript      json.RawMessage   `json:"post_script"`
 	StartDelay      json.RawMessage   `json:"start_delay"`
+	Delay           json.RawMessage   `json:"delay"`
 	StartNodeID     *string           `json:"start_node_id"`
 	Nodes           []json.RawMessage `json:"nodes"`
 	RetryOnRecovery *bool             `json:"retry_on_recovery"`
@@ -469,7 +484,7 @@ func parseRawNode(r *rawNode, limits NodeLimits) (*NodeContent, error) {
 		}
 		if r.Script != nil || r.Conditions != nil || r.Channel != nil || r.Form != nil || r.HTTPConfig != nil || r.ExecutionConfig != nil || r.Nodes != nil ||
 			r.PollerHTTP != nil || r.PollerRedis != nil || r.PollerRabbitMQ != nil || len(r.Config) > 0 ||
-			len(r.Branches) > 0 || r.ParallelEndNodeID != nil || r.CombiningScript != nil ||
+			len(r.Branches) > 0 || r.ParallelEndNodeID != nil || r.CombiningScript != nil || len(r.Delay) > 0 ||
 			// allowed_roles, record_actor, and public are the input node's
 			// authorization surface. A reference resolves its type from the
 			// definition, so the occurrence cannot be judged here and
@@ -493,7 +508,7 @@ func parseRawNode(r *rawNode, limits NodeLimits) (*NodeContent, error) {
 		return nil, errors.New("node type is required")
 	}
 	if !ValidNodeType(r.Type) {
-		return nil, fmt.Errorf("node type %q is not supported (allowed: script, conditions, input, group, external_call, output, poller, parallel_start, parallel_end)", r.Type)
+		return nil, fmt.Errorf("node type %q is not supported (allowed: script, conditions, input, group, external_call, output, poller, parallel_start, parallel_end, delay)", r.Type)
 	}
 	nc.Type = NodeType(r.Type)
 	if nc.OnFailure != nil && !onFailureAllowed(nc.Type) {
@@ -884,6 +899,25 @@ func parseRawNode(r *rawNode, limits NodeLimits) (*NodeContent, error) {
 		}
 		nc.CombiningScript = *r.CombiningScript
 		nc.Timeout = limits.ConditionTimeout
+
+	case NodeTypeDelay:
+		if nc.StartDelaySet {
+			return nil, errors.New("delay node does not support start_delay")
+		}
+		if len(r.Delay) == 0 || string(r.Delay) == "null" {
+			return nil, errors.New("delay node requires a delay")
+		}
+		d, _, err := optionalCappedDuration(r.Delay, "delay", limits.MaxTimeout)
+		if err != nil {
+			return nil, err
+		}
+		nc.Delay = d
+		// A delay wait is idempotent; an interrupted attempt restarts by
+		// default rather than failing the workflow.
+		if r.RetryOnRecovery == nil {
+			nc.RetryOnRecovery = true
+		}
+		nc.Timeout = limits.ConditionTimeout
 	}
 	if _, ok := LookupCustomType(string(nc.Type)); !ok && nc.Type != NodeTypeInput && r.Form != nil {
 		return nil, fmt.Errorf("node type %q does not support form", nc.Type)
@@ -964,7 +998,7 @@ func parseCustomNode(nc *NodeContent, r *rawNode, limits NodeLimits) (*NodeConte
 		r.Form != nil || r.HTTPConfig != nil || r.ExecutionConfig != nil ||
 		r.PollerHTTP != nil || r.PollerRedis != nil || r.PollerRabbitMQ != nil ||
 		len(r.Branches) > 0 || r.ParallelEndNodeID != nil || r.CombiningScript != nil ||
-		r.Nodes != nil || r.StartNodeID != nil || r.ContextPath != nil ||
+		r.Nodes != nil || r.StartNodeID != nil || r.ContextPath != nil || len(r.Delay) > 0 ||
 		// A custom type is never an input node, so the input node's
 		// authorization surface is refused like any other builtin field.
 		len(r.AllowedRoles) > 0 || r.RecordActor != nil || r.Public != nil {

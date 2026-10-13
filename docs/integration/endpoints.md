@@ -33,7 +33,7 @@ Malformed JSON → `400`. Blank name/type/content → `422`. Bad type or content
 
 FE note: `content` for a `group` definition must not contain `keys`; keys are supplied at the workflow occurrence.
 Referencing occurrence may add `keys`, `next_node`, `output_property`, `on_failure` (external_call/poller only), hooks,
-metadata. Executable string fields may template the frozen instance roots (`{{ env.SIMPWF_* }}`, `{{ secret.KEY }}`);
+`start_delay`, metadata. Executable string fields may template the frozen instance roots (`{{ env.SIMPWF_* }}`, `{{ secret.KEY }}`);
 definitions store the template text as-is, values resolve at instance runtime (see `fields.md` reserved roots).
 
 ### `GET /v1/node/definition` → `200`
@@ -164,7 +164,8 @@ surface as `500` if the database rejects the literal instead of returning zero r
 Response:
 
 - Identity, `status` enum, `context_mode` (`full`/`lean`, snapshotted at creation), `debug` (step-through flag,
-  immutable after create), `waiting_reason` (`null` = runnable, `"input"` = parked, `"parallel"` = parked on a join).
+  immutable after create), `waiting_reason` (`null` = runnable, `"input"` = parked, `"parallel"` = parked on a join,
+  `"delay"` = parked on a `start_delay`).
 - `pause_requested`, `termination_pending`, `current_group_id`, `current_node_id`, `current_node_instance_id`
   (`"<instance>:<occurrence>"`, `null` when unresolvable).
 - `attempt`, `counters` (`{"total":N,"nodes":{...}}`), `error` (`null` when empty), `started_at`/`finished_at`, audit

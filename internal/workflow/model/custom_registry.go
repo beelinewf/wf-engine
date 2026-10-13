@@ -43,7 +43,7 @@ func IsBuiltinNodeType(t string) bool {
 	switch NodeType(t) {
 	case NodeTypeScript, NodeTypeConditions, NodeTypeInput, NodeTypeGroup,
 		NodeTypeExternalCall, NodeTypeOutput, NodeTypePoller,
-		NodeTypeParallelStart, NodeTypeParallelEnd:
+		NodeTypeParallelStart, NodeTypeParallelEnd, NodeTypeDelay:
 		return true
 	default:
 		return false
