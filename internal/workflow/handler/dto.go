@@ -64,6 +64,24 @@ type NodeDefinitionResponse struct {
 	UpdatedAt time.Time       `json:"updated_at"`
 }
 
+// NodeTypeResponse is one entry of the GET /v1/node/types catalog. It
+// mirrors api/openapi.yaml.
+type NodeTypeResponse struct {
+	Type string `json:"type"`
+	// Builtin reports a core engine type. Registered custom types carry
+	// false.
+	Builtin bool `json:"builtin"`
+	// Schema is the full node-object JSON Schema for Type, or null when a
+	// custom type registered no schema. Docs-only; Go parsers stay
+	// authoritative.
+	Schema json.RawMessage `json:"schema" swaggertype:"object"`
+}
+
+// NodeTypeListResponse is the GET /v1/node/types body.
+type NodeTypeListResponse struct {
+	Items []NodeTypeResponse `json:"items"`
+}
+
 // ListResponse is the envelope for definition lists.
 type ListResponse[T any] struct {
 	Items      []T   `json:"items"`

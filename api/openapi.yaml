@@ -307,6 +307,33 @@ paths:
         "409": { $ref: "#/components/responses/Conflict" }
         "404": { $ref: "#/components/responses/NotFound" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/node/types:
+    get:
+      tags: [Node Definitions]
+      operationId: listNodeTypes
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      summary: List node types and their schemas
+      description: |
+        The node type catalog: every builtin type plus the custom types
+        registered in this process, each with its full node-object JSON
+        Schema (draft 2020-12). Served from the live code, so it describes
+        the current engine. Custom types are process-local: the catalog
+        reflects the serving process. Reads never fail on a missing schema:
+        a custom type registered without one carries a null schema.
+        The input type's schema documents the dynamic-form contract shape
+        (form.schema plus opaque form.ui hints); each input node's own form
+        still lives in its definition content or pending input.
+      responses:
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "200":
+          description: Node type catalog
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NodeTypeList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "500": { $ref: "#/components/responses/InternalError" }
   /v1/workflow/definition:
     post:
       tags: [Workflow Definitions]
@@ -1317,6 +1344,26 @@ components:
         per_page: { type: integer }
         total: { type: integer }
         total_pages: { type: integer }
+    NodeType:
+      type: object
+      required: [type, builtin, schema]
+      properties:
+        type: { type: string }
+        builtin:
+          type: boolean
+          description: True for a core engine type; registered custom types carry false
+        schema:
+          type: object
+          nullable: true
+          description: |
+            Full node-object JSON Schema (draft 2020-12) describing the accepted
+            shape for this type. Null when a custom type registered no schema.
+            Docs-only; Go parsers stay authoritative.
+    NodeTypeList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/NodeType" } }
     WorkflowDefinitionRequest:
       type: object
       required: [name, content]

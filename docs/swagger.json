@@ -450,6 +450,51 @@
                 }
             }
         },
+        "/v1/node/types": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    },
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "node-definitions"
+                ],
+                "summary": "List node types and their schemas",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_workflow_handler.NodeTypeListResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_workflow_handler.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/internal_workflow_handler.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_workflow_handler.Problem"
+                        }
+                    }
+                }
+            }
+        },
         "/v1/roles": {
             "get": {
                 "security": [
@@ -3335,6 +3380,33 @@
                     "type": "boolean"
                 },
                 "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_workflow_handler.NodeTypeListResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_workflow_handler.NodeTypeResponse"
+                    }
+                }
+            }
+        },
+        "internal_workflow_handler.NodeTypeResponse": {
+            "type": "object",
+            "properties": {
+                "builtin": {
+                    "description": "Builtin reports a core engine type. Registered custom types carry\nfalse.",
+                    "type": "boolean"
+                },
+                "schema": {
+                    "description": "Schema is the full node-object JSON Schema for Type, or null when a\ncustom type registered no schema. Docs-only; Go parsers stay\nauthoritative.",
+                    "type": "object"
+                },
+                "type": {
                     "type": "string"
                 }
             }

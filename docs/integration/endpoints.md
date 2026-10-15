@@ -60,6 +60,16 @@ Malformed UUID → `400`. Unknown → `404`. Returns one definition.
 
 Malformed UUID → `400`. Referenced by any workflow definition or node instance → `409`. Unknown → `404`. Empty body.
 
+## Node types
+
+### `GET /v1/node/types` → `200`
+
+Type catalog: every builtin type plus the custom types registered in this process, in that order. No params, no
+pagination. Each item carries `type`, `builtin`, and the full node-object `schema` (draft 2020-12); a custom type
+registered without a schema carries `schema: null`. Served from the live code, so it describes the current engine.
+The `input` entry's schema documents the dynamic-form contract shape (`form.schema` plus opaque `form.ui` hints);
+each input node's own form still lives in its definition content or pending input.
+
 ## Workflow definitions
 
 Immutable graphs. Same versioning semantics as node definitions.

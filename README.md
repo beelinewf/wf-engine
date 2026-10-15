@@ -490,6 +490,7 @@ The authoritative contract is [api/openapi.yaml](api/openapi.yaml)
 | POST       | `/v1/node/definition`                              | Create immutable node definition (201)                                                                     |
 | GET        | `/v1/node/definition`                              | List (paged, `latest_only`, `type`, ...)                                                                       |
 | GET/DELETE | `/v1/node/definition/{id}`                         | Get / delete (fails if referenced)                                                                         |
+| GET        | `/v1/node/types`                                   | Node type catalog (builtins + registered customs, each with its schema)                                        |
 | POST       | `/v1/workflow/definition`                          | Create immutable workflow definition (201)                                                                 |
 | GET        | `/v1/workflow/definition`                          | List (paged, `latest_only`, ...)                                                                             |
 | GET/DELETE | `/v1/workflow/definition/{id}`                     | Get / delete (fails if referenced)                                                                         |

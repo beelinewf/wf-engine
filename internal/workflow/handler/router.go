@@ -141,6 +141,9 @@ func NewRouter(deps Deps) *gin.Engine {
 		gate(group, auth.ActionDefinitionsRead, http.MethodGet, "", nodeDefs.List)
 		gate(group, auth.ActionDefinitionsRead, http.MethodGet, "/:id", nodeDefs.Get)
 		gate(group, auth.ActionDefinitionsWrite, http.MethodDelete, "/:id", nodeDefs.Delete)
+		// The type catalog sits beside the definitions: whoever can read
+		// definitions can read the types they are built from.
+		gate(v1.Group("/node/types"), auth.ActionDefinitionsRead, http.MethodGet, "", nodeDefs.Types)
 	}
 
 	if deps.WorkflowDefinitions != nil {

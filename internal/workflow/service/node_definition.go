@@ -38,6 +38,9 @@ type NodeDefinitionService interface {
 	// nil for an unknown type. Reads never fail on a missing schema: the
 	// response degrades to a null schema instead.
 	Schema(nodeType string) json.RawMessage
+	// Types returns the node type catalog: the builtins in declaration
+	// order, then the registered custom types in name order.
+	Types() []model.NodeTypeInfo
 }
 
 type nodeDefinitionService struct {
@@ -128,6 +131,12 @@ func (s *nodeDefinitionService) Schema(nodeType string) json.RawMessage {
 		return nil
 	}
 	return schema
+}
+
+// Types returns the node type catalog served from the current code: it
+// describes the current engine, never stored rows.
+func (s *nodeDefinitionService) Types() []model.NodeTypeInfo {
+	return model.NodeTypeCatalog()
 }
 
 // mustNewID generates a UUIDv7 id; generation cannot fail at runtime.

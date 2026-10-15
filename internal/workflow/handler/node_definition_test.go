@@ -30,6 +30,7 @@ type fakeNodeSvc struct {
 	total     int64
 	listErr   error
 	deleteErr error
+	types     []model.NodeTypeInfo
 }
 
 func (f *fakeNodeSvc) Create(_ context.Context, _ service.CreateNodeDefinition) (model.NodeDefinition, error) {
@@ -63,6 +64,8 @@ func (f *fakeNodeSvc) Schema(nodeType string) json.RawMessage {
 	}
 	return schema
 }
+
+func (f *fakeNodeSvc) Types() []model.NodeTypeInfo { return f.types }
 
 func performJSON(r *gin.Engine, method, path, body string, headers map[string]string) *httptest.ResponseRecorder {
 	w := httptest.NewRecorder()

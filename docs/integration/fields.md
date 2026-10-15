@@ -32,7 +32,8 @@ type. Every workflow definition read carries a `schemas` map keyed by type, cove
 in that workflow. Both are computed on read; nothing is stored. `schema` is `null` when the type is unknown to
 this build; `schemas` degrades to the declared types (empty `type` resolved from the DB, unresolvable kept as
 declared) and never fails the read. The Go parsers stay authoritative; schemas are documentation only, for
-generic frontend forms.
+generic frontend forms. `GET /v1/node/types` serves the same schemas as a standalone catalog — every builtin plus
+the registered customs — so a frontend never hardcodes the type list.
 
 ### Workflow status (`status`)
 
