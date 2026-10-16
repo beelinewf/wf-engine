@@ -31,6 +31,11 @@ type fakeInstanceSvc struct {
 	statusInst      *model.WorkflowInstance
 	statusErr       error
 	detail          *service.StatusDetail
+	// detailFunc, when set, answers GetStatusDetail dynamically per call
+	// (1-based call number in detailCalls), so stream tests can script a
+	// changing status. Nil keeps the fixed detail/statusErr behavior.
+	detailCalls int
+	detailFunc  func(call int) (*service.StatusDetail, error)
 	contextInst     *model.WorkflowInstance
 	updateCtxReq    *service.UpdateContext
 	updateCtxRes    *model.WorkflowInstance
@@ -71,6 +76,10 @@ func (f *fakeInstanceSvc) GetStatus(_ context.Context, _ string, _ auth.Principa
 	return f.statusInst, f.statusErr
 }
 func (f *fakeInstanceSvc) GetStatusDetail(_ context.Context, _ string, _ auth.Principal) (*service.StatusDetail, error) {
+	f.detailCalls++
+	if f.detailFunc != nil {
+		return f.detailFunc(f.detailCalls)
+	}
 	return f.detail, f.statusErr
 }
 func (f *fakeInstanceSvc) GetContext(_ context.Context, _ string, _ auth.Principal) (*model.WorkflowInstance, error) {

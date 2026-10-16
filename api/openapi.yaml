@@ -5,7 +5,8 @@ info:
   description: |
     Durable PostgreSQL-backed workflow engine. Definitions are immutable;
     new versions reference the previous version. Instances run asynchronously
-    and expose status, context, input, and node-level debugging APIs.
+    and expose status, context, input, and node-level debugging APIs, plus a
+    live status stream over server-sent events.
     Lean-context mode stores per-node context as replayable set/unset diffs
     with periodic anchors. Fleet default: SIMPWF_ENGINE_LEAN_CONTEXT_DEFAULT
     (also SIMPWF_ENGINE_LEAN_ANCHOR_EVERY, SIMPWF_ENGINE_LEAN_REPLAY_MAX).
@@ -492,6 +493,42 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/InstanceStatus" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/workflow/instance/{id}/status/stream:
+    get:
+      tags: [Workflow Instances]
+      operationId: streamWorkflowStatus
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      summary: Stream workflow instance status
+      description: |
+        Live status over server-sent events. The server sends the current
+        status promptly on connect, then a new `status` event only when the
+        visible status changes; each event's data is the InstanceStatus
+        schema, identical to GET .../{id}/status. Idle streams receive `: ping`
+        comments, and the stream closes after a terminal status
+        (finished, failed, stopped) is delivered, after 30 minutes, or when
+        the client disconnects. A reconnect receives the current snapshot
+        first, so a client may resume with Last-Event-ID without a replay
+        log. Emissions are paced server-side at ~20 events/s at most.
+        Failures before the first event use the error responses below; a
+        mid-stream failure arrives as an `error` event and closes the stream.
+      parameters:
+        - $ref: "#/components/parameters/InstanceID"
+      responses:
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "200":
+          description: Status event stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: |
+                  SSE frames: `event: status` with InstanceStatus JSON in
+                  data, `: ping` heartbeats, and a terminal `error` event
+                  carrying a problem body when the stream fails mid-flight.
         "404": { $ref: "#/components/responses/NotFound" }
         "401": { $ref: "#/components/responses/Unauthorized" }
   /v1/workflow/instance/{id}/context:
