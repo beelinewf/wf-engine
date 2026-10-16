@@ -1,10 +1,12 @@
 package handler
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/simpwf/workflow-engine/internal/workflow/model"
@@ -16,11 +18,22 @@ import (
 // InstanceHandler serves workflow instance routes.
 type InstanceHandler struct {
 	svc service.InstanceService
+	// streamPoll, streamHeartbeat, and streamMax bound StatusStream. The
+	// constructor sets the production defaults; tests shrink them to keep
+	// stream tests fast.
+	streamPoll      time.Duration
+	streamHeartbeat time.Duration
+	streamMax       time.Duration
 }
 
 // NewInstanceHandler builds the handler.
 func NewInstanceHandler(svc service.InstanceService) *InstanceHandler {
-	return &InstanceHandler{svc: svc}
+	return &InstanceHandler{
+		svc:             svc,
+		streamPoll:      statusStreamPollInterval,
+		streamHeartbeat: statusStreamHeartbeatInterval,
+		streamMax:       statusStreamMaxDuration,
+	}
 }
 
 // Create handles POST /v1/workflow/instance.
@@ -112,10 +125,183 @@ func (h *InstanceHandler) Status(c *gin.Context) {
 		WriteError(c, err)
 		return
 	}
+	c.JSON(http.StatusOK, toInstanceStatusResponse(d))
+}
+
+const (
+	// statusStreamPollInterval is the default cadence at which a status
+	// stream re-reads the instance. A poll that finds no change emits
+	// nothing.
+	statusStreamPollInterval = 500 * time.Millisecond
+	// statusStreamHeartbeatInterval paces the `: ping` comments that keep
+	// idle streams alive through proxies.
+	statusStreamHeartbeatInterval = 15 * time.Second
+	// statusStreamMaxDuration bounds one stream; the client reconnects
+	// afterwards and receives the current snapshot first.
+	statusStreamMaxDuration = 30 * time.Minute
+	// statusStreamMinEmitInterval is the server-side emission floor:
+	// bursts coalesce to the latest snapshot at ~20 events/s at most.
+	statusStreamMinEmitInterval = 50 * time.Millisecond
+)
+
+// StatusStream handles GET /v1/workflow/instance/{id}/status/stream.
+//
+// @Summary Stream workflow instance status
+// @Tags workflow-instances
+// @Produce text/event-stream
+// @Param id path string true "Instance ID"
+// @Success 200 {object} InstanceStatusResponse
+// @Failure 401,403,404,500 {object} Problem
+// @Security ApiKeyAuth
+// @Security BearerAuth
+// @Router /v1/workflow/instance/{id}/status/stream [get]
+func (h *InstanceHandler) StatusStream(c *gin.Context) {
+	ctx := c.Request.Context()
+	id := c.Param("id")
+	p := requestPrincipalValue(c)
+
+	d, err := h.svc.GetStatusDetail(ctx, id, p)
+	if err != nil {
+		WriteError(c, err)
+		return
+	}
+	// The first snapshot is encoded before the stream headers go out, so
+	// a failure here still reports its HTTP status instead of a bare
+	// truncated stream.
+	first, err := json.Marshal(toInstanceStatusResponse(d))
+	if err != nil {
+		WriteProblem(c, http.StatusInternalServerError, "cannot encode status")
+		return
+	}
+
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+	c.Status(http.StatusOK)
+
+	seq := 0
+	emit := func(revision int64, event string, payload []byte) bool {
+		seq++
+		frame := statusStreamFrame(strconv.FormatInt(revision, 10)+"-"+strconv.Itoa(seq), event, payload)
+		if _, err := c.Writer.Write(frame); err != nil {
+			return false
+		}
+		flushStream(c)
+		return true
+	}
+	// After the headers are sent the HTTP status can no longer change, so
+	// a mid-stream failure is delivered as a terminal error event.
+	emitError := func(revision int64, err error) {
+		body, _ := json.Marshal(Problem{
+			Type:   "about:blank",
+			Title:  "Stream error",
+			Status: StatusForError(err),
+			Detail: err.Error(),
+		})
+		emit(revision, "error", body)
+	}
+
+	last := first
+	lastRev := d.Instance.Revision
+	if !emit(lastRev, "status", last) {
+		return
+	}
+	if terminalWorkflowStatus(d.Instance.Status) {
+		return
+	}
+	lastEmit := time.Now()
+
+	poll := time.NewTicker(h.streamPoll)
+	defer poll.Stop()
+	heartbeat := time.NewTicker(h.streamHeartbeat)
+	defer heartbeat.Stop()
+	deadline := time.NewTimer(h.streamMax)
+	defer deadline.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-deadline.C:
+			return
+		case <-heartbeat.C:
+			if _, err := c.Writer.Write([]byte(": ping\n\n")); err != nil {
+				return
+			}
+			flushStream(c)
+		case <-poll.C:
+			d, err := h.svc.GetStatusDetail(ctx, id, p)
+			if err != nil {
+				emitError(lastRev, err)
+				return
+			}
+			payload, err := json.Marshal(toInstanceStatusResponse(d))
+			if err != nil {
+				emitError(d.Instance.Revision, err)
+				return
+			}
+			if bytes.Equal(payload, last) {
+				continue
+			}
+			// Every poll re-reads the full state, so skipping an emit
+			// only delays delivery to the next poll; nothing is lost.
+			if time.Since(lastEmit) < statusStreamMinEmitInterval {
+				continue
+			}
+			last, lastRev = payload, d.Instance.Revision
+			lastEmit = time.Now()
+			if !emit(lastRev, "status", last) {
+				return
+			}
+			if terminalWorkflowStatus(d.Instance.Status) {
+				return
+			}
+		}
+	}
+}
+
+// terminalWorkflowStatus reports whether no further status change can
+// follow, so the stream may close after delivering it.
+func terminalWorkflowStatus(s model.WorkflowStatus) bool {
+	switch s {
+	case model.WorkflowFinished, model.WorkflowFailed, model.WorkflowStopped:
+		return true
+	default:
+		return false
+	}
+}
+
+// statusStreamFrame renders one SSE event. Data is split so a multi-line
+// payload stays a single event.
+func statusStreamFrame(id, event string, data []byte) []byte {
+	var b bytes.Buffer
+	b.WriteString("id: " + id + "\nevent: " + event + "\n")
+	for _, line := range bytes.Split(data, []byte("\n")) {
+		b.WriteString("data: ")
+		b.Write(line)
+		b.WriteByte('\n')
+	}
+	b.WriteByte('\n')
+	return b.Bytes()
+}
+
+// flushStream pushes buffered bytes to the client. A writer without
+// flushing still delivers the bytes, only later.
+func flushStream(c *gin.Context) {
+	if f, ok := c.Writer.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// toInstanceStatusResponse maps a status detail onto the openapi
+// InstanceStatus schema. Status and StatusStream share it so the REST and
+// SSE payloads never drift.
+func toInstanceStatusResponse(d *service.StatusDetail) InstanceStatusResponse {
 	inst := d.Instance
 	waitingReason := nullableString(string(inst.WaitingReason))
 	errorMsg := nullableString(inst.Error)
-	resp := InstanceStatusResponse{
+	return InstanceStatusResponse{
 		ID:                    inst.ID,
 		WorkflowDefinitionID:  inst.WorkflowDefinitionID,
 		ContextMode:           inst.ContextMode,
@@ -142,7 +328,6 @@ func (h *InstanceHandler) Status(c *gin.Context) {
 		CreatedAt:             inst.CreatedAt,
 		UpdatedAt:             inst.UpdatedAt,
 	}
-	c.JSON(http.StatusOK, resp)
 }
 
 // Context handles GET /v1/workflow/instance/{id}/context.

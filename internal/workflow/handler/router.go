@@ -170,6 +170,7 @@ func NewRouter(deps Deps) *gin.Engine {
 		gate(group, auth.ActionInstancesCreate, http.MethodPost, "", instances.Create)
 		gate(group, auth.ActionInstancesRead, http.MethodGet, "", instances.List)
 		gate(group, auth.ActionInstancesRead, http.MethodGet, "/:id/status", instances.Status)
+		gate(group, auth.ActionInstancesRead, http.MethodGet, "/:id/status/stream", instances.StatusStream)
 		gate(group, auth.ActionInstancesRead, http.MethodGet, "/:id/status/node/:node_id", instances.NodeDebug)
 		gate(group, auth.ActionInstancesRead, http.MethodGet, "/:id/debug/context", instances.DebugContext)
 		gate(group, auth.ActionInstancesRead, http.MethodGet, "/:id/context", instances.Context)
