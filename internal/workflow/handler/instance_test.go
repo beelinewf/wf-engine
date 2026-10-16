@@ -25,17 +25,17 @@ const (
 
 // fakeInstanceSvc is an in-memory InstanceService for handler tests.
 type fakeInstanceSvc struct {
-	createReq       *service.CreateInstance
-	createInst      model.WorkflowInstance
-	createErr       error
-	statusInst      *model.WorkflowInstance
-	statusErr       error
-	detail          *service.StatusDetail
+	createReq  *service.CreateInstance
+	createInst model.WorkflowInstance
+	createErr  error
+	statusInst *model.WorkflowInstance
+	statusErr  error
+	detail     *service.StatusDetail
 	// detailFunc, when set, answers GetStatusDetail dynamically per call
 	// (1-based call number in detailCalls), so stream tests can script a
 	// changing status. Nil keeps the fixed detail/statusErr behavior.
-	detailCalls int
-	detailFunc  func(call int) (*service.StatusDetail, error)
+	detailCalls     int
+	detailFunc      func(call int) (*service.StatusDetail, error)
 	contextInst     *model.WorkflowInstance
 	updateCtxReq    *service.UpdateContext
 	updateCtxRes    *model.WorkflowInstance
