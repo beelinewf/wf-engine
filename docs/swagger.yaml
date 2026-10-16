@@ -2098,6 +2098,43 @@ paths:
       summary: Get workflow node debug detail
       tags:
       - workflow-instances
+  /v1/workflow/instance/{id}/status/stream:
+    get:
+      parameters:
+      - description: Instance ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.InstanceStatusResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      summary: Stream workflow instance status
+      tags:
+      - workflow-instances
   /v1/workflow/instance/{id}/stop:
     post:
       parameters:
