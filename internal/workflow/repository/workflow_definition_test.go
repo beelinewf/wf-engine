@@ -189,3 +189,35 @@ func TestWorkflowDefinitionDeleteOK(t *testing.T) {
 		t.Errorf("GetByID after delete error = %v, want ErrNotFound", err)
 	}
 }
+
+func TestWorkflowDefinitionDeleteClearsFormRefs(t *testing.T) {
+	db := setupTestDB(t)
+	ctx := context.Background()
+	repo := repository.NewWorkflowDefinitionRepository(db)
+	forms := repository.NewFormRepository(db)
+
+	def := newWorkflowDef("11111111-1111-7111-8111-111111111111", "flow", 1, "33333333-3333-7333-8333-333333333333")
+	if err := repo.Create(ctx, def); err != nil {
+		t.Fatal(err)
+	}
+	created, err := forms.Create(ctx, "contact", []byte(`{"type":"object"}`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := forms.SaveWorkflowFormRefs(ctx, def.ID, []string{created.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := forms.Delete(ctx, created.ID); !errors.Is(err, model.ErrConflict) {
+		t.Fatalf("Delete() of referenced form error = %v, want ErrConflict", err)
+	}
+	if err := repo.Delete(ctx, def.ID); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	// The definition's ref rows are gone with it, so the form is deletable.
+	if refs, err := forms.WorkflowFormRefs(ctx, def.ID); err != nil || len(refs) != 0 {
+		t.Fatalf("WorkflowFormRefs() = %v, %v, want empty", refs, err)
+	}
+	if err := forms.Delete(ctx, created.ID); err != nil {
+		t.Errorf("Delete() after definition delete error = %v, want nil", err)
+	}
+}

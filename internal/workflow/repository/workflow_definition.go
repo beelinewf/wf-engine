@@ -128,6 +128,12 @@ func (r *gormWorkflowDefinitionRepository) Delete(ctx context.Context, id string
 		if schedules > 0 {
 			return fmt.Errorf("%w: workflow definition %s is referenced by cron schedules", model.ErrConflict, id)
 		}
+		// The definition's own form references go with it, which is what
+		// eventually makes a referenced form deletable again.
+		if err := tx.Where("workflow_definition_id = ?", id).
+			Delete(&WorkflowDefinitionFormRefModel{}).Error; err != nil {
+			return fmt.Errorf("workflow definition form refs clear: %w", err)
+		}
 		res := tx.Delete(&WorkflowDefinitionModel{}, "id = ?", id)
 		if res.Error != nil {
 			return fmt.Errorf("workflow definition delete: %w", res.Error)

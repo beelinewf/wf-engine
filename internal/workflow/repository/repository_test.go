@@ -24,9 +24,12 @@ func setupTestDB(t *testing.T) *gorm.DB {
 		&repository.RoleModel{},
 		&repository.RolePermissionModel{},
 		&repository.SecretModel{},
+		&repository.FormModel{},
 		&repository.NodeDefinitionModel{},
 		&repository.WorkflowDefinitionModel{},
 		&repository.WorkflowDefinitionNodeRefModel{},
+		&repository.WorkflowDefinitionFormRefModel{},
+		&repository.NodeDefinitionFormRefModel{},
 		&repository.WorkflowRequestModel{},
 		&repository.CronScheduleModel{},
 		&repository.ScheduleFireModel{},
@@ -59,7 +62,8 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	// blocks the reset.
 	if err := db.Exec(`TRUNCATE TABLE
 		role_permissions, roles,
-		secrets, status_update_outbox, node_context_history, input_deliveries, workflow_instance_events, node_instances,
+		secrets, forms, workflow_definition_form_refs, node_definition_form_refs,
+		status_update_outbox, node_context_history, input_deliveries, workflow_instance_events, node_instances,
 		workflow_instances, workflow_requests, cron_schedules, schedule_fires, workflow_definition_node_refs,
 		workflow_definitions, node_definitions, users
 		RESTART IDENTITY`).Error; err != nil {

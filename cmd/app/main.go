@@ -231,6 +231,7 @@ func run(ctx context.Context, cfg *configuration.Config, logger *logrus.Logger) 
 	nodeDefs := repository.NewNodeDefinitionRepository(db)
 	wfDefs := repository.NewWorkflowDefinitionRepository(db)
 	secrets := repository.NewSecretRepository(db)
+	forms := repository.NewFormRepository(db)
 	users := repository.NewUserRepository(db)
 	roles := repository.NewRoleRepository(db)
 
@@ -308,9 +309,10 @@ func run(ctx context.Context, cfg *configuration.Config, logger *logrus.Logger) 
 
 	execLimits := executorLimits(cfg)
 
-	nodeSvc := service.NewNodeDefinitionService(nodeDefs, nodeLimits, actor)
-	wfSvc := service.NewWorkflowDefinitionService(wfDefs, nodeDefs, nodeLimits, actor)
+	nodeSvc := service.NewNodeDefinitionService(nodeDefs, nodeLimits, actor, forms)
+	wfSvc := service.NewWorkflowDefinitionService(wfDefs, nodeDefs, nodeLimits, actor, forms)
 	secretSvc := service.NewSecretService(secrets)
+	formSvc := service.NewFormService(forms, wfSvc)
 
 	// Optional broker clients. They exist only when their DSN is configured;
 	// a configured but unreachable broker fails startup. The close defers are
@@ -362,6 +364,7 @@ func run(ctx context.Context, cfg *configuration.Config, logger *logrus.Logger) 
 		repository.NewParallelRepository(db),
 		wfDefs,
 		secrets,
+		forms,
 		wfSvc,
 		&executor.InputExecutor{},
 		hookRunner,
@@ -529,6 +532,7 @@ func run(ctx context.Context, cfg *configuration.Config, logger *logrus.Logger) 
 		NodeDefinitions:     nodeSvc,
 		WorkflowDefinitions: wfSvc,
 		Secrets:             secretSvc,
+		Forms:               formSvc,
 		Instances:           instSvc,
 		Schedules:           schedSvc,
 		Statistics:          statsSvc,

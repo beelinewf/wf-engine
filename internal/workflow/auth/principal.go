@@ -37,6 +37,8 @@ const (
 	ActionDefinitionsWrite       = "definitions:write"
 	ActionSecretsRead            = "secrets:read"
 	ActionSecretsWrite           = "secrets:write"
+	ActionFormsRead              = "forms:read"
+	ActionFormsWrite             = "forms:write"
 	ActionInstancesCreate        = "instances:create"
 	ActionInstancesRead          = "instances:read"
 	ActionInstancesUpdateContext = "instances:update-context"
@@ -223,6 +225,8 @@ func KnownActions() []string {
 		ActionDefinitionsWrite,
 		ActionSecretsRead,
 		ActionSecretsWrite,
+		ActionFormsRead,
+		ActionFormsWrite,
 		ActionInstancesCreate,
 		ActionInstancesRead,
 		ActionInstancesUpdateContext,

@@ -27,7 +27,8 @@ Reusable immutable steps. New versions point at `previous_version_id`; one child
 | `content`             | yes      | Object. Per-type rules, see `fields.md`. Must not carry `keys`.                                  |
 | `previous_version_id` | no       | UUID of existing definition. Sets `version = prev + 1`, inherits `lineage_id`. Unknown id → `404`. |
 
-Malformed JSON → `400`. Blank name/type/content → `422`. Bad type or content → `422`. Response is the full definition
+Malformed JSON → `400`. Blank name/type/content → `422`. Bad type, bad content, or unknown `form_id` → `422`.
+Response is the full definition
 (`id`, `name`, `version`, `previous_version_id`, `lineage_id`, `type`, `content`, `created_by`, `updated_by`,
 `created_at`, `updated_at`).
 
@@ -82,11 +83,12 @@ Immutable graphs. Same versioning semantics as node definitions.
 | `content`             | yes      | Object: `start_node_id` (UUID, required), `nodes` (non-empty array, required), `keys` (optional), `context_mode` (optional enum), `status_update` (optional). Full rules in `fields.md`. |
 | `previous_version_id` | no       | UUID of existing definition. Unknown id → `404`.                                                                                                                               |
 
-Malformed JSON → `400`. Blank name/content → `422`. Bad content (bad links, unknown `node_definition_id`, type mismatch
-on references) → `422`. Response is the full definition (same shape as node definition minus `type`).
+Malformed JSON → `400`. Blank name/content → `422`. Bad content (bad links, unknown `node_definition_id`, unknown
+`form_id`, type mismatch on references) → `422`. Response is the full definition (same shape as node definition minus
+`type`).
 
-FE note: every `node_definition_id` used must already exist; the create call resolves and validates all references
-before storing. Authored `content` is stored as-is.
+FE note: every `node_definition_id` and `form_id` used must already exist; the create call resolves and validates all
+references before storing. Authored `content` is stored as-is.
 
 ### `GET /v1/workflow/definition` → `200`
 
@@ -129,6 +131,41 @@ Key outside `^[A-Za-z0-9_]{1,128}$` → `400`. Unknown → `404`. Returns one ma
 Key outside `^[A-Za-z0-9_]{1,128}$` → `400`. Unknown → `404`. Empty body. Running instances keep their frozen copy;
 only new instances see the deletion.
 
+## Forms
+
+Render contracts for input nodes, stored once and referenced by `form_id` from node and workflow definitions. Reads
+return the exact stored bytes; the engine never reads a form — delivery is gated solely by the node's validation
+script.
+
+### `POST /v1/forms` → `201`
+
+| Body field | Required | Rule                                                                                                        |
+| ---------- | -------- | ----------------------------------------------------------------------------------------------------------- |
+| `name`     | yes      | Non-blank string. Blank → `422`.                                                                              |
+| `schema`   | yes      | Non-empty JSON object compiling as a draft 2020-12 JSON Schema. Missing/non-object/empty/uncompilable → `422`. |
+| `ui`       | no       | JSON object of opaque render hints. Omitted → absent. Present but not an object → `422`.                       |
+
+Malformed JSON → `400`. Response is the created form (`id`, `name`, `schema`, `ui`, `created_at`, `updated_at`).
+
+### `GET /v1/forms` → `200`
+
+`page` / `per_page` same rules as definitions; bad → `400`. No `order` param; fixed `created_at, id` ascending.
+Envelope `{items, page, per_page, total, total_pages}`.
+
+### `GET /v1/forms/{id}` → `200`
+
+Malformed UUID → `400`. Unknown → `404`. Returns one form.
+
+### `PUT /v1/forms/{id}` → `200`
+
+Fully overwrites `name`/`schema`/`ui` with the same rules as create; an omitted `ui` clears it. Malformed
+UUID → `400`. Malformed JSON → `400`. Unknown → `404`. A form stays updatable while referenced.
+
+### `DELETE /v1/forms/{id}` → `204`
+
+Malformed UUID → `400`. Referenced by any workflow or node definition → `409`. Unknown → `404`. Empty body.
+Deleting the referencing definitions frees the form.
+
 ## Instances
 
 ### `POST /v1/workflow/instance` → `202`
@@ -140,6 +177,7 @@ Starts a run. Normal runs start `waiting`; step-through runs (`"debug": true`) s
 | `workflow_definition_id` | yes      | Non-blank string. Blank → `422`. Unknown id → `404` (no `400` here; a malformed UUID can surface as `500`, same caveat as status).                                                                                                                 |
 | `context`                | no       | JSON object. Omitted/`null` → `{}`. Arrays, scalars, malformed JSON → `422`.                                                                                                                                                                     |
 | `debug`                  | no       | Boolean. Omitted/`false` → normal run. `true` → step-through run: starts `paused` (runnable, `waiting_reason: null`), and each `POST .../resume` advances exactly one engine transition before re-pausing until termination. Immutable after create. |
+| `snapshot_forms`         | no       | Boolean. Omitted/`false` → live forms: status serves `form_id` only. `true` → freezes every referenced form's schema/ui into the instance; status serves the frozen bytes in `pending_input.form` and later library edits do not affect the run. Unknown `form_id` → `422`. |
 
 Definition with unparsable content → `422`. Response `{id, status}` (`"waiting"`, or `"paused"` for a debug run).
 
@@ -188,6 +226,11 @@ Response:
   completed_count, branches[]}`; each branch `{id, name, branch_index, start_node_id, status, waiting_reason, error,
   updated_at}`. A branch parked on an input node shows `status: "waiting"`, `waiting_reason: "input"`: deliver to it
   with `PUT .../input?branch_id=<branch id>`. Full enum lists are in `fields.md`.
+- `pending_input`: present only when parked on an input node (`waiting_reason == "input"`): `{node_id, channel,
+  output_property, form_id, form, allowed_roles, record_actor, public}`. `form_id` is absent when the node references
+  no form. `form` carries the frozen `{schema, ui}` bytes when the instance was created with `"snapshot_forms": true`;
+  the frontend renders it when present, else fetches `GET /v1/forms/{form_id}`. Live instances serve `form_id` only:
+  the bytes never ride on status except on a snapshot run.
 
 ### `GET /v1/workflow/instance/{id}/context` → `200`
 
@@ -269,8 +312,8 @@ A blank or whitespace-only header counts as no credential, since no client means
 content in it is a credential and is checked.
 
 The other instance routes are unaffected: `GET .../status` and every other read still require a credential, so an
-anonymous caller cannot fetch the form schema or the context to discover what to send. Share the instance id and the
-expected shape out-of-band, the way a webhook URL is shared. The authenticated status response reports
+anonymous caller cannot fetch the form from the library or the context to discover what to send. Share the instance id
+and the expected shape out-of-band, the way a webhook URL is shared. The authenticated status response reports
 `pending_input.public` so a frontend can tell in advance.
 
 ## Controls

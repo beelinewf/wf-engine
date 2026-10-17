@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Create sample node definitions, then create the sample workflows with the
-# returned node definition IDs: "main" (private input node) and
+# Create the sample form, then sample node definitions, then the sample
+# workflows with the returned IDs: "main" (private input node) and
 # "main-public" (same graph, public input node).
 #
 # Usage: scripts/seed.sh [BASE_URL]
@@ -27,6 +27,41 @@ api_curl() {
     curl "$@"
   fi
 }
+
+# Both input definitions below render the same post form, so one library
+# entry serves them: the definition create calls reference its returned id.
+form_payload=$(cat <<'JSON'
+{
+  "name": "post-form",
+  "schema": {
+    "type": "object",
+    "required": ["title", "body"],
+    "properties": {
+      "title": {"type": "string", "minLength": 1},
+      "body": {"type": "string", "minLength": 1}
+    }
+  },
+  "ui": {
+    "order": ["title", "body"],
+    "fields": {
+      "title": {"label": "Title", "placeholder": "Post title"},
+      "body": {"label": "Body", "widget": "textarea", "placeholder": "Write something..."}
+    }
+  }
+}
+JSON
+)
+
+form_response=$(api_curl -fsS -X POST \
+  -H 'Content-Type: application/json' \
+  --data-binary "$form_payload" \
+  "$BASE_URL/v1/forms") \
+  || fail "create post form"
+
+form_id=$(jq -er '.id' <<<"$form_response") \
+  || fail "parse post form id"
+
+echo "seed: created form post-form ($form_id)" >&2
 
 node_definitions=$(cat <<'JSON'
 {
@@ -74,23 +109,6 @@ node_definitions=$(cat <<'JSON'
       "type": "input",
       "channel": "http",
       "output_property": "new_post",
-      "form": {
-        "schema": {
-          "type": "object",
-          "required": ["title", "body"],
-          "properties": {
-            "title": {"type": "string", "minLength": 1},
-            "body": {"type": "string", "minLength": 1}
-          }
-        },
-        "ui": {
-          "order": ["title", "body"],
-          "fields": {
-            "title": {"label": "Title", "placeholder": "Post title"},
-            "body": {"label": "Body", "widget": "textarea", "placeholder": "Write something..."}
-          }
-        }
-      },
       "validation": {
         "script": "return input != null && Object.prototype.toString.call(input) === '[object Object]';"
       }
@@ -103,23 +121,6 @@ node_definitions=$(cat <<'JSON'
       "type": "input",
       "channel": "http",
       "output_property": "public_post",
-      "form": {
-        "schema": {
-          "type": "object",
-          "required": ["title", "body"],
-          "properties": {
-            "title": {"type": "string", "minLength": 1},
-            "body": {"type": "string", "minLength": 1}
-          }
-        },
-        "ui": {
-          "order": ["title", "body"],
-          "fields": {
-            "title": {"label": "Title", "placeholder": "Post title"},
-            "body": {"label": "Body", "widget": "textarea", "placeholder": "Write something..."}
-          }
-        }
-      },
       "validation": {
         "script": "return input != null && Object.prototype.toString.call(input) === '[object Object]';"
       },
@@ -240,6 +241,12 @@ workflow_public_template=$(cat <<'JSON'
 JSON
 )
 
+# Point both input definitions at the shared form created above.
+node_definitions=$(jq -c --arg form_id "$form_id" '
+  .input.content.form_id = $form_id
+  | .input_public.content.form_id = $form_id
+' <<<"$node_definitions") || fail "attach form_id to input definitions"
+
 node_definition_ids='{}'
 
 while IFS= read -r key; do
@@ -304,10 +311,12 @@ public_workflow_definition_id=$(create_workflow "$workflow_public_template" main
   || fail "create public-input workflow definition"
 
 jq -n \
+  --arg form_id "$form_id" \
   --arg workflow_definition_id "$main_workflow_definition_id" \
   --arg public_workflow_definition_id "$public_workflow_definition_id" \
   --argjson node_definition_ids "$node_definition_ids" \
   '{
+    form_id: $form_id,
     node_definition_ids: $node_definition_ids,
     workflow_definition_id: $workflow_definition_id,
     public_workflow_definition_id: $public_workflow_definition_id

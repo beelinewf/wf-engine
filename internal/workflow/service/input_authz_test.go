@@ -343,8 +343,8 @@ func TestRecordActorForServicePrincipalUsesSystemUser(t *testing.T) {
 	}
 }
 
-// The form schema, the validation script, and the post hook all still see
-// the raw payload under record_actor: only the context merge changes.
+// The validation script and the post hook still see the raw payload under
+// record_actor: only the context merge changes.
 func TestRecordActorKeepsRawPayloadForValidationAndHooks(t *testing.T) {
 	db := setupSvcDB(t)
 	ctx := context.Background()
@@ -357,15 +357,6 @@ func TestRecordActorKeepsRawPayloadForValidationAndHooks(t *testing.T) {
 			"channel":         "http",
 			"output_property": "webhook",
 			"record_actor":    true,
-			"form": map[string]any{
-				"schema": map[string]any{
-					"type":     "object",
-					"required": []string{"approved"},
-					"properties": map[string]any{
-						"approved": map[string]any{"type": "boolean"},
-					},
-				},
-			},
 			"validation": map[string]any{
 				// The script sees the raw payload, not the envelope.
 				"script": `var b = JSON.parse(input); if (typeof b.approved !== 'boolean') { return 'not a bool'; }`,
@@ -410,9 +401,9 @@ func TestRecordActorKeepsRawPayloadForValidationAndHooks(t *testing.T) {
 	}
 }
 
-// A schema rejection still answers 422 with accepted=false; the
+// A script rejection still answers 422 with accepted=false; the
 // authorization gates must not change that.
-func TestRecordActorKeepsSchemaRejectionAsUnprocessable(t *testing.T) {
+func TestRecordActorKeepsScriptRejectionAsUnprocessable(t *testing.T) {
 	db := setupSvcDB(t)
 	ctx := context.Background()
 	svc := svcInstanceServiceWithCatalog(db, gateCatalog)
@@ -423,12 +414,8 @@ func TestRecordActorKeepsSchemaRejectionAsUnprocessable(t *testing.T) {
 			"channel":         "http",
 			"output_property": "webhook",
 			"record_actor":    true,
-			"form": map[string]any{
-				"schema": map[string]any{
-					"type":       "object",
-					"required":   []string{"approved"},
-					"properties": map[string]any{"approved": map[string]any{"type": "boolean"}},
-				},
+			"validation": map[string]any{
+				"script": `var b = JSON.parse(input); if (typeof b.approved !== 'boolean') { return 'not a bool'; }`,
 			},
 		}),
 	)
@@ -449,7 +436,7 @@ func TestRecordActorKeepsSchemaRejectionAsUnprocessable(t *testing.T) {
 		t.Fatal("Accepted = true, want a rejected delivery")
 	}
 	if delivery.Error == "" {
-		t.Error("Error is empty, want the schema failure message")
+		t.Error("Error is empty, want the script failure message")
 	}
 }
 

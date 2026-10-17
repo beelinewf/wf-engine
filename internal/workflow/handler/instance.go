@@ -58,6 +58,7 @@ func (h *InstanceHandler) Create(c *gin.Context) {
 		WorkflowDefinitionID: req.WorkflowDefinitionID,
 		Context:              req.Context,
 		Debug:                req.Debug,
+		SnapshotForms:        req.SnapshotForms,
 		Actor:                principalActor(c),
 	})
 	if err != nil {
@@ -701,7 +702,7 @@ func toNodeOccurrenceResponses(nodes map[string]service.NodeOccurrence) map[stri
 
 // toPendingInputResponse maps the waiting-input contract onto the openapi
 // PendingInput schema. Nil stays nil so the field is omitted; a formless
-// input node renders form as JSON null.
+// input node omits form_id.
 func toPendingInputResponse(p *service.PendingInput) *PendingInputResponse {
 	if p == nil {
 		return nil
@@ -710,18 +711,20 @@ func toPendingInputResponse(p *service.PendingInput) *PendingInputResponse {
 	if allowed == nil {
 		allowed = []string{}
 	}
-	resp := &PendingInputResponse{
+	var form *SnapshotFormResponse
+	if p.Form != nil {
+		form = &SnapshotFormResponse{Schema: p.Form.Schema, UI: p.Form.UI}
+	}
+	return &PendingInputResponse{
 		NodeID:         p.NodeID,
 		Channel:        p.Channel,
 		OutputProperty: p.OutputProperty,
+		FormID:         p.FormID,
+		Form:           form,
 		AllowedRoles:   allowed,
 		RecordActor:    p.RecordActor,
 		Public:         p.Public,
 	}
-	if p.Form != nil {
-		resp.Form = &InputFormDTO{Schema: p.Form.Schema, UI: p.Form.UI}
-	}
-	return resp
 }
 
 // toParallelResponses maps the service parallel tree onto the openapi

@@ -74,6 +74,11 @@ definitions:
           Debug starts a step-through run: paused at create, re-paused after
           every node until termination. Immutable after create.
         type: boolean
+      snapshot_forms:
+        description: |-
+          SnapshotForms freezes every referenced form's schema/ui into the
+          instance at creation. Status then serves the frozen bytes.
+        type: boolean
       workflow_definition_id:
         type: string
     type: object
@@ -145,19 +150,100 @@ definitions:
       typescript:
         type: string
     type: object
+  internal_workflow_handler.FormResponse:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      schema:
+        type: object
+      ui:
+        type: object
+      updated_at:
+        type: string
+    type: object
+  internal_workflow_handler.FormUsageInstanceResponse:
+    properties:
+      current_node_id:
+        type: string
+      id:
+        type: string
+      is_waiting_on_form:
+        type: boolean
+      status:
+        type: string
+      workflow_definition_id:
+        type: string
+    type: object
+  internal_workflow_handler.FormUsageNodeDefinitionResponse:
+    properties:
+      id:
+        type: string
+      lineage_id:
+        type: string
+      name:
+        type: string
+      type:
+        type: string
+      version:
+        type: integer
+    type: object
+  internal_workflow_handler.FormUsageNodeResponse:
+    properties:
+      node_definition_id:
+        type: string
+      node_id:
+        type: string
+      node_name:
+        type: string
+    type: object
+  internal_workflow_handler.FormUsageResponse:
+    properties:
+      form_id:
+        type: string
+      instance_total:
+        type: integer
+      node_definitions:
+        items:
+          $ref: '#/definitions/internal_workflow_handler.FormUsageNodeDefinitionResponse'
+        type: array
+      page:
+        type: integer
+      per_page:
+        type: integer
+      workflow_definitions:
+        items:
+          $ref: '#/definitions/internal_workflow_handler.FormUsageWorkflowDefinitionResponse'
+        type: array
+      workflow_instances:
+        items:
+          $ref: '#/definitions/internal_workflow_handler.FormUsageInstanceResponse'
+        type: array
+    type: object
+  internal_workflow_handler.FormUsageWorkflowDefinitionResponse:
+    properties:
+      id:
+        type: string
+      lineage_id:
+        type: string
+      name:
+        type: string
+      nodes:
+        items:
+          $ref: '#/definitions/internal_workflow_handler.FormUsageNodeResponse'
+        type: array
+      version:
+        type: integer
+    type: object
   internal_workflow_handler.InputDeliveryResponse:
     properties:
       accepted:
         type: boolean
       error:
         type: string
-    type: object
-  internal_workflow_handler.InputFormDTO:
-    properties:
-      schema:
-        type: object
-      ui:
-        type: object
     type: object
   internal_workflow_handler.InstanceContextResponse:
     properties:
@@ -257,6 +343,21 @@ definitions:
         type: string
       workflow_definition_id:
         type: string
+    type: object
+  internal_workflow_handler.ListResponse-internal_workflow_handler_FormResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/internal_workflow_handler.FormResponse'
+        type: array
+      page:
+        type: integer
+      per_page:
+        type: integer
+      total:
+        type: integer
+      total_pages:
+        type: integer
     type: object
   internal_workflow_handler.ListResponse-internal_workflow_handler_InstanceSummaryResponse:
     properties:
@@ -556,7 +657,13 @@ definitions:
       channel:
         type: string
       form:
-        $ref: '#/definitions/internal_workflow_handler.InputFormDTO'
+        allOf:
+        - $ref: '#/definitions/internal_workflow_handler.SnapshotFormResponse'
+        description: |-
+          Form carries the frozen bytes when the instance was created with
+          snapshot_forms. Absent for live instances and formless nodes.
+      form_id:
+        type: string
       node_id:
         type: string
       output_property:
@@ -641,6 +748,15 @@ definitions:
       total_runs:
         type: integer
     type: object
+  internal_workflow_handler.SaveFormRequest:
+    properties:
+      name:
+        type: string
+      schema:
+        type: object
+      ui:
+        type: object
+    type: object
   internal_workflow_handler.ScheduleResponse:
     properties:
       context:
@@ -683,6 +799,13 @@ definitions:
     - key
     - updated_at
     - value_masked
+    type: object
+  internal_workflow_handler.SnapshotFormResponse:
+    properties:
+      schema:
+        type: object
+      ui:
+        type: object
     type: object
   internal_workflow_handler.StatisticsSummaryResponse:
     properties:
@@ -827,6 +950,271 @@ paths:
       summary: Get the authenticated caller
       tags:
       - auth
+  /v1/forms:
+    get:
+      parameters:
+      - description: Page number
+        in: query
+        name: page
+        type: integer
+      - description: Items per page
+        in: query
+        name: per_page
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.ListResponse-internal_workflow_handler_FormResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      summary: List forms
+      tags:
+      - forms
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Form
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_workflow_handler.SaveFormRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.FormResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      summary: Create form
+      tags:
+      - forms
+  /v1/forms/{id}:
+    delete:
+      parameters:
+      - description: Form ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      summary: Delete form
+      tags:
+      - forms
+    get:
+      parameters:
+      - description: Form ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.FormResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      summary: Get form
+      tags:
+      - forms
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Form ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Form
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_workflow_handler.SaveFormRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.FormResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      summary: Update form
+      tags:
+      - forms
+  /v1/forms/{id}/usage:
+    get:
+      parameters:
+      - description: Form ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Page number
+        in: query
+        name: page
+        type: integer
+      - description: Items per page
+        in: query
+        name: per_page
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.FormUsageResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      summary: Get form usage
+      tags:
+      - forms
   /v1/node/definition:
     get:
       parameters:
