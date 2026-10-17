@@ -68,6 +68,22 @@ type SecretModel struct {
 // TableName is the secrets table.
 func (SecretModel) TableName() string { return "secrets" }
 
+// FormModel persists one forms-library entry. Schema is a JSON Schema the
+// frontend renders; UI carries opaque render hints. The engine never reads
+// either: definitions reference the row by id, and status carries only the
+// id for the frontend to fetch.
+type FormModel struct {
+	ID        string         `gorm:"column:id;type:uuid;primaryKey"`
+	Name      string         `gorm:"column:name;type:text;not null"`
+	Schema    datatypes.JSON `gorm:"column:schema;type:jsonb;not null"`
+	UI        datatypes.JSON `gorm:"column:ui;type:jsonb"`
+	CreatedAt time.Time      `gorm:"column:created_at;not null"`
+	UpdatedAt time.Time      `gorm:"column:updated_at;not null"`
+}
+
+// TableName is the forms table.
+func (FormModel) TableName() string { return "forms" }
+
 // NodeDefinitionModel persists model.NodeDefinition.
 type NodeDefinitionModel struct {
 	ID                string         `gorm:"column:id;type:uuid;primaryKey"`
@@ -113,6 +129,29 @@ type WorkflowDefinitionNodeRefModel struct {
 
 // TableName is the workflow_definition_node_refs table.
 func (WorkflowDefinitionNodeRefModel) TableName() string { return "workflow_definition_node_refs" }
+
+// WorkflowDefinitionFormRefModel tracks which forms a workflow definition
+// references, to block form deletion while referenced. The rows carry no
+// schema/ui copies: the forms row stays the single source.
+type WorkflowDefinitionFormRefModel struct {
+	WorkflowDefinitionID string    `gorm:"column:workflow_definition_id;type:uuid;primaryKey"`
+	FormID               string    `gorm:"column:form_id;type:uuid;primaryKey;index"`
+	CreatedAt            time.Time `gorm:"column:created_at;not null"`
+}
+
+// TableName is the workflow_definition_form_refs table.
+func (WorkflowDefinitionFormRefModel) TableName() string { return "workflow_definition_form_refs" }
+
+// NodeDefinitionFormRefModel tracks which forms a node definition references,
+// to block form deletion while referenced.
+type NodeDefinitionFormRefModel struct {
+	NodeDefinitionID string    `gorm:"column:node_definition_id;type:uuid;primaryKey"`
+	FormID           string    `gorm:"column:form_id;type:uuid;primaryKey;index"`
+	CreatedAt        time.Time `gorm:"column:created_at;not null"`
+}
+
+// TableName is the node_definition_form_refs table.
+func (NodeDefinitionFormRefModel) TableName() string { return "node_definition_form_refs" }
 
 // WorkflowRequestModel persists model.WorkflowRequest.
 type WorkflowRequestModel struct {
@@ -180,6 +219,7 @@ type WorkflowInstanceModel struct {
 	Frame                datatypes.JSON `gorm:"column:frame;type:jsonb;not null;default:'{}'"`
 	Context              datatypes.JSON `gorm:"column:context;type:jsonb;not null;default:'{}'"`
 	Counters             datatypes.JSON `gorm:"column:counters;type:jsonb;not null;default:'{}'"`
+	FormSnapshot         datatypes.JSON `gorm:"column:form_snapshot;type:jsonb"`
 	MigratedFrom         *string        `gorm:"column:migrated_from;type:uuid"`
 	SupersededBy         *string        `gorm:"column:superseded_by;type:uuid"`
 	Revision             int64          `gorm:"column:revision;not null;default:0"`

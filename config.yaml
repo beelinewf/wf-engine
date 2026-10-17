@@ -198,16 +198,18 @@ auth:
   # role denies by default.
   #
   # Actions: definitions:read, definitions:write, secrets:read,
-  # secrets:write, instances:create, instances:read,
-  # instances:update-context, input:deliver, instances:control,
-  # instances:migrate, statistics:read, roles:read, schedules:read,
-  # schedules:write.
+  # secrets:write, forms:read, forms:write, instances:create,
+  # instances:read, instances:update-context, input:deliver,
+  # instances:control, instances:migrate, statistics:read, roles:read,
+  # schedules:read, schedules:write.
   role_permissions:
     admin:
       - "definitions:read"
       - "definitions:write"
       - "secrets:read"
       - "secrets:write"
+      - "forms:read"
+      - "forms:write"
       - "instances:create"
       - "instances:read"
       - "instances:update-context"

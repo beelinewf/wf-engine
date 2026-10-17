@@ -18,6 +18,15 @@ func jsonCol(raw json.RawMessage, fallback string) datatypes.JSON {
 	return datatypes.JSON(raw)
 }
 
+// nullableJSONCol converts a raw JSON field for a nullable JSONB column,
+// preserving SQL NULL when the field is unset.
+func nullableJSONCol(raw json.RawMessage) datatypes.JSON {
+	if len(raw) == 0 {
+		return nil
+	}
+	return datatypes.JSON(raw)
+}
+
 // UserToModel maps a domain user to its persistence model.
 func UserToModel(u model.User) UserModel {
 	return UserModel{
@@ -223,6 +232,7 @@ func WorkflowInstanceToModel(w model.WorkflowInstance) WorkflowInstanceModel {
 		Frame:                jsonCol(w.Frame, "{}"),
 		Context:              jsonCol(w.Context, "{}"),
 		Counters:             jsonCol(w.Counters, "{}"),
+		FormSnapshot:         nullableJSONCol(w.FormSnapshot),
 		MigratedFrom:         uuidPtr(w.MigratedFrom),
 		SupersededBy:         uuidPtr(w.SupersededBy),
 		Revision:             w.Revision,
@@ -255,6 +265,7 @@ func WorkflowInstanceFromModel(m WorkflowInstanceModel) model.WorkflowInstance {
 		Frame:                json.RawMessage(m.Frame),
 		Context:              json.RawMessage(m.Context),
 		Counters:             json.RawMessage(m.Counters),
+		FormSnapshot:         json.RawMessage(m.FormSnapshot),
 		MigratedFrom:         strVal(m.MigratedFrom),
 		SupersededBy:         strVal(m.SupersededBy),
 		Revision:             m.Revision,

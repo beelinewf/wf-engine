@@ -14,6 +14,7 @@ import (
 	"github.com/simpwf/workflow-engine/internal/workflow/model"
 	"github.com/simpwf/workflow-engine/internal/workflow/repository"
 	"github.com/simpwf/workflow-engine/internal/workflow/service"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
@@ -99,6 +100,13 @@ func TestMigratePausedHappyPath(t *testing.T) {
 		t.Fatalf("Pause() error = %v", err)
 	}
 
+	// Seed a frozen snapshot on the source row: migration must carry it so
+	// the new run does not silently flip back to live forms.
+	snap := `{"f1":{"schema":{"type":"object"}}}`
+	if err := db.Model(&repository.WorkflowInstanceModel{}).Where("id = ?", inst.ID).Update("form_snapshot", datatypes.JSON(snap)).Error; err != nil {
+		t.Fatalf("seed source snapshot: %v", err)
+	}
+
 	res, err := svc.Migrate(ctx, service.MigrateRequest{
 		SourceInstanceID:     inst.ID,
 		WorkflowDefinitionID: v2,
@@ -123,6 +131,12 @@ func TestMigratePausedHappyPath(t *testing.T) {
 	if nxt.MigratedFrom != inst.ID {
 		t.Errorf("migrated_from = %q, want %q", nxt.MigratedFrom, inst.ID)
 	}
+	assertJSONEq(t, "migrated form snapshot", nxt.FormSnapshot, snap)
+	persisted, err := repo.GetByID(ctx, nxt.ID)
+	if err != nil {
+		t.Fatalf("GetByID() error = %v", err)
+	}
+	assertJSONEq(t, "persisted form snapshot", persisted.FormSnapshot, snap)
 	if nxt.Debug {
 		t.Error("debug = true, want false")
 	}

@@ -99,10 +99,14 @@ func (f *fakeWorkflowRepo) SetNodeRefs(_ context.Context, workflowDefinitionID s
 }
 
 func newWorkflowService(wfRepo *fakeWorkflowRepo, ndRepo *fakeNodeRepo) service.WorkflowDefinitionService {
+	return newWorkflowServiceWithForms(wfRepo, ndRepo, newFakeFormRepo())
+}
+
+func newWorkflowServiceWithForms(wfRepo *fakeWorkflowRepo, ndRepo *fakeNodeRepo, forms *fakeFormRepo) service.WorkflowDefinitionService {
 	if ndRepo == nil {
 		ndRepo = newFakeNodeRepo()
 	}
-	return service.NewWorkflowDefinitionService(wfRepo, ndRepo, testLimits, actorID)
+	return service.NewWorkflowDefinitionService(wfRepo, ndRepo, testLimits, actorID, forms)
 }
 
 func TestCreateWorkflowDefinitionV1(t *testing.T) {
@@ -268,12 +272,13 @@ func TestMaterializeInheritsOutputProperty(t *testing.T) {
 	}
 }
 
-func TestMaterializeInheritsInputForm(t *testing.T) {
+func TestMaterializeInheritsInputFormID(t *testing.T) {
+	formID := "aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa"
 	ndRepo := newFakeNodeRepo()
 	ndRepo.defs[nodeDefA] = model.NodeDefinition{
 		ID: nodeDefA, Name: "shared-input", Version: 1, LineageID: lineageID,
 		Type: "input", Content: json.RawMessage(`{"type":"input","channel":"http","output_property":"user",
-			"form":{"schema":{"type":"object","required":["email"],"properties":{"email":{"type":"string"}}},"ui":{"order":["email"]}}}`),
+			"form_id":"` + formID + `"}`),
 	}
 	svc := newWorkflowService(newFakeWorkflowRepo(), ndRepo)
 
@@ -293,14 +298,67 @@ func TestMaterializeInheritsInputForm(t *testing.T) {
 	if first.Type != model.NodeTypeInput {
 		t.Fatalf("type = %s, want input", first.Type)
 	}
-	if first.Form == nil {
-		t.Fatal("form = nil, want inherited form")
+	if first.FormID != formID {
+		t.Errorf("FormID = %q, want inherited %q", first.FormID, formID)
 	}
-	if got := string(first.Form.Schema); got != `{"type":"object","required":["email"],"properties":{"email":{"type":"string"}}}` {
-		t.Errorf("schema = %s", got)
+}
+
+func TestCreateWorkflowDefinitionUnknownFormIDRejected(t *testing.T) {
+	svc := newWorkflowServiceWithForms(newFakeWorkflowRepo(), nil, newFakeFormRepo())
+	content := `{"start_node_id":"aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa","nodes":[
+		{"id":"aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa","type":"input","channel":"http","output_property":"user",
+			"form_id":"aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa"}
+	]}`
+	_, err := svc.Create(context.Background(), service.CreateWorkflowDefinition{
+		Name:    "flow",
+		Content: json.RawMessage(content),
+	})
+	if !errors.Is(err, model.ErrInvalid) {
+		t.Fatalf("Create() error = %v, want ErrInvalid for the unknown form_id", err)
 	}
-	if got := string(first.Form.UI); got != `{"order":["email"]}` {
-		t.Errorf("ui = %s", got)
+}
+
+func TestCreateWorkflowDefinitionRecordsFormRefs(t *testing.T) {
+	ctx := context.Background()
+	forms := newFakeFormRepo()
+	created, err := forms.Create(ctx, "contact", formTestSchema, formTestUI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	groupForm, err := forms.Create(ctx, "grouped", formTestSchema, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := newWorkflowServiceWithForms(newFakeWorkflowRepo(), nil, forms)
+
+	// form_id on a top-level input node and on a group child are both
+	// recorded; group children must be walked, not just top-level nodes.
+	content := `{"start_node_id":"aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa","nodes":[
+		{"id":"aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa","type":"input","channel":"http","output_property":"user",
+			"form_id":"` + created.ID + `","next_node":"bbbbbbbb-bbbb-7bbb-8bbb-bbbbbbbbbbbb"},
+		{"id":"bbbbbbbb-bbbb-7bbb-8bbb-bbbbbbbbbbbb","type":"group","start_node_id":"cccccccc-cccc-7ccc-8ccc-cccccccccccc",
+			"nodes":[{"id":"cccccccc-cccc-7ccc-8ccc-cccccccccccc","type":"input","channel":"http",
+				"form_id":"` + groupForm.ID + `"}]}
+	]}`
+	def, err := svc.Create(ctx, service.CreateWorkflowDefinition{Name: "flow", Content: json.RawMessage(content)})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	got, err := forms.WorkflowFormRefs(ctx, def.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("WorkflowFormRefs() = %v, want both form ids", got)
+	}
+
+	// Once recorded, the referenced form stays updatable but not deletable.
+	formSvc := service.NewFormService(forms, newFakeResolver())
+	if _, err := formSvc.Update(ctx, created.ID, "renamed", formTestSchema, nil); err != nil {
+		t.Errorf("Update() of referenced form error = %v, want nil", err)
+	}
+	if err := formSvc.Delete(ctx, created.ID); !errors.Is(err, model.ErrConflict) {
+		t.Errorf("Delete() of referenced form error = %v, want ErrConflict", err)
 	}
 }
 

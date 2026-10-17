@@ -240,7 +240,7 @@ func TestInstanceStatus(t *testing.T) {
 	}
 }
 
-func TestInstanceStatusPendingInputWithForm(t *testing.T) {
+func TestInstanceStatusPendingInputWithFormID(t *testing.T) {
 	now := time.Now().UTC()
 	inst := model.WorkflowInstance{
 		ID: instanceID, WorkflowDefinitionID: wfDefID,
@@ -251,10 +251,7 @@ func TestInstanceStatusPendingInputWithForm(t *testing.T) {
 	}
 	detail := &service.StatusDetail{Instance: inst, PendingInput: &service.PendingInput{
 		NodeID: "node-1", Channel: "http", OutputProperty: "user",
-		Form: &model.InputForm{
-			Schema: json.RawMessage(`{"type":"object","required":["email"]}`),
-			UI:     json.RawMessage(`{"order":["email"]}`),
-		},
+		FormID: "11111111-1111-7111-8111-111111111111",
 	}}
 	r := NewRouter(Deps{Health: NewHealth(fakePinger{}), Instances: &fakeInstanceSvc{detail: detail}})
 	w := performJSON(r, http.MethodGet, "/v1/workflow/instance/"+instanceID+"/status", "", nil)
@@ -272,17 +269,62 @@ func TestInstanceStatusPendingInputWithForm(t *testing.T) {
 	if pi["node_id"] != "node-1" || pi["channel"] != "http" || pi["output_property"] != "user" {
 		t.Errorf("pending_input identity = %v", pi)
 	}
+	if pi["form_id"] != "11111111-1111-7111-8111-111111111111" {
+		t.Errorf("pending_input.form_id = %v, want the referenced form id", pi["form_id"])
+	}
+	if _, present := pi["form"]; present {
+		t.Errorf("pending_input.form present = %v, want no form bytes on status", pi["form"])
+	}
+}
+
+func TestInstanceStatusPendingInputWithSnapshotForm(t *testing.T) {
+	now := time.Now().UTC()
+	inst := model.WorkflowInstance{
+		ID: instanceID, WorkflowDefinitionID: wfDefID,
+		Status: model.WorkflowWaiting, WaitingReason: model.WaitingReasonInput,
+		CreatedBy: instanceID, UpdatedBy: instanceID,
+		Frame:     json.RawMessage(`{"current_node_id":"x"}`),
+		CreatedAt: now, UpdatedAt: now,
+	}
+	detail := &service.StatusDetail{Instance: inst, PendingInput: &service.PendingInput{
+		NodeID: "node-1", Channel: "http", OutputProperty: "user",
+		FormID: "11111111-1111-7111-8111-111111111111",
+		Form: &service.SnapshotForm{
+			Schema: json.RawMessage(`{"type":"object"}`),
+			UI:     json.RawMessage(`{"theme":"dark"}`),
+		},
+	}}
+	r := NewRouter(Deps{Health: NewHealth(fakePinger{}), Instances: &fakeInstanceSvc{detail: detail}})
+	w := performJSON(r, http.MethodGet, "/v1/workflow/instance/"+instanceID+"/status", "", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	pi, ok := raw["pending_input"].(map[string]any)
+	if !ok {
+		t.Fatalf("pending_input missing: %v", raw)
+	}
+	if pi["form_id"] != "11111111-1111-7111-8111-111111111111" {
+		t.Errorf("pending_input.form_id = %v, want the referenced form id", pi["form_id"])
+	}
 	form, ok := pi["form"].(map[string]any)
 	if !ok {
 		t.Fatalf("pending_input.form missing: %v", pi)
 	}
-	schema, ok := form["schema"].(map[string]any)
-	if !ok || schema["type"] != "object" {
-		t.Errorf("form.schema = %v, want object schema", form["schema"])
+	schema, _ := form["schema"].(map[string]any)
+	if schema["type"] != "object" {
+		t.Errorf("pending_input.form.schema = %v, want the frozen schema", form["schema"])
+	}
+	ui, _ := form["ui"].(map[string]any)
+	if ui["theme"] != "dark" {
+		t.Errorf("pending_input.form.ui = %v, want the frozen ui", form["ui"])
 	}
 }
 
-func TestInstanceStatusPendingInputFormNull(t *testing.T) {
+func TestInstanceStatusPendingInputFormIDAbsent(t *testing.T) {
 	now := time.Now().UTC()
 	inst := model.WorkflowInstance{
 		ID: instanceID, WorkflowDefinitionID: wfDefID,
@@ -307,12 +349,11 @@ func TestInstanceStatusPendingInputFormNull(t *testing.T) {
 	if !ok {
 		t.Fatalf("pending_input missing: %v", raw)
 	}
-	form, present := pi["form"]
-	if !present {
-		t.Fatalf("form key missing, want present-with-null: %v", pi)
+	if _, present := pi["form_id"]; present {
+		t.Errorf("form_id present = %v, want absent for formless input node", pi["form_id"])
 	}
-	if form != nil {
-		t.Errorf("form = %v, want null for formless input node", form)
+	if _, present := pi["form"]; present {
+		t.Errorf("form present = %v, want no form bytes on status", pi["form"])
 	}
 }
 

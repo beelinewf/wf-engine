@@ -23,9 +23,12 @@ func main() {
 		&repository.RoleModel{},
 		&repository.RolePermissionModel{},
 		&repository.SecretModel{},
+		&repository.FormModel{},
 		&repository.NodeDefinitionModel{},
 		&repository.WorkflowDefinitionModel{},
 		&repository.WorkflowDefinitionNodeRefModel{},
+		&repository.WorkflowDefinitionFormRefModel{},
+		&repository.NodeDefinitionFormRefModel{},
 		&repository.WorkflowRequestModel{},
 		&repository.CronScheduleModel{},
 		&repository.ScheduleFireModel{},
@@ -75,6 +78,12 @@ func foreignKeyDDL() string {
 	// workflow_definition_node_refs
 	add("workflow_definition_node_refs", "fk_wf_def_node_refs_workflow_definition", "\"workflow_definition_id\"", "workflow_definitions", "\"id\"")
 	add("workflow_definition_node_refs", "fk_wf_def_node_refs_node_definition", "\"node_definition_id\"", "node_definitions", "\"id\"")
+	// workflow_definition_form_refs
+	add("workflow_definition_form_refs", "fk_wf_def_form_refs_workflow_definition", "\"workflow_definition_id\"", "workflow_definitions", "\"id\"")
+	add("workflow_definition_form_refs", "fk_wf_def_form_refs_form", "\"form_id\"", "forms", "\"id\"")
+	// node_definition_form_refs
+	add("node_definition_form_refs", "fk_node_def_form_refs_node_definition", "\"node_definition_id\"", "node_definitions", "\"id\"")
+	add("node_definition_form_refs", "fk_node_def_form_refs_form", "\"form_id\"", "forms", "\"id\"")
 	// workflow_requests
 	add("workflow_requests", "fk_workflow_requests_workflow_definition", "\"workflow_definition_id\"", "workflow_definitions", "\"id\"")
 	add("workflow_requests", "fk_workflow_requests_created_by", "\"created_by\"", "users", "\"id\"")

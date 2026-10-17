@@ -20,6 +20,7 @@ type Deps struct {
 	NodeDefinitions     service.NodeDefinitionService
 	WorkflowDefinitions service.WorkflowDefinitionService
 	Secrets             service.SecretService
+	Forms               service.FormService
 	Instances           service.InstanceService
 	Schedules           service.ScheduleService
 	Statistics          service.StatisticsService
@@ -159,6 +160,17 @@ func NewRouter(deps Deps) *gin.Engine {
 		gate(group, auth.ActionSecretsRead, http.MethodGet, "", secrets.List)
 		gate(group, auth.ActionSecretsRead, http.MethodGet, "/:key", secrets.Get)
 		gate(group, auth.ActionSecretsWrite, http.MethodDelete, "/:key", secrets.Delete)
+	}
+
+	if deps.Forms != nil {
+		forms := NewFormHandler(deps.Forms)
+		group := v1.Group("/forms")
+		gate(group, auth.ActionFormsWrite, http.MethodPost, "", forms.Create)
+		gate(group, auth.ActionFormsRead, http.MethodGet, "", forms.List)
+		gate(group, auth.ActionFormsRead, http.MethodGet, "/:id", forms.Get)
+		gate(group, auth.ActionFormsRead, http.MethodGet, "/:id/usage", forms.Usage)
+		gate(group, auth.ActionFormsWrite, http.MethodPut, "/:id", forms.Update)
+		gate(group, auth.ActionFormsWrite, http.MethodDelete, "/:id", forms.Delete)
 	}
 
 	if deps.Instances != nil {

@@ -768,24 +768,20 @@ func TestParseNodeContentOnFailureReferencedNode(t *testing.T) {
 	}
 }
 
-func TestParseInputNodeFormAccepted(t *testing.T) {
+func TestParseInputNodeFormIDAccepted(t *testing.T) {
 	nc := mustParseContent(t, `{
 		"type": "input",
 		"channel": "http",
 		"output_property": "user",
-		"form": {
-			"schema": {"type":"object","required":["email"],"properties":{"email":{"type":"string","format":"email"}}},
-			"ui": {"order":["email"]}
-		}
+		"form_id": "11111111-1111-7111-8111-111111111111"
 	}`)
-	if nc.Form == nil {
-		t.Fatal("form = nil, want parsed form")
+	if nc.FormID != "11111111-1111-7111-8111-111111111111" {
+		t.Errorf("FormID = %q, want the referenced form id", nc.FormID)
 	}
-	if !strings.Contains(string(nc.Form.Schema), `"email"`) {
-		t.Errorf("form schema not stored: %s", nc.Form.Schema)
-	}
-	if !strings.Contains(string(nc.Form.UI), `"order"`) {
-		t.Errorf("form ui not stored: %s", nc.Form.UI)
+	// An input node without a form parses with an empty FormID.
+	plain := mustParseContent(t, `{"type":"input","channel":"http","output_property":"user"}`)
+	if plain.FormID != "" {
+		t.Errorf("FormID = %q, want empty for a formless node", plain.FormID)
 	}
 }
 
@@ -1034,17 +1030,14 @@ func TestParseAllowedRolesRejectsOversizedLists(t *testing.T) {
 	}
 }
 
-func TestParseInputNodeFormRejectsInvalid(t *testing.T) {
+func TestParseInputNodeFormIDRejectsInvalid(t *testing.T) {
 	cases := []struct {
 		name string
 		raw  string
 		want string
 	}{
-		{"missing schema", `{"type":"input","channel":"http","output_property":"x","form":{"ui":{}}}`, "schema"},
-		{"empty schema", `{"type":"input","channel":"http","output_property":"x","form":{"schema":{}}}`, "schema"},
-		{"non-object schema", `{"type":"input","channel":"http","output_property":"x","form":{"schema":[]}}`, "schema"},
-		{"invalid json schema", `{"type":"input","channel":"http","output_property":"x","form":{"schema":{"type":"object","properties":{"name":{"type":"string","pattern":"(["}}}}}`, "schema"},
-		{"non-object ui", `{"type":"input","channel":"http","output_property":"x","form":{"schema":{"type":"object"},"ui":[1,2]}}`, "ui"},
+		{"non-uuid form_id", `{"type":"input","channel":"http","output_property":"x","form_id":"not-a-uuid"}`, "form_id"},
+		{"legacy form key", `{"type":"input","channel":"http","output_property":"x","form":{"schema":{"type":"object"}}}`, "form_id"},
 	}
 	for _, c := range cases {
 		_, err := model.ParseNodeContent([]byte(c.raw), testLimits)
@@ -1058,21 +1051,21 @@ func TestParseInputNodeFormRejectsInvalid(t *testing.T) {
 	}
 }
 
-func TestParseFormRejectsNonInputTypes(t *testing.T) {
-	raw := `{"type":"script","script":"return 1;","form":{"schema":{"type":"object"}}}`
+func TestParseFormIDRejectsNonInputTypes(t *testing.T) {
+	raw := `{"type":"script","script":"return 1;","form_id":"11111111-1111-7111-8111-111111111111"}`
 	if _, err := model.ParseNodeContent([]byte(raw), testLimits); err == nil {
-		t.Error("script with form: error = nil, want error")
-	} else if !strings.Contains(err.Error(), "form") {
-		t.Errorf("script with form: error = %q, want mention of form", err)
+		t.Error("script with form_id: error = nil, want error")
+	} else if !strings.Contains(err.Error(), "form_id") {
+		t.Errorf("script with form_id: error = %q, want mention of form_id", err)
 	}
 }
 
-func TestParseFormRejectsReference(t *testing.T) {
-	raw := `{"node_definition_id":"11111111-1111-7111-8111-111111111111","form":{"schema":{"type":"object"}}}`
+func TestParseFormIDRejectsReference(t *testing.T) {
+	raw := `{"node_definition_id":"11111111-1111-7111-8111-111111111111","form_id":"22222222-2222-7222-8222-222222222222"}`
 	if _, err := model.ParseNodeContent([]byte(raw), testLimits); err == nil {
-		t.Error("reference with form: error = nil, want error")
+		t.Error("reference with form_id: error = nil, want error")
 	} else if !strings.Contains(err.Error(), "inline executable") {
-		t.Errorf("reference with form: error = %q, want inline-executable rejection", err)
+		t.Errorf("reference with form_id: error = %q, want inline-executable rejection", err)
 	}
 }
 

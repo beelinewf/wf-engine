@@ -59,8 +59,9 @@ status notifications. Both stay fully disabled when their DSN is absent.
   not affect running instances.
 - Node types: `script` (Goja ES5.1 sandbox, no `eval`), `conditions`
   (exactly-one-match routing), `input` (HTTP webhook, Redis pub/sub, or
-  RabbitMQ queue with optional `form` contract — JSON Schema plus ui hints
-  — plus validation script and `Idempotency-Key` dedupe),
+  RabbitMQ queue with optional `form_id` reference into the `/v1/forms` library
+  — JSON Schema plus ui hints — plus validation script and `Idempotency-Key` dedupe;
+  instances created with `"snapshot_forms": true` freeze those bytes at start),
   `output` (publish a context value to Redis or RabbitMQ, returns a
   receipt), nested `group`, `external_call` (outbound HTTP or allowlisted
   command), and `poller` (active wait over HTTP, Redis, or RabbitMQ until
@@ -184,7 +185,8 @@ them and prints their ids (defaults to the compose URL):
 
 ```bash
 bash scripts/seed.sh http://localhost:8080
-# -> {"node_definition_ids": {...}, "workflow_definition_id": "<WF_ID>"}
+# -> {"form_id": "<FORM_ID>", "node_definition_ids": {...}, "workflow_definition_id": "<WF_ID>",
+#     "public_workflow_definition_id": "<PUBLIC_WF_ID>"}
 
 # Start an instance (202 Accepted)
 curl -s -X POST http://localhost:8080/v1/workflow/instance \
@@ -422,7 +424,7 @@ posts a payload it cannot hold a credential for.
 A public node accepts a `PUT` carrying **no credential at all**, even with
 authentication switched on, and `PUT /v1/workflow/instance/{id}/input` is
 the only endpoint exempted from the global auth gate to allow it. Everything
-else, including the status and form reads, still requires a credential.
+else, including the status and forms-library reads, still requires a credential.
 
 The flag is opt-in and per node, and it forces the node open and
 unattributed: `public: true` combined with a non-empty `allowed_roles` or
@@ -467,9 +469,9 @@ reaches the context:
 ```
 
 So templates read `{{ approval.input_data.approved }}` and
-`{{ approval.user_id }}`. The form schema, the validation script, and the
-post hook's `output` always see the **raw** payload, so validation code is
-unaffected. With `record_actor` absent or false the bare payload is written
+`{{ approval.user_id }}`. The validation script and the post hook's
+`output` always see the **raw** payload, so validation code is unaffected.
+With `record_actor` absent or false the bare payload is written
 and existing definitions behave exactly as before. A broker or API-token
 delivery records the system user. Replaying an idempotency key returns the
 first writer's recorded delivery, attribution included.
@@ -674,10 +676,10 @@ is clean, and `task test` passes.
   unauthenticated **write**, so treat it as a public endpoint you own. Anyone
   holding the instance id can deliver to it, the payload is stored as-is, and
   the run continues. Set it only where an outside party must post to you, and
-  pair it with a form schema plus a validation script: the flag is open by
-  construction, so the input contract is the only thing constraining what a
-  stranger can write into your context. Prefer an authenticated route and a
-  signature check when you control both ends.
+  pair it with a strict validation script: the flag is open by construction,
+  so the script is the only backend gate on what a stranger can write into
+  your context. Prefer an authenticated route and a signature check when you
+  control both ends.
 - Roles are taken from the verified token, never from the request body, so a
   caller cannot escalate by claiming a role in a parameter. A role absent
   from `auth.role_permissions` grants nothing.

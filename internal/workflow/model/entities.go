@@ -115,6 +115,10 @@ type WorkflowInstance struct {
 	Frame                json.RawMessage
 	Context              json.RawMessage
 	Counters             json.RawMessage
+	// FormSnapshot freezes the referenced forms when the instance was
+	// created with snapshot mode on: form id -> {"schema","ui"}. Nil
+	// when the instance follows the live forms library.
+	FormSnapshot json.RawMessage
 	// MigratedFrom is the source instance id when this run was created by
 	// a definition migration; empty otherwise.
 	MigratedFrom string

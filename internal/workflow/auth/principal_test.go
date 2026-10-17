@@ -259,6 +259,16 @@ func TestKnownActionsIncludesMigrate(t *testing.T) {
 	}
 }
 
+func TestKnownActionsIncludesForms(t *testing.T) {
+	known := map[string]bool{}
+	for _, action := range auth.KnownActions() {
+		known[action] = true
+	}
+	if !known[auth.ActionFormsRead] || !known[auth.ActionFormsWrite] {
+		t.Errorf("KnownActions() = %v, want forms:read and forms:write", auth.KnownActions())
+	}
+}
+
 func TestSystemPrincipalIsService(t *testing.T) {
 	p := auth.SystemPrincipal("11111111-1111-7111-8111-111111111111")
 	if !p.Service {

@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/simpwf/workflow-engine/pkg/contextpath"
 	"github.com/simpwf/workflow-engine/pkg/ids"
 )
@@ -111,7 +110,7 @@ type NodeContent struct {
 	Channel     string            // input
 	ContextPath string            // output: source context path
 	Validation  *ValidationScript // input
-	Form        *InputForm        // input: dynamic form contract (schema + ui hints)
+	FormID      string            // input: forms-library reference, resolved only by the frontend
 	// AllowedRoles is the input node's second authorization gate. It is
 	// checked against the caller's live token roles after the endpoint
 	// permission, so a role may hold input:deliver and still be refused by
@@ -202,15 +201,6 @@ type Condition struct {
 // ValidationScript validates an input payload.
 type ValidationScript struct {
 	Script string
-}
-
-// InputForm is the dynamic-form contract of an input node. Schema is a JSON
-// Schema (draft 2020-12) payload contract; UI carries opaque frontend render
-// hints. Both are versioned with the definition content snapshot, so v1/v2
-// carry their own form.
-type InputForm struct {
-	Schema json.RawMessage `json:"schema"`
-	UI     json.RawMessage `json:"ui,omitempty"`
 }
 
 // HookScript is an optional lifecycle context-transform script. A pre hook
@@ -304,7 +294,8 @@ type rawNode struct {
 	Channel           *string                  `json:"channel"`
 	ContextPath       *string                  `json:"context_path"`
 	Validation        *rawValidation           `json:"validation"`
-	Form              *rawForm                 `json:"form"`
+	FormID            *string                  `json:"form_id"`
+	Form              json.RawMessage          `json:"form"` // legacy detector: errors explicitly, never parsed
 	AllowedRoles      []string                 `json:"allowed_roles"`
 	RecordActor       *bool                    `json:"record_actor"`
 	Public            *bool                    `json:"public"`
@@ -337,11 +328,6 @@ type rawCondition struct {
 
 type rawValidation struct {
 	Script string `json:"script"`
-}
-
-type rawForm struct {
-	Schema json.RawMessage `json:"schema"`
-	UI     json.RawMessage `json:"ui"`
 }
 
 type rawHTTPConfig struct {
@@ -400,6 +386,12 @@ func ParseNodeContent(raw []byte, limits NodeLimits) (*NodeContent, error) {
 }
 
 func parseRawNode(r *rawNode, limits NodeLimits) (*NodeContent, error) {
+	// The inline form object was replaced by a forms-library reference.
+	// Reject the old key explicitly so it is never silently ignored; an
+	// explicit null still decodes as absent, as before.
+	if len(r.Form) > 0 && string(r.Form) != "null" {
+		return nil, errors.New("form is no longer supported; reference a form from the library with form_id")
+	}
 	nc := &NodeContent{
 		ID:       r.ID,
 		Name:     r.Name,
@@ -482,7 +474,7 @@ func parseRawNode(r *rawNode, limits NodeLimits) (*NodeContent, error) {
 		if r.ContextPath != nil {
 			return nil, errors.New("input node does not support context_path; use output_property")
 		}
-		if r.Script != nil || r.Conditions != nil || r.Channel != nil || r.Form != nil || r.HTTPConfig != nil || r.ExecutionConfig != nil || r.Nodes != nil ||
+		if r.Script != nil || r.Conditions != nil || r.Channel != nil || r.FormID != nil || r.HTTPConfig != nil || r.ExecutionConfig != nil || r.Nodes != nil ||
 			r.PollerHTTP != nil || r.PollerRedis != nil || r.PollerRabbitMQ != nil || len(r.Config) > 0 ||
 			len(r.Branches) > 0 || r.ParallelEndNodeID != nil || r.CombiningScript != nil || len(r.Delay) > 0 ||
 			// allowed_roles, record_actor, and public are the input node's
@@ -596,15 +588,17 @@ func parseRawNode(r *rawNode, limits NodeLimits) (*NodeContent, error) {
 			}
 			nc.Validation = &ValidationScript{Script: r.Validation.Script}
 		}
-		form, err := parseInputForm(r.Form)
+		if r.FormID != nil {
+			if !ids.Valid(*r.FormID) {
+				return nil, fmt.Errorf("form_id %q is not a valid uuid", *r.FormID)
+			}
+			nc.FormID = *r.FormID
+		}
+		allowedRoles, err := parseAllowedRoles(r.AllowedRoles)
 		if err != nil {
 			return nil, err
 		}
-		nc.Form = form
-		nc.AllowedRoles, err = parseAllowedRoles(r.AllowedRoles)
-		if err != nil {
-			return nil, err
-		}
+		nc.AllowedRoles = allowedRoles
 		if r.RecordActor != nil {
 			nc.RecordActor = *r.RecordActor
 		}
@@ -919,8 +913,8 @@ func parseRawNode(r *rawNode, limits NodeLimits) (*NodeContent, error) {
 		}
 		nc.Timeout = limits.ConditionTimeout
 	}
-	if _, ok := LookupCustomType(string(nc.Type)); !ok && nc.Type != NodeTypeInput && r.Form != nil {
-		return nil, fmt.Errorf("node type %q does not support form", nc.Type)
+	if _, ok := LookupCustomType(string(nc.Type)); !ok && nc.Type != NodeTypeInput && r.FormID != nil {
+		return nil, fmt.Errorf("node type %q does not support form_id", nc.Type)
 	}
 	// allowed_roles, record_actor, and public are the input node's
 	// authorization surface, so no other builtin type may carry them. The
@@ -995,7 +989,7 @@ func parseAllowedRoles(raw []string) ([]string, error) {
 // were already parsed by the caller.
 func parseCustomNode(nc *NodeContent, r *rawNode, limits NodeLimits) (*NodeContent, error) {
 	if r.Script != nil || r.Conditions != nil || r.Channel != nil || r.Validation != nil ||
-		r.Form != nil || r.HTTPConfig != nil || r.ExecutionConfig != nil ||
+		r.FormID != nil || r.HTTPConfig != nil || r.ExecutionConfig != nil ||
 		r.PollerHTTP != nil || r.PollerRedis != nil || r.PollerRabbitMQ != nil ||
 		len(r.Branches) > 0 || r.ParallelEndNodeID != nil || r.CombiningScript != nil ||
 		r.Nodes != nil || r.StartNodeID != nil || r.ContextPath != nil || len(r.Delay) > 0 ||
@@ -1023,56 +1017,6 @@ func parseCustomNode(nc *NodeContent, r *rawNode, limits NodeLimits) (*NodeConte
 	nc.CustomConfig = append(json.RawMessage(nil), r.Config...)
 	nc.Custom = parsed
 	return nc, nil
-}
-
-// parseInputForm resolves the optional form contract of an input node. The
-// schema must be a non-empty JSON object that compiles as a JSON Schema
-// (draft 2020-12); ui, when present, must be a JSON object of opaque render
-// hints. Raw copies are stored so status responses serve exact bytes.
-func parseInputForm(raw *rawForm) (*InputForm, error) {
-	if raw == nil {
-		return nil, nil
-	}
-	if len(raw.Schema) == 0 || strings.TrimSpace(string(raw.Schema)) == "" || string(raw.Schema) == "null" {
-		return nil, errors.New("form.schema is required")
-	}
-	trimmed := strings.TrimSpace(string(raw.Schema))
-	if !strings.HasPrefix(trimmed, "{") {
-		return nil, errors.New("form.schema must be an object")
-	}
-	if trimmed == "{}" {
-		return nil, errors.New("form.schema must be a non-empty object")
-	}
-	var schemaDoc any
-	if err := json.Unmarshal(raw.Schema, &schemaDoc); err != nil {
-		return nil, fmt.Errorf("form.schema must be valid JSON: %w", err)
-	}
-	if _, ok := schemaDoc.(map[string]any); !ok {
-		return nil, errors.New("form.schema must be an object")
-	}
-	c := jsonschema.NewCompiler()
-	c.DefaultDraft(jsonschema.Draft2020)
-	if err := c.AddResource("form.json", schemaDoc); err != nil {
-		return nil, fmt.Errorf("form.schema is not a valid JSON Schema: %w", err)
-	}
-	if _, err := c.Compile("form.json"); err != nil {
-		return nil, fmt.Errorf("form.schema is not a valid JSON Schema: %w", err)
-	}
-	form := &InputForm{Schema: append(json.RawMessage(nil), raw.Schema...)}
-	if len(raw.UI) > 0 {
-		if string(raw.UI) == "null" {
-			return nil, errors.New("form.ui must be an object")
-		}
-		var uiDoc any
-		if err := json.Unmarshal(raw.UI, &uiDoc); err != nil {
-			return nil, fmt.Errorf("form.ui must be valid JSON: %w", err)
-		}
-		if _, ok := uiDoc.(map[string]any); !ok {
-			return nil, errors.New("form.ui must be an object")
-		}
-		form.UI = append(json.RawMessage(nil), raw.UI...)
-	}
-	return form, nil
 }
 
 // parseHookScript resolves a pre/post lifecycle hook object. The returned

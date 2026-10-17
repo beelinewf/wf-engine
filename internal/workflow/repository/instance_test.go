@@ -2551,3 +2551,52 @@ func TestPauseResumePreservesDelayDeadline(t *testing.T) {
 		t.Errorf("claimed = %d, want none before the preserved deadline", len(claimed))
 	}
 }
+
+func TestWorkflowInstanceFormSnapshotRoundTrip(t *testing.T) {
+	db := setupTestDB(t)
+	seedInstanceFixture(t, db)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	repo := repository.NewInstanceRepository(db)
+
+	snap := json.RawMessage(`{"f1":{"schema":{"type":"object"},"ui":{"theme":"dark"}}}`)
+	w := model.WorkflowInstance{
+		ID: "aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaa1", WorkflowDefinitionID: fixtureWorkflowDefID,
+		Status: model.WorkflowWaiting, WaitingReason: model.WaitingReasonRunnable,
+		Frame: json.RawMessage(`{}`), Context: json.RawMessage(`{}`), Counters: json.RawMessage(`{}`),
+		FormSnapshot: snap,
+		CreatedBy:    fixtureUserID, UpdatedBy: fixtureUserID, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := repo.Insert(ctx, w); err != nil {
+		t.Fatalf("Insert() error = %v", err)
+	}
+	got, err := repo.GetByID(ctx, w.ID)
+	if err != nil {
+		t.Fatalf("GetByID() error = %v", err)
+	}
+	var gotSnap, wantSnap map[string]any
+	if err := json.Unmarshal(got.FormSnapshot, &gotSnap); err != nil {
+		t.Fatalf("unmarshal FormSnapshot: %v", err)
+	}
+	if err := json.Unmarshal(snap, &wantSnap); err != nil {
+		t.Fatalf("unmarshal want snapshot: %v", err)
+	}
+	if !reflect.DeepEqual(gotSnap, wantSnap) {
+		t.Errorf("FormSnapshot = %s, want %s", got.FormSnapshot, snap)
+	}
+
+	// Snapshot off stores NULL, which reads back empty.
+	w2 := w
+	w2.ID = "aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaa2"
+	w2.FormSnapshot = nil
+	if err := repo.Insert(ctx, w2); err != nil {
+		t.Fatalf("Insert() error = %v", err)
+	}
+	got2, err := repo.GetByID(ctx, w2.ID)
+	if err != nil {
+		t.Fatalf("GetByID() error = %v", err)
+	}
+	if len(got2.FormSnapshot) != 0 {
+		t.Errorf("FormSnapshot = %s, want empty", got2.FormSnapshot)
+	}
+}

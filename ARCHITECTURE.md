@@ -41,9 +41,9 @@ behind narrow interfaces.
 | `internal/workflow/transport`      | Optional Redis and RabbitMQ adapters: connect/ping, durable queue declaration, confirmed persistent publishing, pattern/exact subscribe, keyed GET with missing-key detection, manual-ack consume including per-execution arbitrary-queue poller consumption, clean shutdown; narrow `RedisPublisher`/`RabbitPublisher` interfaces plus poller `Get`/`Subscribe`/`ConsumeQueue` surfaces.                                                                                                                                                                                                                                                                                                  |
 | `internal/workflow/inputtransport` | Broker input consumers: Redis pattern subscriber (`workflow:input:*`, envelope decode) and RabbitMQ queue consumer (`NodeInstanceId` + `IdempotencyKey` headers, `message_id` fallback, manual ack/requeue), both delivering through `InstanceService.DeliverInput` with the matching source channel.                                                                                                                                                                                                                                                                                                                                                                                      |
 | `internal/workflow/statusupdate`   | Status-notification dispatcher: claims the oldest unresolved outbox event per instance/transport, loads the immutable per-definition config, publishes through the transport's publisher (http/redis/rabbitmq), retries with the transport's `retry_delay` and dead-letters past its `max_retry`.                                                                                                                                                                                                                                                                                                                                                                                    |
-| `internal/workflow/form`           | JSON Schema (draft 2020-12) validation of input payloads against the waiting input node's `form.schema`, with joined human-readable messages; nil when the node carries no form (legacy script-only path).                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `internal/workflow/form`           | Draft 2020-12 sanity check (`CheckSchema`) for forms-library schema documents before they are stored. Payloads are never validated against a form backend-side; input delivery is gated solely by the node's validation script.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `internal/workflow/auth`          | Framework-free authentication and authorization: the OIDC discovery + JWKS verifier, the claim-to-`Principal` mapping, the `Principal` carried on the request context, the config-owned role catalog, and the resource-action constants every route gates on. Knows nothing about Gin or GORM.                                                                                                                                                                                                                                                                                                                                                                                       |
-| `internal/workflow/service`        | Use-case orchestration: definitions, secrets validation, instance create/status/context/input (source channel must match the input node channel; the two-gate authorization check, then schema-then-script enforcement on delivery), node debug, pause/resume/stop controls (events + local cancellation signal), rollback of paused/failed instances to a prior occurrence (context restore, recomputed group stack), and identity resolution (JIT user upsert, role seeding, role reads). Instance creation snapshots all secrets under reserved `secret`; read views redact that root and rendered secret values. |
+| `internal/workflow/service`        | Use-case orchestration: definitions, secrets validation, instance create/status/context/input (source channel must match the input node channel; the two-gate authorization check, then script-only enforcement on delivery), node debug, pause/resume/stop controls (events + local cancellation signal), rollback of paused/failed instances to a prior occurrence (context restore, recomputed group stack), and identity resolution (JIT user upsert, role seeding, role reads). Instance creation snapshots all secrets under reserved `secret`; read views redact that root and rendered secret values. |
 | `internal/workflow/handler`        | Gin routes, HTTP DTOs, query parsing, RFC 7807 problem+json, the authentication middleware (API token → service principal, OIDC bearer → user) and the per-route permission middleware.                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `pkg/*`                            | Configuration (Viper), database (GORM over the Postgres driver with the pgx wire format), UUIDv7 ids, context paths + typed rendering, host-function registry. No `internal` imports.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `migrations/`                      | Atlas config + immutable versioned SQL + `atlas.sum`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -267,23 +267,29 @@ Node statuses: `waiting -> running -> finished | failed | stopped`.
   branch-owned occurrences and for every node while parallel branches are
   live.
 
-- **Input `form` contract**: an `input` node may carry optional
-  `form: {schema, ui}`. `schema` is a JSON Schema (draft 2020-12) payload
-  contract, parsed and compile-checked at definition time; `ui` is an
-  opaque object of frontend render hints (label, order, widget). The form
-  lives in the definition content snapshot, so v1/v2 carry their own form
-  and in-flight runs keep validating against their own version (definitions
-  are immutable, no migration). Referenced nodes inherit the form through
-  materialization; occurrences carry no `form` key. On delivery the payload
-  is validated schema-first, then by the validation script: a schema
-  failure persists `accepted=false` with a `"schema validation failed: ..."`
-  error (returned as HTTP 422) and the script never runs. Reusing an
-  `Idempotency-Key` with a different payload returns 409; a corrected
-  payload needs a fresh key. Status exposes `pending_input`
-  (`node_id`, `channel`, `output_property`, `form` with exact schema/ui
-  bytes; `form: null` when the node carries none; field omitted unless
-  parked on an input node) so one generic frontend renderer serves every
-  workflow version without per-version form code. Graph load failures
+- **Forms library**: render contracts live in `forms` rows (`name`, `schema`,
+  `ui`), not in definitions. An `input` node carries an optional `form_id`
+  (UUID, input-only, rejected on references and other types); definition
+  create verifies every referenced id exists (`422` on unknown) and records
+  the reference for delete protection. A referenced form stays updatable but
+  cannot be deleted (`409`) until its referencing definitions are gone, and
+  deleting a definition frees its forms. `GET /v1/forms/{id}/usage` lists
+  the referrers: using workflow and node definitions plus instances of
+  those definitions. Occurrences that inherit their input
+  shape through `node_definition_id` inherit the `form_id` through
+  materialization. The backend never reads a form: delivery is gated solely
+  by the validation script, so a payload violating the form's schema but
+  passing the script is accepted. Reusing an `Idempotency-Key` with a
+  different payload returns 409; a corrected payload needs a fresh key.
+  Status exposes `pending_input` (`node_id`, `channel`, `output_property`,
+  `form_id` (absent when unset), `form` (frozen bytes, snapshot runs only),
+  `allowed_roles`, `record_actor`, `public`; field omitted unless parked on
+  an input node); the frontend renders `form` when present, else fetches
+  `GET /v1/forms/{form_id}` for the bytes, so one generic renderer serves
+  every workflow version without per-version form code. Instances created
+  with `snapshot_forms` freeze every referenced form's `schema`/`ui` into
+  the instance row at start, so later library edits do not move a running
+  run (definition migration carries the snapshot). Graph load failures
   leave `pending_input` nil, same degraded-status rule as the nodes map.
 
 ## Dispatcher lifecycle
@@ -487,9 +493,9 @@ accepted payload becomes `{"user_id": ..., "input_data": <raw payload>}`
 under `output_property`, so templates read `{{ key.input_data.x }}` and
 `{{ key.user_id }}`.
 
-The split matters: the form schema, the validation script, and the post
-hook's `output` all still receive the **raw** payload, so validation code
-written before this feature keeps working unchanged. The envelope is applied
+The split matters: the validation script and the post hook's `output` all
+still receive the **raw** payload, so validation code written before this
+feature keeps working unchanged. The envelope is applied
 at the single point where the delivery becomes context, and only after
 validation has passed, so an unvalidated payload can never be attributed.
 A replay of an idempotency key returns the first writer's recorded

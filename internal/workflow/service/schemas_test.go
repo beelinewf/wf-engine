@@ -159,7 +159,7 @@ func TestSchemasSkipsTypesWithoutSchema(t *testing.T) {
 }
 
 func TestNodeDefinitionServiceSchema(t *testing.T) {
-	svc := service.NewNodeDefinitionService(newFakeNodeRepo(), testLimits, actorID)
+	svc := service.NewNodeDefinitionService(newFakeNodeRepo(), testLimits, actorID, newFakeFormRepo())
 	if raw := svc.Schema("script"); raw == nil {
 		t.Error("Schema(script) = nil, want schema")
 	}

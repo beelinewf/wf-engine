@@ -1,75 +1,42 @@
-// Package form validates input payloads against an input node's JSON Schema
-// contract before script validation runs.
+// Package form checks that a forms-library schema document is itself a valid
+// JSON Schema before it is stored. Payloads are never validated against a
+// form backend-side: input delivery is gated solely by the node's validation
+// script.
 package form
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
 )
 
-// Validate checks payload against the node's form schema. It returns nil when
-// the node carries no form (legacy path: script validation alone applies).
-func Validate(node *model.NodeContent, payload []byte) error {
-	if node == nil || node.Form == nil || len(node.Form.Schema) == 0 {
-		return nil
+// CheckSchema reports whether schema is a non-empty JSON object that compiles
+// as a JSON Schema (draft 2020-12).
+func CheckSchema(schema []byte) error {
+	if len(schema) == 0 || strings.TrimSpace(string(schema)) == "" || string(schema) == "null" {
+		return errors.New("schema is required")
 	}
-	var schemaDoc any
-	if err := json.Unmarshal(node.Form.Schema, &schemaDoc); err != nil {
-		return fmt.Errorf("form schema is invalid: %w", err)
+	var doc any
+	if err := json.Unmarshal(schema, &doc); err != nil {
+		return fmt.Errorf("schema must be valid JSON: %w", err)
+	}
+	obj, ok := doc.(map[string]any)
+	if !ok {
+		return errors.New("schema must be an object")
+	}
+	if len(obj) == 0 {
+		return errors.New("schema must be a non-empty object")
 	}
 	c := jsonschema.NewCompiler()
 	c.DefaultDraft(jsonschema.Draft2020)
-	if err := c.AddResource("form.json", schemaDoc); err != nil {
-		return fmt.Errorf("form schema is invalid: %w", err)
+	if err := c.AddResource("form.json", doc); err != nil {
+		return fmt.Errorf("schema is not a valid JSON Schema: %w", err)
 	}
-	sch, err := c.Compile("form.json")
-	if err != nil {
-		return fmt.Errorf("form schema is invalid: %w", err)
-	}
-	var payloadDoc any
-	if err := json.Unmarshal(payload, &payloadDoc); err != nil {
-		return fmt.Errorf("input body must be valid JSON: %w", err)
-	}
-	if err := sch.Validate(payloadDoc); err != nil {
-		return fmt.Errorf("schema validation failed: %s", joinMessages(err))
+	if _, err := c.Compile("form.json"); err != nil {
+		return fmt.Errorf("schema is not a valid JSON Schema: %w", err)
 	}
 	return nil
-}
-
-// joinMessages flattens nested validation errors into a human-readable list.
-func joinMessages(err error) string {
-	var ve *jsonschema.ValidationError
-	if e, ok := err.(*jsonschema.ValidationError); ok {
-		ve = e
-	} else {
-		return err.Error()
-	}
-	var msgs []string
-	var walk func(e *jsonschema.ValidationError)
-	walk = func(e *jsonschema.ValidationError) {
-		if len(e.Causes) == 0 {
-			msgs = append(msgs, stripRootLocation(e.Error()))
-			return
-		}
-		for _, c := range e.Causes {
-			walk(c)
-		}
-	}
-	walk(ve)
-	if len(msgs) == 0 {
-		return err.Error()
-	}
-	return strings.Join(msgs, "; ")
-}
-
-// stripRootLocation drops the empty root JSON Pointer prefix emitted by
-// the validator for errors on the payload root (e.g. a missing required
-// property). The empty location carries no information; nested locations
-// like "at '/address': ..." are kept.
-func stripRootLocation(msg string) string {
-	return strings.TrimPrefix(msg, "at '': ")
 }

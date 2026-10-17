@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -52,6 +53,7 @@ type WorkflowDefinitionService interface {
 type workflowDefinitionService struct {
 	repo         repository.WorkflowDefinitionRepository
 	nodeRepo     repository.NodeDefinitionRepository
+	forms        repository.FormRepository
 	limits       model.NodeLimits
 	actor        string
 	mat          *kernel.Materializer
@@ -64,8 +66,9 @@ func NewWorkflowDefinitionService(
 	nodeRepo repository.NodeDefinitionRepository,
 	limits model.NodeLimits,
 	actor string,
+	forms repository.FormRepository,
 ) WorkflowDefinitionService {
-	return &workflowDefinitionService{repo: repo, nodeRepo: nodeRepo, limits: limits, actor: actor, mat: kernel.NewMaterializer(nodeRepo, limits), resolveCache: defcache.New[string, *model.WorkflowContent](resolveCacheSize)}
+	return &workflowDefinitionService{repo: repo, nodeRepo: nodeRepo, forms: forms, limits: limits, actor: actor, mat: kernel.NewMaterializer(nodeRepo, limits), resolveCache: defcache.New[string, *model.WorkflowContent](resolveCacheSize)}
 }
 
 func (s *workflowDefinitionService) Create(ctx context.Context, req CreateWorkflowDefinition) (model.WorkflowDefinition, error) {
@@ -79,6 +82,10 @@ func (s *workflowDefinitionService) Create(ctx context.Context, req CreateWorkfl
 	// Resolving the references validates that every node_definition_id
 	// exists and merges cleanly; the authored content is stored as-is.
 	if _, err := s.Materialize(ctx, wc); err != nil {
+		return model.WorkflowDefinition{}, err
+	}
+	formIDs := collectFormIDs(wc.Nodes)
+	if err := ensureFormsExist(ctx, s.forms, formIDs); err != nil {
 		return model.WorkflowDefinition{}, err
 	}
 
@@ -111,6 +118,9 @@ func (s *workflowDefinitionService) Create(ctx context.Context, req CreateWorkfl
 	}
 	if err := s.repo.SetNodeRefs(ctx, def.ID, collectNodeRefs(wc)); err != nil {
 		return model.WorkflowDefinition{}, fmt.Errorf("record node refs: %w", err)
+	}
+	if err := s.forms.SaveWorkflowFormRefs(ctx, def.ID, formIDs); err != nil {
+		return model.WorkflowDefinition{}, fmt.Errorf("record form refs: %w", err)
 	}
 	return def, nil
 }
@@ -264,4 +274,41 @@ func collectNodeRefs(wc *model.WorkflowContent) []string {
 	}
 	walk(wc.Nodes)
 	return refs
+}
+
+// collectFormIDs gathers the distinct form ids referenced by input nodes in
+// a node tree, including group children. Occurrence nodes that inherit their
+// input shape through node_definition_id carry no form_id of their own, so
+// only inline references are collected here.
+func collectFormIDs(nodes []*model.NodeContent) []string {
+	seen := map[string]bool{}
+	var ids []string
+	var walk func(nodes []*model.NodeContent)
+	walk = func(nodes []*model.NodeContent) {
+		for _, n := range nodes {
+			if n.FormID != "" && !seen[n.FormID] {
+				seen[n.FormID] = true
+				ids = append(ids, n.FormID)
+			}
+			if n.Group != nil {
+				walk(n.Group.Nodes)
+			}
+		}
+	}
+	walk(nodes)
+	return ids
+}
+
+// ensureFormsExist verifies every referenced form id names a stored form. An
+// unknown id is a definition error; any other lookup failure passes through.
+func ensureFormsExist(ctx context.Context, forms repository.FormRepository, formIDs []string) error {
+	for _, formID := range formIDs {
+		if _, err := forms.GetByID(ctx, formID); err != nil {
+			if errors.Is(err, model.ErrNotFound) {
+				return fmt.Errorf("%w: unknown form_id %q", model.ErrInvalid, formID)
+			}
+			return err
+		}
+	}
+	return nil
 }
