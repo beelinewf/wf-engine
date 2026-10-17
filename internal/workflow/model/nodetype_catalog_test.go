@@ -36,29 +36,20 @@ func TestNodeTypeCatalogListsBuiltinsFirst(t *testing.T) {
 	}
 }
 
-// TestNodeTypeCatalogInputFormDocumented pins the input type's distinctive
-// field: the catalog documents the form shape (schema required, ui hints),
-// while each input node's own form stays in its content.
-func TestNodeTypeCatalogInputFormDocumented(t *testing.T) {
+// TestNodeTypeCatalogInputFormIDDocumented pins the input type's distinctive
+// field: the catalog documents the forms-library reference, while the form
+// bodies live in the forms library, not in node content.
+func TestNodeTypeCatalogInputFormIDDocumented(t *testing.T) {
 	entry, ok := catalogByType(t, model.NodeTypeCatalog())["input"]
 	if !ok {
 		t.Fatal("catalog missing the input type")
 	}
 	props, _ := decodeSchema(t, entry.Schema)["properties"].(map[string]any)
-	form, ok := props["form"].(map[string]any)
-	if !ok {
-		t.Fatal("input schema documents no form property")
+	if _, ok := props["form_id"]; !ok {
+		t.Error("input schema documents no form_id property")
 	}
-	formProps, _ := form["properties"].(map[string]any)
-	if _, ok := formProps["schema"]; !ok {
-		t.Error("input form documents no schema property")
-	}
-	if _, ok := formProps["ui"]; !ok {
-		t.Error("input form documents no ui property")
-	}
-	required, _ := form["required"].([]any)
-	if len(required) != 1 || required[0] != "schema" {
-		t.Errorf("input form required = %v, want [schema]", required)
+	if _, legacy := props["form"]; legacy {
+		t.Error("input schema still advertises the legacy form object")
 	}
 }
 
