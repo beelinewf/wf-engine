@@ -465,3 +465,35 @@ func TestRouterScheduleRoutesRequireSchedulesActions(t *testing.T) {
 		t.Errorf("anonymous GET status = %d, want 401", w.Code)
 	}
 }
+
+// TestRouterNodeTypesRequireDefinitionsRead: the type catalog sits behind
+// the same definitions:read gate as the definition reads.
+func TestRouterNodeTypesRequireDefinitionsRead(t *testing.T) {
+	catalog := auth.NewCatalog(map[string][]string{
+		"reader": {auth.ActionDefinitionsRead},
+	})
+	routerFor := func(roles ...string) *gin.Engine {
+		return NewRouter(Deps{
+			Health:          NewHealth(fakePinger{}),
+			NodeDefinitions: &fakeNodeSvc{},
+			Auth:            &fakeAuthSvc{},
+			AuthSettings:    configuration.Auth{},
+			OIDC:            stubVerifier{principal: auth.Principal{Subject: "s1", Issuer: testIssuer, UserID: testSystemUserID, Roles: roles}},
+			Catalog:         catalog,
+		})
+	}
+	bearer := map[string]string{BearerHeader: "Bearer [REDACTED]"}
+
+	w := performJSON(routerFor("reader"), http.MethodGet, "/v1/node/types", "", bearer)
+	if w.Code != http.StatusOK {
+		t.Errorf("reader GET status = %d, want 200", w.Code)
+	}
+	w = performJSON(routerFor("writer"), http.MethodGet, "/v1/node/types", "", bearer)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("writer GET status = %d, want 403", w.Code)
+	}
+	w = performJSON(routerFor("reader"), http.MethodGet, "/v1/node/types", "", nil)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("anonymous GET status = %d, want 401", w.Code)
+	}
+}

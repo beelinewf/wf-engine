@@ -376,3 +376,20 @@ func TestNodeDefinitionList(t *testing.T) {
 		t.Errorf("type = %q", items[0].Type)
 	}
 }
+
+func TestNodeDefinitionTypes(t *testing.T) {
+	svc := newService(newFakeNodeRepo())
+	types := svc.Types()
+	want := []string{
+		"script", "conditions", "input", "group", "external_call", "output",
+		"poller", "parallel_start", "parallel_end", "delay",
+	}
+	if len(types) < len(want) {
+		t.Fatalf("Types() has %d entries, want at least %d", len(types), len(want))
+	}
+	for i, name := range want {
+		if got := types[i]; got.Type != name || !got.Builtin || len(got.Schema) == 0 {
+			t.Errorf("Types()[%d] = %+v, want builtin %q with schema", i, got, name)
+		}
+	}
+}
