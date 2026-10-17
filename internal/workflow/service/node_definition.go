@@ -42,14 +42,15 @@ type NodeDefinitionService interface {
 
 type nodeDefinitionService struct {
 	repo   repository.NodeDefinitionRepository
+	forms  repository.FormRepository
 	limits model.NodeLimits
 	actor  string
 }
 
 // NewNodeDefinitionService builds the service. limits carries the global
 // engine limits; actor is the configured system user id for audit fields.
-func NewNodeDefinitionService(repo repository.NodeDefinitionRepository, limits model.NodeLimits, actor string) NodeDefinitionService {
-	return &nodeDefinitionService{repo: repo, limits: limits, actor: actor}
+func NewNodeDefinitionService(repo repository.NodeDefinitionRepository, limits model.NodeLimits, actor string, forms repository.FormRepository) NodeDefinitionService {
+	return &nodeDefinitionService{repo: repo, forms: forms, limits: limits, actor: actor}
 }
 
 func (s *nodeDefinitionService) Create(ctx context.Context, req CreateNodeDefinition) (model.NodeDefinition, error) {
@@ -72,6 +73,10 @@ func (s *nodeDefinitionService) Create(ctx context.Context, req CreateNodeDefini
 	// resolve to a node with no executable fields instead of failing.
 	if nc.NodeDefinitionID != "" {
 		return model.NodeDefinition{}, fmt.Errorf("%w: node definitions cannot carry node_definition_id; the content must be self-contained", model.ErrInvalid)
+	}
+	formIDs := collectFormIDs([]*model.NodeContent{nc})
+	if err := ensureFormsExist(ctx, s.forms, formIDs); err != nil {
+		return model.NodeDefinition{}, err
 	}
 
 	now := nowUTC()
@@ -102,6 +107,9 @@ func (s *nodeDefinitionService) Create(ctx context.Context, req CreateNodeDefini
 
 	if err := s.repo.Create(ctx, def); err != nil {
 		return model.NodeDefinition{}, err
+	}
+	if err := s.forms.SaveNodeFormRefs(ctx, def.ID, formIDs); err != nil {
+		return model.NodeDefinition{}, fmt.Errorf("record form refs: %w", err)
 	}
 	return def, nil
 }

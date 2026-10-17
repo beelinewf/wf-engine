@@ -292,17 +292,16 @@ func TestGetStatusDetailGoldenWaitingInput(t *testing.T) {
 	ctx := context.Background()
 	svc := svcInstanceService(db)
 
+	created, err := repository.NewFormRepository(db).Create(ctx, "contact",
+		[]byte(`{"type":"object","required":["email"],"properties":{"email":{"type":"string"}}}`),
+		[]byte(`{"order":["email"]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
 	n1 := "11111111-1111-7111-8111-111111111101"
 	wfID := svcCreateWorkflow(t, db, n1,
 		svcNodeJSON(n1, "input", "ask", "", "", map[string]any{
-			"channel": "http", "output_property": "user",
-			"form": map[string]any{
-				"schema": map[string]any{
-					"type": "object", "required": []string{"email"},
-					"properties": map[string]any{"email": map[string]any{"type": "string"}},
-				},
-				"ui": map[string]any{"order": []string{"email"}},
-			},
+			"channel": "http", "output_property": "user", "form_id": created.ID,
 		}),
 	)
 	inst, err := svc.Create(ctx, service.CreateInstance{WorkflowDefinitionID: wfID})
@@ -316,11 +315,23 @@ func TestGetStatusDetailGoldenWaitingInput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetStatusDetail() error = %v", err)
 	}
+	if d.PendingInput == nil || d.PendingInput.FormID != created.ID {
+		t.Fatalf("PendingInput = %+v, want the referenced form id", d.PendingInput)
+	}
+	// The golden pins the form_id-only status; the bytes live in the
+	// library for the frontend to fetch.
+	stored, err := repository.NewFormRepository(db).GetByID(ctx, d.PendingInput.FormID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(stored.Schema), `"email"`) {
+		t.Errorf("library form schema = %s, want the bytes", stored.Schema)
+	}
 	occs, err := repository.NewInstanceRepository(db).ListNodeInstances(ctx, inst.ID)
 	if err != nil {
 		t.Fatalf("ListNodeInstances() error = %v", err)
 	}
-	volatile := map[string]string{wfID: "<WF>", inst.ID: "<INST>"}
+	volatile := map[string]string{wfID: "<WF>", inst.ID: "<INST>", created.ID: "<FORM>"}
 	for _, o := range occs {
 		volatile[o.ID] = "<OCC-" + o.NodeID[len(o.NodeID)-3:] + ">"
 	}
@@ -416,6 +427,9 @@ func statusDegradationService(inst *model.WorkflowInstance, occs []model.NodeIns
 		par,
 		&statusStubWorkflowDefs{},
 		&statusStubSecrets{},
+		// Nil: this harness never calls Create; Status reads the row,
+		// never the form repository.
+		nil,
 		mat,
 		&executor.InputExecutor{},
 		executor.NewHookRunner(nil),

@@ -90,6 +90,79 @@ type SecretResponse struct {
 	UpdatedAt   time.Time `json:"updated_at" validate:"required" format:"date-time"`
 }
 
+// -- forms --------------------------------------------------------------------
+
+// SaveFormRequest is the POST /v1/forms and PUT /v1/forms/{id} body. PUT
+// fully overwrites the entry: an omitted ui clears it.
+type SaveFormRequest struct {
+	Name   string          `json:"name"`
+	Schema json.RawMessage `json:"schema" swaggertype:"object"`
+	UI     json.RawMessage `json:"ui,omitempty" swaggertype:"object"`
+}
+
+// FormResponse is one forms-library entry.
+type FormResponse struct {
+	ID        string          `json:"id"`
+	Name      string          `json:"name"`
+	Schema    json.RawMessage `json:"schema" swaggertype:"object"`
+	UI        json.RawMessage `json:"ui,omitempty" swaggertype:"object"`
+	CreatedAt time.Time       `json:"created_at"`
+	UpdatedAt time.Time       `json:"updated_at"`
+}
+
+// FormUsageResponse is the GET /v1/forms/{id}/usage body: every
+// definition and instance that references the form. Instances are
+// paginated; definition sets are returned whole. Empty lists serialize
+// as [], never null.
+type FormUsageResponse struct {
+	FormID              string                                `json:"form_id"`
+	WorkflowDefinitions []FormUsageWorkflowDefinitionResponse `json:"workflow_definitions"`
+	NodeDefinitions     []FormUsageNodeDefinitionResponse     `json:"node_definitions"`
+	WorkflowInstances   []FormUsageInstanceResponse           `json:"workflow_instances"`
+	InstanceTotal       int64                                 `json:"instance_total"`
+	Page                int                                   `json:"page"`
+	PerPage             int                                   `json:"per_page"`
+}
+
+// FormUsageWorkflowDefinitionResponse is a using workflow definition
+// with the referencing nodes pinpointed.
+type FormUsageWorkflowDefinitionResponse struct {
+	ID        string                  `json:"id"`
+	Name      string                  `json:"name"`
+	Version   int                     `json:"version"`
+	LineageID string                  `json:"lineage_id"`
+	Nodes     []FormUsageNodeResponse `json:"nodes"`
+}
+
+// FormUsageNodeResponse pinpoints one node that references the form.
+// NodeDefinitionID names the referenced node definition, or "" for an
+// inline form_id.
+type FormUsageNodeResponse struct {
+	NodeID           string `json:"node_id"`
+	NodeName         string `json:"node_name"`
+	NodeDefinitionID string `json:"node_definition_id"`
+}
+
+// FormUsageNodeDefinitionResponse is a using node definition.
+type FormUsageNodeDefinitionResponse struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Version   int    `json:"version"`
+	LineageID string `json:"lineage_id"`
+	Type      string `json:"type"`
+}
+
+// FormUsageInstanceResponse is an instance of a using workflow
+// definition. IsWaitingOnForm flags an instance parked on an input node
+// that uses the form.
+type FormUsageInstanceResponse struct {
+	ID                   string  `json:"id"`
+	WorkflowDefinitionID string  `json:"workflow_definition_id"`
+	Status               string  `json:"status"`
+	IsWaitingOnForm      bool    `json:"is_waiting_on_form"`
+	CurrentNodeID        *string `json:"current_node_id"`
+}
+
 // -- auth ---------------------------------------------------------------------
 
 // AuthConfigResponse is the GET /v1/auth/config body. It is the public login
@@ -155,6 +228,9 @@ type CreateInstanceRequest struct {
 	// Debug starts a step-through run: paused at create, re-paused after
 	// every node until termination. Immutable after create.
 	Debug bool `json:"debug,omitempty"`
+	// SnapshotForms freezes every referenced form's schema/ui into the
+	// instance at creation. Status then serves the frozen bytes.
+	SnapshotForms bool `json:"snapshot_forms,omitempty"`
 }
 
 // CreateInstanceResponse is the 202 body.
@@ -212,15 +288,26 @@ type InstanceStatusResponse struct {
 	UpdatedAt             time.Time                         `json:"updated_at"`
 }
 
+// SnapshotFormResponse is the frozen form served on a snapshot instance's
+// pending input: the schema/ui bytes as they were at instance start.
+type SnapshotFormResponse struct {
+	Schema json.RawMessage `json:"schema" swaggertype:"object"`
+	UI     json.RawMessage `json:"ui,omitempty" swaggertype:"object"`
+}
+
 // PendingInputResponse is the waiting-input contract on status: the frontend
-// renders its dynamic form from Form. Form is null when the input node
-// carries no form contract; pending_input itself is omitted unless the
-// instance waits on an input node.
+// renders form when present, else fetches the form named by form_id from
+// the forms library. form_id is absent when the input node references no
+// form; pending_input itself is omitted unless the instance waits on an
+// input node.
 type PendingInputResponse struct {
-	NodeID         string        `json:"node_id"`
-	Channel        string        `json:"channel"`
-	OutputProperty string        `json:"output_property"`
-	Form           *InputFormDTO `json:"form"`
+	NodeID         string `json:"node_id"`
+	Channel        string `json:"channel"`
+	OutputProperty string `json:"output_property"`
+	FormID         string `json:"form_id,omitempty"`
+	// Form carries the frozen bytes when the instance was created with
+	// snapshot_forms. Absent for live instances and formless nodes.
+	Form *SnapshotFormResponse `json:"form,omitempty"`
 	// AllowedRoles is the node's role gate. Empty means the node is open to
 	// any caller that holds input:deliver.
 	AllowedRoles []string `json:"allowed_roles"`
@@ -232,12 +319,6 @@ type PendingInputResponse struct {
 	// with no credential, even when auth is on. Status and form reads stay
 	// authenticated, so an anonymous caller learns the shape out-of-band.
 	Public bool `json:"public"`
-}
-
-// InputFormDTO carries the raw schema contract plus opaque ui render hints.
-type InputFormDTO struct {
-	Schema json.RawMessage `json:"schema" swaggertype:"object"`
-	UI     json.RawMessage `json:"ui,omitempty" swaggertype:"object"`
 }
 
 // NodeOccurrenceResponse maps a workflow graph node id to its executed

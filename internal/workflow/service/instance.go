@@ -14,7 +14,6 @@ import (
 
 	"github.com/simpwf/workflow-engine/internal/workflow/auth"
 	"github.com/simpwf/workflow-engine/internal/workflow/executor"
-	"github.com/simpwf/workflow-engine/internal/workflow/form"
 	"github.com/simpwf/workflow-engine/internal/workflow/kernel"
 	"github.com/simpwf/workflow-engine/internal/workflow/model"
 	"github.com/simpwf/workflow-engine/internal/workflow/repository"
@@ -29,6 +28,11 @@ type CreateInstance struct {
 	WorkflowDefinitionID string
 	Context              json.RawMessage
 	Debug                bool
+	// SnapshotForms freezes every form the definition references into the
+	// instance row at create; status then serves the frozen bytes. Off by
+	// default: status serves only form_id and the frontend reads the live
+	// forms library.
+	SnapshotForms bool
 	// Actor is the users.id uuid recorded as created_by/updated_by. An
 	// empty Actor falls back to the service default (the system user), so
 	// a caller that predates per-request actors keeps working unchanged.
@@ -91,8 +95,8 @@ type StatusDetail struct {
 	// status response omits the map instead of failing.
 	Nodes map[string]NodeOccurrence
 	// PendingInput describes the input the instance waits for. Non-nil only
-	// when the instance waits on an input node; Form is nil when that node
-	// carries no form contract.
+	// when the instance waits on an input node; FormID is empty when that
+	// node references no form.
 	PendingInput *PendingInput
 	// Parallel lists every parallel execution of the instance in creation
 	// order with its branches. Nil when the instance never forked. Loops
@@ -130,12 +134,26 @@ type ParallelBranchView struct {
 }
 
 // PendingInput is the waiting-input contract served on status: the frontend
-// renders its dynamic form from Form, then delivers the payload.
+// fetches the form named by FormID from the forms library, renders it, then
+// delivers the payload.
+// SnapshotForm is one frozen forms-library entry served on a snapshot
+// instance's pending input: the schema/ui bytes as they were when the
+// instance started.
+type SnapshotForm struct {
+	Schema json.RawMessage
+	UI     json.RawMessage
+}
+
 type PendingInput struct {
 	NodeID         string
 	Channel        string
 	OutputProperty string
-	Form           *model.InputForm
+	// FormID names the forms-library entry the frontend renders. Empty when
+	// the node references no form. The engine never resolves it.
+	FormID string
+	// Form carries the frozen bytes when the instance was created with
+	// snapshot mode on. Nil for live instances and for formless nodes.
+	Form *SnapshotForm
 	// AllowedRoles is the node's role gate, so a frontend can hide or
 	// explain a delivery the caller's roles would be refused for. It is
 	// empty when the node is open.
@@ -149,6 +167,24 @@ type PendingInput struct {
 	// behind authentication, so an anonymous caller learns the shape
 	// out-of-band rather than from this contract.
 	Public bool
+}
+
+// formSnapshotEntry is one frozen forms-library entry: the schema/ui bytes
+// as they were when the instance started. UI is omitted when the form has
+// none.
+type formSnapshotEntry struct {
+	Schema json.RawMessage `json:"schema"`
+	UI     json.RawMessage `json:"ui,omitempty"`
+}
+
+// parseFormSnapshot decodes the frozen forms map. A corrupt value degrades
+// to nil so status still serves form_id.
+func parseFormSnapshot(raw json.RawMessage) map[string]formSnapshotEntry {
+	var snap map[string]formSnapshotEntry
+	if err := json.Unmarshal(raw, &snap); err != nil {
+		return nil
+	}
+	return snap
 }
 
 // NodeOccurrence is the per-node status view: the already-executed
@@ -378,6 +414,7 @@ type instanceService struct {
 	parallel     repository.ParallelRepository
 	wfDefs       repository.WorkflowDefinitionRepository
 	secrets      SecretSnapshotter
+	forms        repository.FormRepository
 	materializer WorkflowMaterializer
 	validator    *executor.InputExecutor
 	hooks        *executor.HookRunner
@@ -398,6 +435,7 @@ func NewInstanceService(
 	parallel repository.ParallelRepository,
 	wfDefs repository.WorkflowDefinitionRepository,
 	secrets SecretSnapshotter,
+	forms repository.FormRepository,
 	materializer WorkflowMaterializer,
 	validator *executor.InputExecutor,
 	hooks *executor.HookRunner,
@@ -407,7 +445,7 @@ func NewInstanceService(
 	leanOptions model.LeanOptions,
 ) InstanceService {
 	return newInstanceService(
-		instances, parallel, wfDefs, secrets, materializer, validator, hooks,
+		instances, parallel, wfDefs, secrets, forms, materializer, validator, hooks,
 		actor, limits, cancels, leanOptions, auth.Catalog{},
 	)
 }
@@ -421,6 +459,7 @@ func NewInstanceServiceWithCatalog(
 	parallel repository.ParallelRepository,
 	wfDefs repository.WorkflowDefinitionRepository,
 	secrets SecretSnapshotter,
+	forms repository.FormRepository,
 	materializer WorkflowMaterializer,
 	validator *executor.InputExecutor,
 	hooks *executor.HookRunner,
@@ -431,7 +470,7 @@ func NewInstanceServiceWithCatalog(
 	catalog auth.Catalog,
 ) InstanceService {
 	return newInstanceService(
-		instances, parallel, wfDefs, secrets, materializer, validator, hooks,
+		instances, parallel, wfDefs, secrets, forms, materializer, validator, hooks,
 		actor, limits, cancels, leanOptions, catalog,
 	)
 }
@@ -441,6 +480,7 @@ func newInstanceService(
 	parallel repository.ParallelRepository,
 	wfDefs repository.WorkflowDefinitionRepository,
 	secrets SecretSnapshotter,
+	forms repository.FormRepository,
 	materializer WorkflowMaterializer,
 	validator *executor.InputExecutor,
 	hooks *executor.HookRunner,
@@ -455,6 +495,7 @@ func newInstanceService(
 		parallel:     parallel,
 		wfDefs:       wfDefs,
 		secrets:      secrets,
+		forms:        forms,
 		materializer: materializer,
 		validator:    validator,
 		hooks:        hooks,
@@ -550,6 +591,37 @@ func (s *instanceService) Create(ctx context.Context, req CreateInstance) (model
 		// manual resume. The dispatcher only claims waiting/runnable
 		// rows, so the instance parks until resumed.
 		w.Status = model.WorkflowPaused
+	}
+	if req.SnapshotForms {
+		if s.forms == nil {
+			return model.WorkflowInstance{}, fmt.Errorf("%w: snapshot_forms requires a form repository", model.ErrInvalid)
+		}
+		materialized, err := s.materializer.Materialize(ctx, wc)
+		if err != nil {
+			return model.WorkflowInstance{}, err
+		}
+		formIDs := collectFormIDs(materialized.Nodes)
+		if err := ensureFormsExist(ctx, s.forms, formIDs); err != nil {
+			return model.WorkflowInstance{}, err
+		}
+		if len(formIDs) > 0 {
+			snap := make(map[string]formSnapshotEntry, len(formIDs))
+			for _, id := range formIDs {
+				f, err := s.forms.GetByID(ctx, id)
+				if err != nil {
+					return model.WorkflowInstance{}, fmt.Errorf("%w: snapshot form %q: %v", model.ErrInvalid, id, err)
+				}
+				if len(f.Schema) == 0 {
+					return model.WorkflowInstance{}, fmt.Errorf("%w: snapshot form %q has no schema", model.ErrInvalid, id)
+				}
+				snap[id] = formSnapshotEntry{Schema: f.Schema, UI: f.UI}
+			}
+			frozen, err := json.Marshal(snap)
+			if err != nil {
+				return model.WorkflowInstance{}, fmt.Errorf("snapshot forms: %w", err)
+			}
+			w.FormSnapshot = frozen
+		}
 	}
 	if err := s.instances.Insert(ctx, w); err != nil {
 		return model.WorkflowInstance{}, err
@@ -726,15 +798,21 @@ func pendingInput(wc *model.WorkflowContent, inst *model.WorkflowInstance, curre
 	if key == "" {
 		key = node.ID
 	}
-	return &PendingInput{
+	p := &PendingInput{
 		NodeID:         node.ID,
 		Channel:        node.Channel,
 		OutputProperty: key,
-		Form:           node.Form,
+		FormID:         node.FormID,
 		AllowedRoles:   node.AllowedRoles,
 		RecordActor:    node.RecordActor,
 		Public:         node.Public,
 	}
+	if p.FormID != "" && len(inst.FormSnapshot) > 0 {
+		if e, ok := parseFormSnapshot(inst.FormSnapshot)[p.FormID]; ok {
+			p.Form = &SnapshotForm{Schema: e.Schema, UI: e.UI}
+		}
+	}
+	return p
 }
 
 func (s *instanceService) GetContext(ctx context.Context, id string, p auth.Principal) (*model.WorkflowInstance, error) {
@@ -1749,6 +1827,7 @@ func (s *instanceService) Migrate(ctx context.Context, req MigrateRequest) (*Mig
 		Frame:                frameRaw,
 		Context:              contextRaw,
 		Counters:             mustMarshal(model.Counters{}),
+		FormSnapshot:         inst.FormSnapshot,
 		MigratedFrom:         inst.ID,
 		CreatedBy:            actor,
 		UpdatedBy:            actor,
@@ -2132,25 +2211,12 @@ func (s *instanceService) DeliverInput(ctx context.Context, req DeliverInput) (*
 	}
 	tgt.attempt = attempt
 	tgt.startCtx = ctxMap
-	// Schema-first enforcement: the form schema rejects bad payloads before
-	// the validation script runs. Rejection persists Accepted=false, same as
-	// a script rejection; the script never runs after a schema failure.
-	// Anonymous deliveries record the anonymous marker alongside any
-	// rejection, so the audit trail still distinguishes them.
-	if inputNode.Form != nil {
-		if err := form.Validate(inputNode, req.Payload); err != nil {
-			return s.instances.DeliverInput(ctx, repository.InputCompletion{
-				InstanceID:     inst.ID,
-				NodeInstanceID: attempt.ID,
-				IdempotencyKey: req.IdempotencyKey,
-				Payload:        req.Payload,
-				Accepted:       false,
-				Error:          err.Error(),
-				CreatedBy:      actor,
-				Anonymous:      anonymous,
-			})
-		}
-	}
+	// The validation script is the only backend gate on the payload. A
+	// referenced form is never consulted: forms are a frontend concern, and
+	// a payload violating the form's schema but passing the script is
+	// accepted. Rejection persists Accepted=false; anonymous deliveries
+	// record the anonymous marker alongside it, so the audit trail still
+	// distinguishes them.
 	vr, err := s.validator.Validate(ctx, executor.Request{Node: inputNode, Context: ctxMap, Payload: req.Payload})
 	if err != nil {
 		return nil, fmt.Errorf("%w: input validation failed: %v", model.ErrInvalid, err)

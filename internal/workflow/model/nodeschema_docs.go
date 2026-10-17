@@ -85,16 +85,7 @@ const inputNodeSchemaJSON = `{
       "required": ["script"],
       "additionalProperties": false
     },
-    "form": {
-      "type": "object",
-      "description": "Dynamic-form contract. schema is a non-empty draft 2020-12 JSON Schema the payload is validated against before the script runs; ui carries opaque render hints.",
-      "properties": {
-        "schema": { "type": "object", "minProperties": 1 },
-        "ui": { "type": "object" }
-      },
-      "required": ["schema"],
-      "additionalProperties": false
-    },
+    "form_id": { "$ref": "#/$defs/nodeId", "description": "Id of the form in the forms library the frontend renders for this node. The engine never reads forms." },
     "allowed_roles": {
       "type": "array",
       "description": "Roles allowed to deliver to this input node, checked against the caller's live token roles after the endpoint permission. Absent or empty is open to any caller.",

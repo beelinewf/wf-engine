@@ -21,7 +21,7 @@ const actorUserID = "44444444-4444-7444-8444-444444444444"
 func TestDefinitionCreateRecordsRequestActor(t *testing.T) {
 	ctx := context.Background()
 
-	nodeSvc := service.NewNodeDefinitionService(newFakeNodeRepo(), testLimits, actorID)
+	nodeSvc := service.NewNodeDefinitionService(newFakeNodeRepo(), testLimits, actorID, newFakeFormRepo())
 	node, err := nodeSvc.Create(ctx, service.CreateNodeDefinition{
 		Name:    "ask",
 		Type:    "input",
@@ -56,7 +56,7 @@ func TestDefinitionCreateRecordsRequestActor(t *testing.T) {
 func TestDefinitionCreateFallsBackToSystemUser(t *testing.T) {
 	ctx := context.Background()
 
-	node, err := service.NewNodeDefinitionService(newFakeNodeRepo(), testLimits, actorID).
+	node, err := service.NewNodeDefinitionService(newFakeNodeRepo(), testLimits, actorID, newFakeFormRepo()).
 		Create(ctx, service.CreateNodeDefinition{
 			Name:    "ask",
 			Type:    "input",

@@ -95,7 +95,8 @@ func (r *resolveCountingNodeRepo) getCalls() int {
 }
 
 func resolveTestService(wf *resolveCountingWfRepo, nd *resolveCountingNodeRepo) *workflowDefinitionService {
-	return NewWorkflowDefinitionService(wf, nd, resolveLimits, "actor").(*workflowDefinitionService)
+	// Resolve paths never create definitions, so no forms repo is needed.
+	return NewWorkflowDefinitionService(wf, nd, resolveLimits, "actor", nil).(*workflowDefinitionService)
 }
 
 func resolveTestNodeRepo() *resolveCountingNodeRepo {

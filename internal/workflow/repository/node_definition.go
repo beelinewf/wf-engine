@@ -116,6 +116,12 @@ func (r *gormNodeDefinitionRepository) Delete(ctx context.Context, id string) er
 		if instances > 0 {
 			return fmt.Errorf("%w: node definition %s is referenced by node instances", model.ErrConflict, id)
 		}
+		// The definition's own form references go with it, which is what
+		// eventually makes a referenced form deletable again.
+		if err := tx.Where("node_definition_id = ?", id).
+			Delete(&NodeDefinitionFormRefModel{}).Error; err != nil {
+			return fmt.Errorf("node definition form refs clear: %w", err)
+		}
 		res := tx.Delete(&NodeDefinitionModel{}, "id = ?", id)
 		if res.Error != nil {
 			return fmt.Errorf("node definition delete: %w", res.Error)

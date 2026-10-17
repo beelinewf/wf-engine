@@ -103,7 +103,11 @@ func contains(list []string, s string) bool {
 }
 
 func newService(repo *fakeNodeRepo) service.NodeDefinitionService {
-	return service.NewNodeDefinitionService(repo, testLimits, actorID)
+	return newServiceWithForms(repo, newFakeFormRepo())
+}
+
+func newServiceWithForms(repo *fakeNodeRepo, forms *fakeFormRepo) service.NodeDefinitionService {
+	return service.NewNodeDefinitionService(repo, testLimits, actorID, forms)
 }
 
 func TestCreateNodeDefinitionV1(t *testing.T) {
@@ -195,6 +199,62 @@ func TestCreateNodeDefinitionRejectsInvalidContent(t *testing.T) {
 		if _, err := svc.Create(context.Background(), req); !errors.Is(err, model.ErrInvalid) {
 			t.Errorf("case %d: error = %v, want ErrInvalid", i, err)
 		}
+	}
+}
+
+func TestCreateNodeDefinitionUnknownFormIDRejected(t *testing.T) {
+	svc := newServiceWithForms(newFakeNodeRepo(), newFakeFormRepo())
+	_, err := svc.Create(context.Background(), service.CreateNodeDefinition{
+		Name:    "ask",
+		Type:    "input",
+		Content: json.RawMessage(`{"type":"input","channel":"http","output_property":"user","form_id":"aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa"}`),
+	})
+	if !errors.Is(err, model.ErrInvalid) {
+		t.Fatalf("Create() error = %v, want ErrInvalid for the unknown form_id", err)
+	}
+}
+
+func TestCreateNodeDefinitionRecordsFormRefs(t *testing.T) {
+	ctx := context.Background()
+	forms := newFakeFormRepo()
+	created, err := forms.Create(ctx, "contact", formTestSchema, formTestUI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	groupForm, err := forms.Create(ctx, "grouped", formTestSchema, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := newServiceWithForms(newFakeNodeRepo(), forms)
+
+	// A group definition walks its children for form references too.
+	def, err := svc.Create(ctx, service.CreateNodeDefinition{
+		Name: "ask-group",
+		Type: "group",
+		Content: json.RawMessage(`{"type":"group","start_node_id":"aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa",
+			"nodes":[
+				{"id":"aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa","type":"input","channel":"http","form_id":"` + created.ID + `"},
+				{"id":"bbbbbbbb-bbbb-7bbb-8bbb-bbbbbbbbbbbb","type":"input","channel":"http","form_id":"` + groupForm.ID + `"}
+			]}`),
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	got, err := forms.NodeFormRefs(ctx, def.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("NodeFormRefs() = %v, want both form ids", got)
+	}
+
+	// Once recorded, the referenced form stays updatable but not deletable.
+	formSvc := service.NewFormService(forms, newFakeResolver())
+	if _, err := formSvc.Update(ctx, created.ID, "renamed", formTestSchema, nil); err != nil {
+		t.Errorf("Update() of referenced form error = %v, want nil", err)
+	}
+	if err := formSvc.Delete(ctx, created.ID); !errors.Is(err, model.ErrConflict) {
+		t.Errorf("Delete() of referenced form error = %v, want ErrConflict", err)
 	}
 }
 

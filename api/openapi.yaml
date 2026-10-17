@@ -223,6 +223,138 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /v1/forms:
+    post:
+      tags: [Forms]
+      operationId: createForm
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      summary: Create a form
+      description: Stores a render contract for input nodes to reference by form_id.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SaveFormRequest" }
+      responses:
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "201":
+          description: Created form
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Form" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+    get:
+      tags: [Forms]
+      operationId: listForms
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      summary: List forms in creation order
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PerPage"
+      responses:
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "200":
+          description: List of forms
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FormList" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/forms/{id}:
+    get:
+      tags: [Forms]
+      operationId: getForm
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      summary: Get a form
+      parameters:
+        - $ref: "#/components/parameters/FormID"
+      responses:
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "200":
+          description: One form
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Form" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [Forms]
+      operationId: updateForm
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      summary: Fully overwrite a form
+      description: Overwrites name, schema, and ui; an omitted ui clears it. A form stays updatable while referenced.
+      parameters:
+        - $ref: "#/components/parameters/FormID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SaveFormRequest" }
+      responses:
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "200":
+          description: Updated form
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Form" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+    delete:
+      tags: [Forms]
+      operationId: deleteForm
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      summary: Delete a form unless a definition references it
+      parameters:
+        - $ref: "#/components/parameters/FormID"
+      responses:
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "204": { description: Deleted }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/forms/{id}/usage:
+    get:
+      tags: [Forms]
+      operationId: getFormUsage
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      summary: List what uses a form
+      description: >-
+        Lists the workflow definitions, node definitions, and workflow
+        instances that reference the form. Workflow definitions pinpoint the
+        exact input nodes, expanding node definition references. Instances
+        are paginated; definition sets are returned whole.
+      parameters:
+        - $ref: "#/components/parameters/FormID"
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PerPage"
+      responses:
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "200":
+          description: Form usage
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FormUsage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /v1/node/definition:
     post:
       tags: [Node Definitions]
@@ -667,21 +799,21 @@ paths:
       description: |
         Raw JSON body; requires Idempotency-Key header. Accepted payload is
         written to the waiting input node's output_property (bare key,
-        defaults to node id). When the input
-        node carries a form contract, the payload is validated against the
-        form schema first, then the validation script; schema and script
-        failures return 422 with the rejection message. Reusing an
-        Idempotency-Key with a different payload returns 409; retries must
-        reuse the same key with the identical payload, and a corrected
-        payload needs a fresh key.
+        defaults to node id). The validation script is the only backend
+        gate: a payload violating the node's referenced form but passing the
+        script is accepted, and a script failure returns 422 with the
+        rejection message. Reusing an Idempotency-Key with a different
+        payload returns 409; retries must reuse the same key with the
+        identical payload, and a corrected payload needs a fresh key.
 
         This is the only endpoint that serves an anonymous caller, and only
         when the waiting input node sets public: true. A request with no
         credential reaches this route unauthenticated and is admitted only on
         a public node; a private node answers 403. Because the status and
-        form reads stay authenticated, an anonymous caller has to learn the
-        payload contract out-of-band, so share the instance id and the shape
-        deliberately. A credential that is present but invalid is still 401,
+        forms-library reads stay authenticated, an anonymous caller has to
+        learn the payload contract out-of-band, so share the instance id and
+        the shape deliberately. A credential that is present but invalid is
+        still 401,
         including on a public node: a caller that proved the wrong thing never
         degrades to an accepted anonymous delivery. An authenticated caller
         on a public node is authorized exactly as on a private one, and its
@@ -1117,6 +1249,11 @@ components:
       schema:
         type: string
         pattern: "^[A-Za-z0-9_]{1,128}$"
+    FormID:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
     InstanceID:
       name: id
       in: path
@@ -1406,6 +1543,9 @@ components:
           description: |
             Step-through run: the instance starts paused and re-pauses
             after every node until termination. Immutable after create.
+        snapshot_forms:
+          type: boolean
+          description: "Freeze every referenced form's schema/ui into the instance at creation. Status then serves the frozen bytes in pending_input.form; later library edits do not affect the run. Default false: status serves form_id only."
     CreateInstanceResponse:
       type: object
       required: [id, status]
@@ -1506,9 +1646,12 @@ components:
           nullable: true
           description: |
             Waiting-input contract (omitted unless the instance waits on an
-            input node). The frontend renders its dynamic form from
-            pending_input.form, then delivers the payload. form is null
-            when the input node carries no form contract.
+            input node). The frontend renders pending_input.form when
+            present (frozen bytes from an instance created with
+            snapshot_forms), else fetches the form named by
+            pending_input.form_id via GET /v1/forms/{form_id}, renders it,
+            then delivers the payload. form_id is absent when the input
+            node references no form.
         parallel:
           type: array
           nullable: true
@@ -1544,13 +1687,30 @@ components:
           description: Advisory rollback target hint; the rollback endpoint stays the source of truth
     PendingInput:
       type: object
-      required: [node_id, channel, output_property, allowed_roles, record_actor, public, form]
+      required: [node_id, channel, output_property, allowed_roles, record_actor, public]
       properties:
         node_id: { type: string, format: uuid }
         channel: { type: string }
         output_property:
           type: string
           description: Bare top-level key the accepted payload is written to; empty when the node sets none, in which case the node id is used
+        form_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Forms-library id the frontend fetches to render (absent when the node references no form)
+        form:
+          type: object
+          nullable: true
+          description: Frozen form bytes served when the instance was created with snapshot_forms (absent for live instances and formless nodes)
+          properties:
+            schema:
+              type: object
+              description: JSON Schema (draft 2020-12) render contract, as frozen at instance start
+            ui:
+              type: object
+              nullable: true
+              description: Opaque frontend render hints (label, order, widget), as frozen at instance start
         allowed_roles:
           type: array
           items: { type: string }
@@ -1574,10 +1734,6 @@ components:
             record_actor=false; the flag only exists on input nodes. An
             anonymous delivery is written as the bare payload and marked
             delivered_by anonymous in the delivery history.
-        form:
-          $ref: "#/components/schemas/InputForm"
-          nullable: true
-          description: Dynamic form contract (null when the input node carries none)
     ParallelExecution:
       type: object
       required: [id, depth, start_node_id, end_node_id, status, branch_count, completed_count, branches]
@@ -1619,17 +1775,99 @@ components:
           description: Park reason while waiting (input, parallel, or empty once runnable)
         error: { type: string }
         updated_at: { type: string, format: date-time }
-    InputForm:
+    SaveFormRequest:
       type: object
-      required: [schema]
+      required: [name, schema]
       properties:
+        name: { type: string }
         schema:
           type: object
-          description: JSON Schema (draft 2020-12) payload contract, versioned with the definition
+          description: Non-empty JSON Schema (draft 2020-12) the frontend renders
         ui:
           type: object
           nullable: true
           description: Opaque frontend render hints (label, order, widget)
+    Form:
+      type: object
+      required: [id, name, schema, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        schema:
+          type: object
+          description: JSON Schema (draft 2020-12) render contract
+        ui:
+          type: object
+          nullable: true
+          description: Opaque frontend render hints (label, order, widget)
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    FormList:
+      type: object
+      required: [items, page, per_page, total, total_pages]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Form" } }
+        page: { type: integer }
+        per_page: { type: integer }
+        total: { type: integer }
+        total_pages: { type: integer }
+    FormUsage:
+      type: object
+      required: [form_id, workflow_definitions, node_definitions, workflow_instances, instance_total, page, per_page]
+      properties:
+        form_id: { type: string, format: uuid }
+        workflow_definitions:
+          type: array
+          items: { $ref: "#/components/schemas/FormUsageWorkflowDefinition" }
+        node_definitions:
+          type: array
+          items: { $ref: "#/components/schemas/FormUsageNodeDefinition" }
+        workflow_instances:
+          type: array
+          items: { $ref: "#/components/schemas/FormUsageInstance" }
+        instance_total: { type: integer }
+        page: { type: integer }
+        per_page: { type: integer }
+    FormUsageWorkflowDefinition:
+      type: object
+      required: [id, name, version, lineage_id, nodes]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        version: { type: integer }
+        lineage_id: { type: string, format: uuid }
+        nodes:
+          type: array
+          items: { $ref: "#/components/schemas/FormUsageNode" }
+    FormUsageNode:
+      type: object
+      required: [node_id, node_name, node_definition_id]
+      properties:
+        node_id: { type: string, format: uuid }
+        node_name: { type: string }
+        node_definition_id:
+          type: string
+          description: Referenced node definition id, or empty for an inline form_id
+    FormUsageNodeDefinition:
+      type: object
+      required: [id, name, version, lineage_id, type]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        version: { type: integer }
+        lineage_id: { type: string, format: uuid }
+        type: { type: string }
+    FormUsageInstance:
+      type: object
+      required: [id, workflow_definition_id, status, is_waiting_on_form]
+      properties:
+        id: { type: string, format: uuid }
+        workflow_definition_id: { type: string, format: uuid }
+        status: { type: string }
+        is_waiting_on_form:
+          type: boolean
+          description: True when the instance is parked on an input node that uses the form
+        current_node_id: { type: string, format: uuid, nullable: true }
     InstanceContext:
       type: object
       required: [id, context]

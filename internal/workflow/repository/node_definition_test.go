@@ -286,6 +286,38 @@ func TestWorkflowDefinitionNodeRefsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestNodeDefinitionDeleteClearsFormRefs(t *testing.T) {
+	db := setupTestDB(t)
+	ctx := context.Background()
+	repo := repository.NewNodeDefinitionRepository(db)
+	forms := repository.NewFormRepository(db)
+
+	def := newDef("11111111-1111-7111-8111-111111111111", "ask", 1, "33333333-3333-7333-8333-333333333333", "input")
+	if err := repo.Create(ctx, def); err != nil {
+		t.Fatal(err)
+	}
+	created, err := forms.Create(ctx, "contact", []byte(`{"type":"object"}`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := forms.SaveNodeFormRefs(ctx, def.ID, []string{created.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := forms.Delete(ctx, created.ID); !errors.Is(err, model.ErrConflict) {
+		t.Fatalf("Delete() of referenced form error = %v, want ErrConflict", err)
+	}
+	if err := repo.Delete(ctx, def.ID); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	// The definition's ref rows are gone with it, so the form is deletable.
+	if refs, err := forms.NodeFormRefs(ctx, def.ID); err != nil || len(refs) != 0 {
+		t.Fatalf("NodeFormRefs() = %v, %v, want empty", refs, err)
+	}
+	if err := forms.Delete(ctx, created.ID); err != nil {
+		t.Errorf("Delete() after definition delete error = %v, want nil", err)
+	}
+}
+
 func TestUpsertSystemUserAndFKs(t *testing.T) {
 	// setupTestDB seeds the system user used by definition foreign keys.
 	db := setupTestDB(t)

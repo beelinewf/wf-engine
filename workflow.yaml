@@ -108,9 +108,12 @@ nodes:
 
   # Input node: parks the instance waiting on a payload. The channel fixes
   # the transport; here the payload arrives through the instance's Redis
-  # channel workflow:input:<instance_id>. The optional form contract lets a
-  # generic frontend render the input dynamically per workflow version:
-  # status pending_input.form serves these exact bytes back.
+  # channel workflow:input:<instance_id>. The optional form_id references a
+  # form created via POST /v1/forms, so a generic frontend renders the input
+  # dynamically per workflow version: status pending_input.form_id carries
+  # only this id, and the frontend fetches the schema/ui from the library.
+  # The engine never reads the form; delivery is gated solely by the
+  # validation.script below.
   #
   # allowed_roles is the node's second authorization gate, independent of
   # the input:deliver endpoint permission. A caller holding input:deliver but
@@ -126,9 +129,9 @@ nodes:
   # of the bare payload, so the context records who delivered it. Templates
   # therefore read approval.input_data.*, and approval.user_id is the
   # users.id uuid of the deliverer (the system user for a service call).
-  # The form schema, the validation script, and the post hook's "output"
-  # global still see the raw payload. Leave it off to keep the legacy shape,
-  # and migrate the templates by prefixing the key with input_data.
+  # The validation script and the post hook's "output" global still see the
+  # raw payload. Leave it off to keep the legacy shape, and migrate the
+  # templates by prefixing the key with input_data.
   #
   # public is the third gate and the only one that skips authentication: a
   # caller with no credential at all can PUT this node, which is what an
@@ -148,15 +151,10 @@ nodes:
     allowed_roles:
       - manager
     record_actor: true
-    form:
-      schema:
-        type: "object"
-        required: ["approved"]
-        properties:
-          approved:
-            type: "boolean"
-      ui:
-        order: ["approved"]
+    # form_id names a form in the library (created via POST /v1/forms with
+    # the schema/ui this input renders). The sample leaves it unset; set it
+    # to the returned id to attach a form, e.g.:
+    # form_id: "11111111-1111-7111-8111-111111111111"
     validation:
       script: |
         var body = JSON.parse(input);

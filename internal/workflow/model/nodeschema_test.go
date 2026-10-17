@@ -234,6 +234,34 @@ func TestNodeSchemaPublicOnlyOnInput(t *testing.T) {
 	}
 }
 
+// TestNodeSchemaFormIDOnlyOnInput pins the forms-library reference to the
+// one type that parses it, mirroring the parser guard. The legacy inline
+// form object is rejected by the parser, so no schema advertises it.
+func TestNodeSchemaFormIDOnlyOnInput(t *testing.T) {
+	for _, nodeType := range builtinTypes {
+		raw, _ := model.NodeSchema(nodeType)
+		props := decodeSchema(t, raw)["properties"].(map[string]any)
+		_, present := props["form_id"]
+		want := nodeType == "input"
+		if present != want {
+			t.Errorf("%s: form_id present = %v, want %v", nodeType, present, want)
+		}
+		if _, legacy := props["form"]; legacy {
+			t.Errorf("%s: schema still advertises the legacy form object", nodeType)
+		}
+	}
+	// The served input schema accepts the form_id content the parser accepts.
+	raw, _ := model.NodeSchema("input")
+	compiled := compileSchema(t, raw)
+	var instance any
+	if err := json.Unmarshal([]byte(`{"type":"input","channel":"http","output_property":"post","form_id":"aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa"}`), &instance); err != nil {
+		t.Fatal(err)
+	}
+	if err := compiled.Validate(instance); err != nil {
+		t.Errorf("input schema rejected form_id content: %v", err)
+	}
+}
+
 func TestNodeSchemaDurationsAndIDs(t *testing.T) {
 	raw, _ := model.NodeSchema("script")
 	doc := decodeSchema(t, raw)
@@ -293,7 +321,7 @@ func TestNodeSchemaAcceptsValidContent(t *testing.T) {
 	cases := map[string]string{
 		"script":         `{"type":"script","script":"return 1;","id":"aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa","output_property":"total"}`,
 		"conditions":     `{"type":"conditions","conditions":[{"condition":"return true;"},{"condition":"return false;"}]}`,
-		"input":          `{"type":"input","channel":"http","output_property":"post"}`,
+		"input":          `{"type":"input","channel":"http","output_property":"post","form_id":"aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa"}`,
 		"output":         `{"type":"output","channel":"redis","context_path":"post"}`,
 		"external_call":  `{"type":"external_call","http_config":{"url":"https://example.com","method":"GET"}}`,
 		"poller":         `{"type":"poller","http":{"url":"https://example.com","until":"return response.status == 200;"}}`,
