@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/beelinewf/wf-engine/pkg/ids"
 	"github.com/google/uuid"
-	"github.com/simpwf/workflow-engine/pkg/ids"
 )
 
 func TestNewReturnsUUIDv7(t *testing.T) {

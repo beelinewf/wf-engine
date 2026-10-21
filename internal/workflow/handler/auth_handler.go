@@ -5,10 +5,10 @@ import (
 	"net/http"
 	"sort"
 
+	"github.com/beelinewf/wf-engine/internal/workflow/auth"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/service"
 	"github.com/gin-gonic/gin"
-	"github.com/simpwf/workflow-engine/internal/workflow/auth"
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
-	"github.com/simpwf/workflow-engine/internal/workflow/service"
 )
 
 // AuthHandler serves the identity endpoints: the public login contract and

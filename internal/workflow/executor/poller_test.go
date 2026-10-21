@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/executor"
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
-	"github.com/simpwf/workflow-engine/internal/workflow/transport"
+	"github.com/beelinewf/wf-engine/internal/workflow/executor"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/transport"
 )
 
 func TestNormalizePollerBody(t *testing.T) {

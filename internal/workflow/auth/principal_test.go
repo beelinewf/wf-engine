@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/auth"
+	"github.com/beelinewf/wf-engine/internal/workflow/auth"
 )
 
 // testCatalog is the catalog the RBAC matrix runs against. The union of a

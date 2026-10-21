@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/beelinewf/wf-engine/pkg/configuration"
 	"github.com/coreos/go-oidc/v3/oidc"
-	"github.com/simpwf/workflow-engine/pkg/configuration"
 )
 
 // ErrUnauthenticated marks every token that cannot be trusted: missing,

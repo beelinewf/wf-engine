@@ -6,7 +6,7 @@ infra:
     host: "127.0.0.1:9999"
     swagger_enabled: false
   postgresql:
-    dsn: "host=localhost user=gorm password=gorm dbname=simpwf_e2e port=9921 sslmode=disable"
+    dsn: "host=localhost user=gorm password=gorm dbname=beelinewf_e2e port=9921 sslmode=disable"
   redis:
     dsn: ""
   rabbitmq:
@@ -22,7 +22,7 @@ engine:
   exec_allowlist: []
 
 auth:
-  # api_token is deliberately absent: the Taskfile exports SIMPWF_API_TOKEN
+  # api_token is deliberately absent: the Taskfile exports BEELINEWF_API_TOKEN
   # once and both the app (auth.api_token binds to it) and the e2e script read
   # that one value. Spelling the credential here as well would give the two
   # halves of the harness two answers to drift apart.
@@ -31,8 +31,8 @@ auth:
   oidc:
     enabled: true
     issuer: "http://127.0.0.1:9099"
-    client_id: "simpwf"
-    audience: "simpwf"
+    client_id: "beelinewf"
+    audience: "beelinewf"
     roles_claim: "roles"
     username_claim: "name"
     clock_skew: 1m

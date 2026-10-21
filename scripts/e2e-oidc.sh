@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SimpWF end-to-end check of the OIDC + RBAC + input-gate + attribution flow,
+# BeelineWF end-to-end check of the OIDC + RBAC + input-gate + attribution flow,
 # against a running app wired to a throwaway mock identity provider.
 #
 #   bash scripts/e2e-oidc.sh [APP_BASE_URL] [OIDC_ISSUER_URL]
@@ -20,7 +20,7 @@
 #
 # The app must be started with auth.oidc.enabled, the issuer below, and a role
 # catalog whose "finance" role grants input:deliver (see config.yaml).
-# SIMPWF_API_TOKEN must name the same credential the app was started with; the
+# BEELINEWF_API_TOKEN must name the same credential the app was started with; the
 # task target exports it once for both.
 
 set -euo pipefail
@@ -36,8 +36,8 @@ pass() { echo "e2e-oidc: ok: $*"; }
 # The bypass and attribution assertions are half of what this script checks,
 # so the token is mandatory rather than optional: a run without it would
 # report success while skipping the behavior it exists to prove.
-[[ -n "${SIMPWF_API_TOKEN:-}" ]] \
-  || fail "SIMPWF_API_TOKEN must be set: the API-token bypass and attribution checks are mandatory"
+[[ -n "${BEELINEWF_API_TOKEN:-}" ]] \
+  || fail "BEELINEWF_API_TOKEN must be set: the API-token bypass and attribution checks are mandatory"
 
 cleanup() {
   if [[ -n "$MOCK_PID" ]]; then
@@ -185,12 +185,12 @@ pass "first gate refuses a caller with no roles"
 # --- the bypass: a valid API token skips both gates -----------------------------------
 # The instance is still parked: a refused delivery leaves it waiting.
 code=$(curl -sS -o /dev/null -w '%{http_code}' -X PUT "$APP_BASE_URL/v1/workflow/instance/$INST_ID/input" \
-  -H "X-Api-Token: $SIMPWF_API_TOKEN" -H 'Content-Type: application/json' \
+  -H "X-Api-Token: $BEELINEWF_API_TOKEN" -H 'Content-Type: application/json' \
   -H 'Idempotency-Key: e2e-oidc-token' -d '{"approved":true,"by":"token"}')
 [[ "$code" == "202" ]] || fail "API token delivery -> $code, want 202"
 pass "API token bypasses both gates"
 
-ctx=$(curl -fsS "$APP_BASE_URL/v1/workflow/instance/$INST_ID/context" -H "X-Api-Token: $SIMPWF_API_TOKEN")
+ctx=$(curl -fsS "$APP_BASE_URL/v1/workflow/instance/$INST_ID/context" -H "X-Api-Token: $BEELINEWF_API_TOKEN")
 SYS_ID=$(printf '%s' "$ctx" | jq -er '.context.approval.user_id')
 [[ -n "$SYS_ID" ]] || fail "bypassed delivery wrote no user_id: $ctx"
 [[ "$(printf '%s' "$ctx" | jq -r '.context.approval.input_data.by')" == "token" ]] \
@@ -260,7 +260,7 @@ pub_inst=$(curl -fsS -X POST "$APP_BASE_URL/v1/workflow/instance" \
   -d "{\"workflow_definition_id\":\"$PUB_WF\",\"context\":{}}") || fail "create public instance"
 PUB_INST=$(printf '%s' "$pub_inst" | jq -er '.id')
 for _ in $(seq 1 60); do
-  pub_status=$(curl -fsS "$APP_BASE_URL/v1/workflow/instance/$PUB_INST/status" -H "X-Api-Token: $SIMPWF_API_TOKEN")
+  pub_status=$(curl -fsS "$APP_BASE_URL/v1/workflow/instance/$PUB_INST/status" -H "X-Api-Token: $BEELINEWF_API_TOKEN")
   ps=$(printf '%s' "$pub_status" | jq -r '.status')
   preason=$(printf '%s' "$pub_status" | jq -r '.waiting_reason // "none"')
   [[ "$ps" == "waiting" && "$preason" == "input" ]] && break
@@ -284,7 +284,7 @@ pass "anonymous delivery is accepted on a public node"
 
 # The payload lands bare: a public node cannot attribute an anonymous caller,
 # so there is no {user_id, input_data} envelope around it.
-pub_ctx=$(curl -fsS "$APP_BASE_URL/v1/workflow/instance/$PUB_INST/context" -H "X-Api-Token: $SIMPWF_API_TOKEN")
+pub_ctx=$(curl -fsS "$APP_BASE_URL/v1/workflow/instance/$PUB_INST/context" -H "X-Api-Token: $BEELINEWF_API_TOKEN")
 [[ "$(printf '%s' "$pub_ctx" | jq -r '.context.webhook.approved')" == "true" ]] \
   || fail "anonymous delivery did not write the bare payload: $pub_ctx"
 [[ "$(printf '%s' "$pub_ctx" | jq -r '.context.webhook.user_id // "none"')" == "none" ]] \
@@ -299,7 +299,7 @@ pub_inst2=$(curl -fsS -X POST "$APP_BASE_URL/v1/workflow/instance" \
   -d "{\"workflow_definition_id\":\"$PUB_WF\",\"context\":{}}") || fail "create public instance 2"
 PUB_INST2=$(printf '%s' "$pub_inst2" | jq -er '.id')
 for _ in $(seq 1 60); do
-  pub2_status=$(curl -fsS "$APP_BASE_URL/v1/workflow/instance/$PUB_INST2/status" -H "X-Api-Token: $SIMPWF_API_TOKEN")
+  pub2_status=$(curl -fsS "$APP_BASE_URL/v1/workflow/instance/$PUB_INST2/status" -H "X-Api-Token: $BEELINEWF_API_TOKEN")
   ps2=$(printf '%s' "$pub2_status" | jq -r '.status')
   preason2=$(printf '%s' "$pub2_status" | jq -r '.waiting_reason // "none"')
   [[ "$ps2" == "waiting" && "$preason2" == "input" ]] && break
@@ -328,7 +328,7 @@ priv_inst=$(curl -fsS -X POST "$APP_BASE_URL/v1/workflow/instance" \
   -d "{\"workflow_definition_id\":\"$WF_ID\",\"context\":{}}") || fail "create private instance"
 PRIV_INST=$(printf '%s' "$priv_inst" | jq -er '.id')
 for _ in $(seq 1 60); do
-  priv_status=$(curl -fsS "$APP_BASE_URL/v1/workflow/instance/$PRIV_INST/status" -H "X-Api-Token: $SIMPWF_API_TOKEN")
+  priv_status=$(curl -fsS "$APP_BASE_URL/v1/workflow/instance/$PRIV_INST/status" -H "X-Api-Token: $BEELINEWF_API_TOKEN")
   prs=$(printf '%s' "$priv_status" | jq -r '.status')
   prreason=$(printf '%s' "$priv_status" | jq -r '.waiting_reason // "none"')
   [[ "$prs" == "waiting" && "$prreason" == "input" ]] && break

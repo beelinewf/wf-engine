@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
 	"github.com/santhosh-tekuri/jsonschema/v6"
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
 )
 
 const draft2020 = "https://json-schema.org/draft/2020-12/schema"

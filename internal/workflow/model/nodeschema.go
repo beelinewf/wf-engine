@@ -247,7 +247,7 @@ func buildCustomNodeSchema(nodeType string, config json.RawMessage) (json.RawMes
 	doc := map[string]any{
 		"$schema": nodeSchemaDialect,
 		"type":    "object",
-		"title":   fmt.Sprintf("simpwf %s node", nodeType),
+		"title":   fmt.Sprintf("beelinewf %s node", nodeType),
 		"description": fmt.Sprintf(
 			"Registered custom node type %q. Custom nodes carry only type and config plus the shared common fields; "+
 				"every builtin executable field is rejected. Go parsers stay authoritative.", nodeType),

@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
 )
 
 func TestNodeTypesList(t *testing.T) {

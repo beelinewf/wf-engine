@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/executor"
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/executor"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
 )
 
 // inflight tracks concurrent handler entries and the max observed.

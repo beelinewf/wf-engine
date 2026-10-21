@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/executor"
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
-	"github.com/simpwf/workflow-engine/internal/workflow/repository"
-	"github.com/simpwf/workflow-engine/pkg/contextdiff"
+	"github.com/beelinewf/wf-engine/internal/workflow/executor"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/repository"
+	"github.com/beelinewf/wf-engine/pkg/contextdiff"
 	"gorm.io/gorm"
 )
 
@@ -1294,7 +1294,7 @@ func TestEngineExecutorFailureWithoutOnFailureFailsWorkflow(t *testing.T) {
 	db := setupEngineDB(t)
 	wfID := createWorkflow(t, db, n1,
 		nodeJSON(n1, "external_call", "call-api", "", n2, "out", map[string]any{
-			"http_config": map[string]any{"url": "http://no-such-host-simpwf.invalid/x", "method": "GET"},
+			"http_config": map[string]any{"url": "http://no-such-host-beelinewf.invalid/x", "method": "GET"},
 		}),
 		nodeJSON(n2, "script", "done", "return 'done';", "", "out", nil),
 	)

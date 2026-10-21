@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
 	"github.com/gin-gonic/gin"
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
 )
 
 func TestMain(m *testing.M) {

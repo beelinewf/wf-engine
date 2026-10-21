@@ -6,8 +6,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/executor"
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/executor"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
 )
 
 const outInstanceID = "11111111-1111-7111-8111-111111111111"
@@ -59,7 +59,7 @@ func outNode(channel, contextPath string) *model.NodeContent {
 func TestOutputExecutorPublishesToRedis(t *testing.T) {
 	redisPub := &fakeRedisPublisher{}
 	rabbitPub := &fakeRabbitPublisher{}
-	ex := executor.NewBrokerOutputPublisher(redisPub, rabbitPub, "simpwf.output")
+	ex := executor.NewBrokerOutputPublisher(redisPub, rabbitPub, "beelinewf.output")
 	// The registry wires the publisher into the executor.
 	reg := executor.NewExecutors(executor.Limits{}, nil, executor.Dependencies{Output: ex})
 	got := reg[model.NodeTypeOutput]
@@ -95,7 +95,7 @@ func TestOutputExecutorPublishesToRedis(t *testing.T) {
 func TestOutputExecutorPublishesToRabbit(t *testing.T) {
 	redisPub := &fakeRedisPublisher{}
 	rabbitPub := &fakeRabbitPublisher{}
-	ex := executor.NewBrokerOutputPublisher(redisPub, rabbitPub, "simpwf.output")
+	ex := executor.NewBrokerOutputPublisher(redisPub, rabbitPub, "beelinewf.output")
 	reg := executor.NewExecutors(executor.Limits{}, nil, executor.Dependencies{Output: ex})
 	got := reg[model.NodeTypeOutput]
 	_, err := got.Execute(context.Background(), executor.Request{
@@ -107,8 +107,8 @@ func TestOutputExecutorPublishesToRabbit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if rabbitPub.calls != 1 || rabbitPub.queue != "simpwf.output" {
-		t.Errorf("rabbit publish = %+v, want queue simpwf.output", rabbitPub)
+	if rabbitPub.calls != 1 || rabbitPub.queue != "beelinewf.output" {
+		t.Errorf("rabbit publish = %+v, want queue beelinewf.output", rabbitPub)
 	}
 	if rabbitPub.messageID != outInstanceID+":occ-1" {
 		t.Errorf("message_id = %q, want stable execution id", rabbitPub.messageID)

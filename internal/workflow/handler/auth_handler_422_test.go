@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/auth"
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/auth"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
 )
 
 // A role name that is blank after trimming names nobody, which is a

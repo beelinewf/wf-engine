@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/executor"
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
-	"github.com/simpwf/workflow-engine/pkg/customnode"
-	"github.com/simpwf/workflow-engine/pkg/customnode/jev"
-	_ "github.com/simpwf/workflow-engine/pkg/customnode/jev"
+	"github.com/beelinewf/wf-engine/internal/workflow/executor"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/pkg/customnode"
+	"github.com/beelinewf/wf-engine/pkg/customnode/jev"
+	_ "github.com/beelinewf/wf-engine/pkg/customnode/jev"
 )
 
 const fullConfig = `{
@@ -171,7 +171,7 @@ func TestValidateReject(t *testing.T) {
 func TestValidateTemplateShapesPass(t *testing.T) {
 	v, _ := customnode.ByType("jev")
 	got, err := v.Validate(json.RawMessage(`{
-	  "api_key": "{{ env.SIMPWF_OPENROUTER_KEY }}",
+	  "api_key": "{{ env.BEELINEWF_OPENROUTER_KEY }}",
 	  "state": "{{ ticket }}",
 	  "questions": {"q": {"type": "noul", "instructions": "{{ q_text }}"}}
 	}`))

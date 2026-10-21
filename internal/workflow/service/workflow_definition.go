@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/defcache"
-	"github.com/simpwf/workflow-engine/internal/workflow/kernel"
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
-	"github.com/simpwf/workflow-engine/internal/workflow/repository"
+	"github.com/beelinewf/wf-engine/internal/workflow/defcache"
+	"github.com/beelinewf/wf-engine/internal/workflow/kernel"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/repository"
 )
 
 // resolveCacheSize bounds the materialized-definition cache. Definitions

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
 )
 
 type parseCustomConfig struct {

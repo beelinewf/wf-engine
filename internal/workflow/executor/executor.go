@@ -7,8 +7,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
-	"github.com/simpwf/workflow-engine/pkg/jsfunc"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/pkg/jsfunc"
 )
 
 // Limits carries the engine-wide security limits applied by the executors.

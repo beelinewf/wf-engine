@@ -12,13 +12,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/auth"
-	"github.com/simpwf/workflow-engine/internal/workflow/executor"
-	"github.com/simpwf/workflow-engine/internal/workflow/kernel"
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
-	"github.com/simpwf/workflow-engine/internal/workflow/repository"
-	"github.com/simpwf/workflow-engine/pkg/contextdiff"
-	"github.com/simpwf/workflow-engine/pkg/envsnapshot"
+	"github.com/beelinewf/wf-engine/internal/workflow/auth"
+	"github.com/beelinewf/wf-engine/internal/workflow/executor"
+	"github.com/beelinewf/wf-engine/internal/workflow/kernel"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/repository"
+	"github.com/beelinewf/wf-engine/pkg/contextdiff"
+	"github.com/beelinewf/wf-engine/pkg/envsnapshot"
 )
 
 // CreateInstance starts a workflow instance. Debug marks a step-through
@@ -536,8 +536,8 @@ func (s *instanceService) Create(ctx context.Context, req CreateInstance) (model
 	if err := json.Unmarshal(contextRaw, &obj); err != nil || obj == nil {
 		return model.WorkflowInstance{}, fmt.Errorf("%w: context must be a JSON object", model.ErrInvalid)
 	}
-	// Snapshot SIMPWF_* process env under the reserved env root so every
-	// existing {{ }} render site resolves {{ env.SIMPWF_X }} with zero
+	// Snapshot BEELINEWF_* process env under the reserved env root so every
+	// existing {{ }} render site resolves {{ env.BEELINEWF_X }} with zero
 	// template-engine changes. Snapshot wins per key: callers cannot
 	// shadow env-provided credentials with request-body values. The
 	// caller-supplied base is stripped of denied names first, so a request

@@ -9,14 +9,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/executor"
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
-	"github.com/simpwf/workflow-engine/pkg/customnode"
-	"github.com/simpwf/workflow-engine/pkg/customnode/openrouter"
+	"github.com/beelinewf/wf-engine/internal/workflow/executor"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/pkg/customnode"
+	"github.com/beelinewf/wf-engine/pkg/customnode/openrouter"
 )
 
 const chatConfig = `{
-  "api_key": "{{ env.SIMPWF_OPENROUTER_KEY }}",
+  "api_key": "{{ env.BEELINEWF_OPENROUTER_KEY }}",
   "prompt": "Hello from {{ source }}",
   "system": "Answer briefly.",
   "temperature": 0.2,
@@ -29,7 +29,7 @@ const chatConfig = `{
 const responsesConfig = `{
   "api": "responses",
   "model": "openai/gpt-4o-mini",
-  "api_key": "{{ env.SIMPWF_OPENROUTER_KEY }}",
+  "api_key": "{{ env.BEELINEWF_OPENROUTER_KEY }}",
   "messages": [
     {"role": "developer", "content": "Answer briefly."},
     {"role": "user", "content": "Hello from {{ source }}"}
@@ -95,7 +95,7 @@ func TestRegistered(t *testing.T) {
 
 func TestValidateDefaults(t *testing.T) {
 	v, _ := customnode.ByType("openrouter")
-	got, err := v.Validate(json.RawMessage(`{"api_key":"{{ env.SIMPWF_OPENROUTER_KEY }}","prompt":"hi","timeout":"45s"}`))
+	got, err := v.Validate(json.RawMessage(`{"api_key":"{{ env.BEELINEWF_OPENROUTER_KEY }}","prompt":"hi","timeout":"45s"}`))
 	if err != nil {
 		t.Fatalf("Validate() error = %v", err)
 	}
@@ -202,7 +202,7 @@ func TestExecuteChatSuccess(t *testing.T) {
 		}`),
 	}
 	res, err := runOpenRouter(nc, h, 0, map[string]any{
-		"env":    map[string]any{"SIMPWF_OPENROUTER_KEY": "test-secret"},
+		"env":    map[string]any{"BEELINEWF_OPENROUTER_KEY": "test-secret"},
 		"source": "workflow",
 	})
 	if err != nil {
@@ -282,7 +282,7 @@ func TestExecutePreservesLargeNumberInMessageParts(t *testing.T) {
 func TestExecuteRendersModelAndTuning(t *testing.T) {
 	nc := openRouterNode(t, `{
 		"model":"{{ model }}",
-		"api_key":"{{ env.SIMPWF_OPENROUTER_KEY }}",
+		"api_key":"{{ env.BEELINEWF_OPENROUTER_KEY }}",
 		"prompt":"hi",
 		"temperature":"{{ temperature }}",
 		"max_tokens":"{{ max_tokens }}",
@@ -292,7 +292,7 @@ func TestExecuteRendersModelAndTuning(t *testing.T) {
 	}`)
 	h := &fakeHTTP{status: 200, body: []byte(`{"model":"rendered/model","choices":[{"message":{"content":"ok"}}]}`)}
 	res, err := runOpenRouter(nc, h, 0, map[string]any{
-		"env":             map[string]any{"SIMPWF_OPENROUTER_KEY": "k"},
+		"env":             map[string]any{"BEELINEWF_OPENROUTER_KEY": "k"},
 		"model":           "openai/rendered",
 		"temperature":     0.7,
 		"max_tokens":      123,
@@ -332,7 +332,7 @@ func TestExecuteResponsesSuccess(t *testing.T) {
 			"status":"completed"
 		}`),
 	}
-	res, err := runOpenRouter(nc, h, 0, map[string]any{"env": map[string]any{"SIMPWF_OPENROUTER_KEY": "test-secret"}, "source": "workflow"})
+	res, err := runOpenRouter(nc, h, 0, map[string]any{"env": map[string]any{"BEELINEWF_OPENROUTER_KEY": "test-secret"}, "source": "workflow"})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
@@ -372,7 +372,7 @@ func TestExecuteResponsesOutputParts(t *testing.T) {
 			"status":"completed"
 		}`),
 	}
-	res, err := runOpenRouter(nc, h, 0, map[string]any{"env": map[string]any{"SIMPWF_OPENROUTER_KEY": "test-secret"}, "source": "workflow"})
+	res, err := runOpenRouter(nc, h, 0, map[string]any{"env": map[string]any{"BEELINEWF_OPENROUTER_KEY": "test-secret"}, "source": "workflow"})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
@@ -404,32 +404,32 @@ func TestExecuteErrors(t *testing.T) {
 		"missing chat answer": {
 			config: chatConfig,
 			body:   `{"model":"m","choices":[]}`, status: 200,
-			ctx: map[string]any{"env": map[string]any{"SIMPWF_OPENROUTER_KEY": "k"}, "source": "s"}, reason: "openrouter",
+			ctx: map[string]any{"env": map[string]any{"BEELINEWF_OPENROUTER_KEY": "k"}, "source": "s"}, reason: "openrouter",
 		},
 		"blank responses text": {
 			config: responsesConfig,
 			body:   `{"model":"m","output_text":"   "}`, status: 200,
-			ctx: map[string]any{"env": map[string]any{"SIMPWF_OPENROUTER_KEY": "k"}}, reason: "openrouter",
+			ctx: map[string]any{"env": map[string]any{"BEELINEWF_OPENROUTER_KEY": "k"}}, reason: "openrouter",
 		},
 		"status": {
 			config: chatConfig,
 			body:   `oops`, status: 429,
-			ctx: map[string]any{"env": map[string]any{"SIMPWF_OPENROUTER_KEY": "k"}, "source": "s"}, reason: "openrouter-status",
+			ctx: map[string]any{"env": map[string]any{"BEELINEWF_OPENROUTER_KEY": "k"}, "source": "s"}, reason: "openrouter-status",
 		},
 		"blank key": {
 			config: chatConfig,
 			body:   `{}`, status: 200,
-			ctx: map[string]any{"env": map[string]any{"SIMPWF_OPENROUTER_KEY": "  "}, "source": "s"}, reason: "openrouter",
+			ctx: map[string]any{"env": map[string]any{"BEELINEWF_OPENROUTER_KEY": "  "}, "source": "s"}, reason: "openrouter",
 		},
 		"output cap": {
 			config: chatConfig,
 			body:   `{"model":"m","choices":[{"message":{"content":"too large"}}]}`, status: 200,
-			ctx: map[string]any{"env": map[string]any{"SIMPWF_OPENROUTER_KEY": "k"}, "source": "s"}, reason: "openrouter",
+			ctx: map[string]any{"env": map[string]any{"BEELINEWF_OPENROUTER_KEY": "k"}, "source": "s"}, reason: "openrouter",
 		},
 		"status routes failure": {
 			config: chatConfig,
 			body:   `oops`, status: 503,
-			ctx: map[string]any{"env": map[string]any{"SIMPWF_OPENROUTER_KEY": "k"}, "source": "s"}, reason: "openrouter-status", onFailure: true,
+			ctx: map[string]any{"env": map[string]any{"BEELINEWF_OPENROUTER_KEY": "k"}, "source": "s"}, reason: "openrouter-status", onFailure: true,
 		},
 	}
 	for name, tc := range cases {

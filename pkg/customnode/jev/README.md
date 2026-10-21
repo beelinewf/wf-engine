@@ -16,7 +16,7 @@ nodes gate.
   "config": {
     "model": "typesafe/jev-1.13",
     "endpoint": "https://openrouter.ai/api/alpha/decisions",
-    "api_key": "{{ env.SIMPWF_OPENROUTER_KEY }}",
+    "api_key": "{{ env.BEELINEWF_OPENROUTER_KEY }}",
     "state": "{{ ticket }}",
     "questions": {
       "is_urgent": {
@@ -51,7 +51,7 @@ parsed/validated by core (timeout cap, hooks, `on_failure`,
 - `endpoint` string, defaults `https://openrouter.ai/api/alpha/decisions`.
   Must be an absolute `http(s)` URL when set.
 - `api_key` string, required, templated — e.g.
-  `{{ env.SIMPWF_OPENROUTER_KEY }}`. Verified non-blank after render;
+  `{{ env.BEELINEWF_OPENROUTER_KEY }}`. Verified non-blank after render;
   never logged.
 - `state` required, any JSON (`string`|`object`|`array`). Strings render
   with `RenderTemplate`, objects/arrays with `RenderJSON`, so
@@ -76,8 +76,8 @@ like `{{ env.* }}` always pass validate and resolve at runtime. Missing
 
 ## Ops: env + allowlist
 
-- Server env `SIMPWF_OPENROUTER_KEY` must be set. At instance creation,
-  `Create` snapshots `SIMPWF_*` process env under the reserved `env` root;
+- Server env `BEELINEWF_OPENROUTER_KEY` must be set. At instance creation,
+  `Create` snapshots `BEELINEWF_*` process env under the reserved `env` root;
   the snapshot is per-instance, taken once.
 - `openrouter.ai` must be in the engine HTTP allowlist — the node POSTs
   through the shared `HTTPExecutor.Do`, so allowlist/DNS policy applies

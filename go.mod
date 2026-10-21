@@ -1,4 +1,4 @@
-module github.com/simpwf/workflow-engine
+module github.com/beelinewf/wf-engine
 
 go 1.27.2
 

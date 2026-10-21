@@ -4465,7 +4465,7 @@ var SwaggerInfo = &swag.Spec{
 	Host:             "",
 	BasePath:         "/",
 	Schemes:          []string{"http"},
-	Title:            "SimpWF API",
+	Title:            "BeelineWF API",
 	Description:      "Workflow definition and execution API.",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,

@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/kernel"
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
-	"github.com/simpwf/workflow-engine/internal/workflow/repository"
-	"github.com/simpwf/workflow-engine/pkg/ids"
+	"github.com/beelinewf/wf-engine/internal/workflow/kernel"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/repository"
+	"github.com/beelinewf/wf-engine/pkg/ids"
 )
 
 // CreateNodeDefinition is the input for creating a node definition (or the

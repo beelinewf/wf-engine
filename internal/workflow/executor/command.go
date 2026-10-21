@@ -9,7 +9,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/simpwf/workflow-engine/pkg/contextpath"
+	"github.com/beelinewf/wf-engine/pkg/contextpath"
 )
 
 // CommandExecutor runs external commands with direct argv (never a shell)

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
 )
 
 // StatisticsQuery filters the aggregate summary by instance creation time.

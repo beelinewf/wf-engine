@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
-	"github.com/simpwf/workflow-engine/pkg/ids"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/pkg/ids"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )

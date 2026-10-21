@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/simpwf/workflow-engine/pkg/contextpath"
-	"github.com/simpwf/workflow-engine/pkg/ids"
+	"github.com/beelinewf/wf-engine/pkg/contextpath"
+	"github.com/beelinewf/wf-engine/pkg/ids"
 )
 
 // NodeType is the kind of a node.

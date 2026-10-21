@@ -14,7 +14,7 @@ import (
 
 	"ariga.io/atlas-provider-gorm/gormschema"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/repository"
+	"github.com/beelinewf/wf-engine/internal/workflow/repository"
 )
 
 func main() {

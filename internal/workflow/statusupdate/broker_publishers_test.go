@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
-	"github.com/simpwf/workflow-engine/internal/workflow/statusupdate"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/statusupdate"
 )
 
 type fakeRedisPublisher struct {
@@ -74,14 +74,14 @@ func TestRedisPublisherFailsWithoutRedisBlock(t *testing.T) {
 
 func TestRabbitPublisherPublishesToStatusQueue(t *testing.T) {
 	fake := &fakeRabbitPublisher{}
-	p := statusupdate.NewRabbitPublisher(fake, "simpwf.status")
+	p := statusupdate.NewRabbitPublisher(fake, "beelinewf.status")
 	ev := testEvent("logical-2")
 	cfg := &model.StatusUpdateConfig{RabbitMQ: &model.RabbitStatusUpdateConfig{MaxRetry: 1, RetryDelay: 0}}
 	if err := p.Publish(context.Background(), cfg, ev); err != nil {
 		t.Fatalf("Publish() error = %v", err)
 	}
-	if fake.calls != 1 || fake.queue != "simpwf.status" {
-		t.Errorf("publish = %+v, want queue simpwf.status", fake)
+	if fake.calls != 1 || fake.queue != "beelinewf.status" {
+		t.Errorf("publish = %+v, want queue beelinewf.status", fake)
 	}
 	if fake.messageID != "logical-2" {
 		t.Errorf("message_id = %q, want logical event id", fake.messageID)
@@ -96,7 +96,7 @@ func TestRabbitPublisherPublishesToStatusQueue(t *testing.T) {
 
 func TestRabbitPublisherFailsWithoutRabbitBlock(t *testing.T) {
 	fake := &fakeRabbitPublisher{}
-	p := statusupdate.NewRabbitPublisher(fake, "simpwf.status")
+	p := statusupdate.NewRabbitPublisher(fake, "beelinewf.status")
 	cfg := &model.StatusUpdateConfig{Redis: &model.RedisStatusUpdateConfig{}}
 	if err := p.Publish(context.Background(), cfg, testEvent("logical-2")); err == nil {
 		t.Error("Publish() error = nil, want missing-rabbitmq-block failure")

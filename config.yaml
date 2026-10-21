@@ -1,8 +1,8 @@
-# SimpWF workflow engine configuration.
+# BeelineWF workflow engine configuration.
 #
 # The app reads this file when it exists in the working directory (or when
 # started with -config). Without a config file, the same keys are read from
-# environment variables prefixed SIMPWF_ (e.g. SIMPWF_INFRA_POSTGRESQL_DSN).
+# environment variables prefixed BEELINEWF_ (e.g. BEELINEWF_INFRA_POSTGRESQL_DSN).
 # Redis and RabbitMQ are optional: leave their DSNs empty for HTTP-only
 # operation. A configured but unreachable broker fails startup.
 
@@ -18,10 +18,10 @@ infra:
     # queues for a free connection), and GORM holds a connection only per
     # query — so the 25 default trades tail latency for Postgres safety
     # under replica growth. Operator overrides:
-    # SIMPWF_INFRA_POSTGRESQL_MAX_OPEN_CONNS,
-    # SIMPWF_INFRA_POSTGRESQL_MAX_IDLE_CONNS,
-    # SIMPWF_INFRA_POSTGRESQL_CONN_MAX_LIFETIME,
-    # SIMPWF_INFRA_POSTGRESQL_CONN_MAX_IDLE_TIME.
+    # BEELINEWF_INFRA_POSTGRESQL_MAX_OPEN_CONNS,
+    # BEELINEWF_INFRA_POSTGRESQL_MAX_IDLE_CONNS,
+    # BEELINEWF_INFRA_POSTGRESQL_CONN_MAX_LIFETIME,
+    # BEELINEWF_INFRA_POSTGRESQL_CONN_MAX_IDLE_TIME.
     max_open_conns: 25
     max_idle_conns: 25
     conn_max_lifetime: 5m
@@ -31,13 +31,13 @@ infra:
   redis:
     dsn: ""
   # Optional RabbitMQ (durable input/output/status queues). Set the DSN
-  # (e.g. amqp://simpwf:simpwf@localhost:5672/) to enable; the queue names
+  # (e.g. amqp://beelinewf:beelinewf@localhost:5672/) to enable; the queue names
   # default to the values below.
   rabbitmq:
     dsn: ""
-    input_queue: "simpwf.input"
-    output_queue: "simpwf.output"
-    status_queue: "simpwf.status"
+    input_queue: "beelinewf.input"
+    output_queue: "beelinewf.output"
+    status_queue: "beelinewf.status"
 
 # github.com/panjf2000/ants/v2 worker pools: pool drives engine node
 # transitions, status_pool drives status-update delivery. ants internals
@@ -82,12 +82,12 @@ engine:
   # math: 10 replicas x 16/host = 160 concurrent calls per host
   # fleet-wide; the global cap backstops the default pools. Both must
   # be > 0.
-  # Operator overrides: SIMPWF_ENGINE_HTTP_MAX_IN_FLIGHT,
-  # SIMPWF_ENGINE_HTTP_MAX_IN_FLIGHT_PER_HOST.
+  # Operator overrides: BEELINEWF_ENGINE_HTTP_MAX_IN_FLIGHT,
+  # BEELINEWF_ENGINE_HTTP_MAX_IN_FLIGHT_PER_HOST.
   http_max_in_flight: 128
   http_max_in_flight_per_host: 16
-  # Operator overrides: SIMPWF_ENGINE_LEAN_CONTEXT_DEFAULT,
-  # SIMPWF_ENGINE_LEAN_ANCHOR_EVERY, SIMPWF_ENGINE_LEAN_REPLAY_MAX.
+  # Operator overrides: BEELINEWF_ENGINE_LEAN_CONTEXT_DEFAULT,
+  # BEELINEWF_ENGINE_LEAN_ANCHOR_EVERY, BEELINEWF_ENGINE_LEAN_REPLAY_MAX.
   lean_context_default: false
   lean_anchor_every: 20
   lean_replay_max: 500
@@ -101,10 +101,10 @@ engine:
   # /ready reports 503. An attempt living past min_healthy_run resets the
   # count, so slow flapping never exhausts the budget. max_attempts: 1
   # restores run-once behavior (any blip parks the pod until restart).
-  # Operator overrides: SIMPWF_ENGINE_CONSUMER_RETRY_MAX_ATTEMPTS,
-  # SIMPWF_ENGINE_CONSUMER_RETRY_INITIAL_BACKOFF,
-  # SIMPWF_ENGINE_CONSUMER_RETRY_MAX_BACKOFF,
-  # SIMPWF_ENGINE_CONSUMER_RETRY_MIN_HEALTHY_RUN.
+  # Operator overrides: BEELINEWF_ENGINE_CONSUMER_RETRY_MAX_ATTEMPTS,
+  # BEELINEWF_ENGINE_CONSUMER_RETRY_INITIAL_BACKOFF,
+  # BEELINEWF_ENGINE_CONSUMER_RETRY_MAX_BACKOFF,
+  # BEELINEWF_ENGINE_CONSUMER_RETRY_MIN_HEALTHY_RUN.
   consumer_retry:
     max_attempts: 3
     initial_backoff: 1s
@@ -123,15 +123,15 @@ engine:
   exec_allowlist:
     - "/bin/echo"
     - "/bin/ls"
-  # Env snapshot deny list. At instance creation, SIMPWF_* process env is
+  # Env snapshot deny list. At instance creation, BEELINEWF_* process env is
   # snapshotted into the instance context under the reserved env root, and
   # these patterns are the credentials that never enter a workflow template:
-  # SIMPWF_API_TOKEN, SIMPWF_AUTH_*, SIMPWF_SYSTEM_*, and any SIMPWF_*_DSN
+  # BEELINEWF_API_TOKEN, BEELINEWF_AUTH_*, BEELINEWF_SYSTEM_*, and any BEELINEWF_*_DSN
   # (PostgreSQL, Redis, RabbitMQ). A denied name is dropped from the snapshot
   # and {{ env.<denied> }} resolves as "path not found".
   #
-  # Operator overrides: SIMPWF_ENGINE_ENV_DENY_EXTRA,
-  # SIMPWF_ENGINE_ENV_ALLOW_EXCEPTIONS (comma-separated globs). These only
+  # Operator overrides: BEELINEWF_ENGINE_ENV_DENY_EXTRA,
+  # BEELINEWF_ENGINE_ENV_ALLOW_EXCEPTIONS (comma-separated globs). These only
   # extend or narrow the hardcoded defaults, never replace them; an invalid
   # glob fails startup.
   env_deny_extra: []
@@ -166,7 +166,7 @@ auth:
     # resource server; set it only when the provider issues a distinct
     # resource audience. GET /v1/auth/config reports the effective value in
     # "audience" so a frontend does not have to know the fallback.
-    client_id: "simpwf"
+    client_id: "beelinewf"
     audience: ""
     # Claim carrying the caller's roles. Accepts an array of strings, a
     # single string, or a space-delimited string.
@@ -189,7 +189,7 @@ auth:
     # provider-amplification problem the bound exists to prevent.
     cache_ttl: 5m
 
-  # Equivalent env var: SIMPWF_AUTH_ROLE_PERMISSIONS (JSON object). A set
+  # Equivalent env var: BEELINEWF_AUTH_ROLE_PERMISSIONS (JSON object). A set
   # value overrides this file section; blank falls back to it.
   # Role catalog: role name to the resource-actions it grants. At startup it
   # upserts the role and permission rows and prunes the permission rows of

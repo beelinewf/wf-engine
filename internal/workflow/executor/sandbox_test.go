@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/executor"
-	"github.com/simpwf/workflow-engine/pkg/jsfunc"
+	"github.com/beelinewf/wf-engine/internal/workflow/executor"
+	"github.com/beelinewf/wf-engine/pkg/jsfunc"
 )
 
 func run(t *testing.T, opts executor.ScriptOptions) (*executor.ScriptResult, error) {

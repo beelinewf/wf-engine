@@ -10,13 +10,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/auth"
-	"github.com/simpwf/workflow-engine/internal/workflow/executor"
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
-	"github.com/simpwf/workflow-engine/internal/workflow/repository"
-	"github.com/simpwf/workflow-engine/internal/workflow/testdb"
-	"github.com/simpwf/workflow-engine/pkg/configuration"
-	"github.com/simpwf/workflow-engine/pkg/database"
+	"github.com/beelinewf/wf-engine/internal/workflow/auth"
+	"github.com/beelinewf/wf-engine/internal/workflow/executor"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/repository"
+	"github.com/beelinewf/wf-engine/internal/workflow/testdb"
+	"github.com/beelinewf/wf-engine/pkg/configuration"
+	"github.com/beelinewf/wf-engine/pkg/database"
 	"github.com/sirupsen/logrus"
 )
 
@@ -217,7 +217,7 @@ func TestDatabaseOptions(t *testing.T) {
 		t.Fatalf("databaseOptions() = %+v, want explicit config values verbatim", opts)
 	}
 
-	t.Setenv("SIMPWF_INFRA_POSTGRESQL_DSN", "default-dsn")
+	t.Setenv("BEELINEWF_INFRA_POSTGRESQL_DSN", "default-dsn")
 	loaded, err := configuration.Load(configuration.WithConfigFile(filepath.Join(t.TempDir(), "does-not-exist.yaml")))
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
@@ -241,7 +241,7 @@ func TestDatabaseOptions(t *testing.T) {
 func TestDatabasePoolCeiling(t *testing.T) {
 	dsn := testdb.RequireDSN(t, "app")
 
-	t.Setenv("SIMPWF_INFRA_POSTGRESQL_DSN", dsn)
+	t.Setenv("BEELINEWF_INFRA_POSTGRESQL_DSN", dsn)
 	cfg, err := configuration.Load(configuration.WithConfigFile(filepath.Join(t.TempDir(), "does-not-exist.yaml")))
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
@@ -277,7 +277,7 @@ func TestStatusDispatcherOptions(t *testing.T) {
 		t.Fatalf("statusDispatcherOptions() = %+v, want explicit values verbatim", opts)
 	}
 
-	t.Setenv("SIMPWF_INFRA_POSTGRESQL_DSN", "default-dsn")
+	t.Setenv("BEELINEWF_INFRA_POSTGRESQL_DSN", "default-dsn")
 	loaded, err := configuration.Load(configuration.WithConfigFile(filepath.Join(t.TempDir(), "does-not-exist.yaml")))
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
@@ -307,7 +307,7 @@ func TestEngineDispatcherOptions(t *testing.T) {
 		t.Fatalf("engineDispatcherOptions() = %+v, want explicit values verbatim", opts)
 	}
 
-	t.Setenv("SIMPWF_INFRA_POSTGRESQL_DSN", "default-dsn")
+	t.Setenv("BEELINEWF_INFRA_POSTGRESQL_DSN", "default-dsn")
 	loaded, err := configuration.Load(configuration.WithConfigFile(filepath.Join(t.TempDir(), "does-not-exist.yaml")))
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)

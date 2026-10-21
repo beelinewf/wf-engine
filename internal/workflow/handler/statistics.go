@@ -4,10 +4,10 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/beelinewf/wf-engine/internal/workflow/auth"
+	"github.com/beelinewf/wf-engine/internal/workflow/repository"
+	"github.com/beelinewf/wf-engine/internal/workflow/service"
 	"github.com/gin-gonic/gin"
-	"github.com/simpwf/workflow-engine/internal/workflow/auth"
-	"github.com/simpwf/workflow-engine/internal/workflow/repository"
-	"github.com/simpwf/workflow-engine/internal/workflow/service"
 )
 
 // statisticsServiceContract is the subset of service.StatisticsService the

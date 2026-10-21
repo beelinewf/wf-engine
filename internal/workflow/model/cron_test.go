@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
 )
 
 func TestResolveCronSpecDefaultsUTC(t *testing.T) {

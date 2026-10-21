@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
 	"github.com/santhosh-tekuri/jsonschema/v6"
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
 )
 
 // TestConfigSchemaIsRegistered proves the init registration carried the
@@ -72,7 +72,7 @@ func TestConfigSchemaQuestionTypes(t *testing.T) {
 // in its node envelope, so the documented shape and the served schema agree.
 func TestConfigSchemaAcceptsShippedExample(t *testing.T) {
 	config := json.RawMessage(`{
-      "api_key": "{{ env.SIMPWF_OPENROUTER_KEY }}",
+      "api_key": "{{ env.BEELINEWF_OPENROUTER_KEY }}",
       "state": "{{ ticket }}",
       "questions": {
         "is_urgent": {"type": "noul", "instructions": "Urgent?", "criteria": {"true": "Yes", "false": "No"}},

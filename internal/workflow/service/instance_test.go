@@ -13,14 +13,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/auth"
-	"github.com/simpwf/workflow-engine/internal/workflow/engine"
-	"github.com/simpwf/workflow-engine/internal/workflow/executor"
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
-	"github.com/simpwf/workflow-engine/internal/workflow/repository"
-	"github.com/simpwf/workflow-engine/internal/workflow/service"
-	"github.com/simpwf/workflow-engine/internal/workflow/testdb"
-	"github.com/simpwf/workflow-engine/pkg/ids"
+	"github.com/beelinewf/wf-engine/internal/workflow/auth"
+	"github.com/beelinewf/wf-engine/internal/workflow/engine"
+	"github.com/beelinewf/wf-engine/internal/workflow/executor"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/repository"
+	"github.com/beelinewf/wf-engine/internal/workflow/service"
+	"github.com/beelinewf/wf-engine/internal/workflow/testdb"
+	"github.com/beelinewf/wf-engine/pkg/ids"
 	"gorm.io/gorm"
 )
 
@@ -329,7 +329,7 @@ func TestCreateInstance(t *testing.T) {
 }
 
 func TestCreateMergesEnvSnapshot(t *testing.T) {
-	t.Setenv("SIMPWF_S3_ENDPOINT", "play.min.io:9000")
+	t.Setenv("BEELINEWF_S3_ENDPOINT", "play.min.io:9000")
 	db := setupSvcDB(t)
 	ctx := context.Background()
 	wfID := svcCreateWorkflow(t, db, "11111111-1111-7111-8111-111111111101",
@@ -355,15 +355,15 @@ func TestCreateMergesEnvSnapshot(t *testing.T) {
 	if !ok {
 		t.Fatalf("context = %s, want env root", inst.Context)
 	}
-	if env["SIMPWF_S3_ENDPOINT"] != "play.min.io:9000" {
-		t.Errorf("env = %v, want SIMPWF_S3_ENDPOINT snapshot", env)
+	if env["BEELINEWF_S3_ENDPOINT"] != "play.min.io:9000" {
+		t.Errorf("env = %v, want BEELINEWF_S3_ENDPOINT snapshot", env)
 	}
 }
 
 func TestCreateStripsDeniedEnvBase(t *testing.T) {
-	t.Setenv("SIMPWF_INFRA_POSTGRESQL_DSN", "host=localhost dbname=gorm")
-	t.Setenv("SIMPWF_API_TOKEN", "tok")
-	t.Setenv("SIMPWF_S3_ENDPOINT", "play.min.io:9000")
+	t.Setenv("BEELINEWF_INFRA_POSTGRESQL_DSN", "host=localhost dbname=gorm")
+	t.Setenv("BEELINEWF_API_TOKEN", "tok")
+	t.Setenv("BEELINEWF_S3_ENDPOINT", "play.min.io:9000")
 	db := setupSvcDB(t)
 	ctx := context.Background()
 	wfID := svcCreateWorkflow(t, db, "11111111-1111-7111-8111-111111111101",
@@ -373,7 +373,7 @@ func TestCreateStripsDeniedEnvBase(t *testing.T) {
 
 	inst, err := svc.Create(ctx, service.CreateInstance{
 		WorkflowDefinitionID: wfID,
-		Context:              json.RawMessage(`{"env":{"SIMPWF_API_TOKEN":"evil","SIMPWF_S3_ENDPOINT":"caller"}}`),
+		Context:              json.RawMessage(`{"env":{"BEELINEWF_API_TOKEN":"evil","BEELINEWF_S3_ENDPOINT":"caller"}}`),
 	})
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
@@ -386,13 +386,13 @@ func TestCreateStripsDeniedEnvBase(t *testing.T) {
 	if !ok {
 		t.Fatalf("context = %s, want env root", inst.Context)
 	}
-	if _, ok := env["SIMPWF_API_TOKEN"]; ok {
+	if _, ok := env["BEELINEWF_API_TOKEN"]; ok {
 		t.Errorf("context = %s, denied key stored", inst.Context)
 	}
-	if _, ok := env["SIMPWF_INFRA_POSTGRESQL_DSN"]; ok {
+	if _, ok := env["BEELINEWF_INFRA_POSTGRESQL_DSN"]; ok {
 		t.Errorf("context = %s, denied DSN snapshotted", inst.Context)
 	}
-	if env["SIMPWF_S3_ENDPOINT"] != "play.min.io:9000" {
+	if env["BEELINEWF_S3_ENDPOINT"] != "play.min.io:9000" {
 		t.Errorf("env = %v, want snapshot to win for allowed key", env)
 	}
 }
@@ -490,7 +490,7 @@ func TestUpdateContextPreservesSecretSnapshot(t *testing.T) {
 const secretMaskForTest = service.SecretMask
 
 func TestUpdateContextPreservesEnvSnapshot(t *testing.T) {
-	t.Setenv("SIMPWF_S3_ENDPOINT", "play.min.io:9000")
+	t.Setenv("BEELINEWF_S3_ENDPOINT", "play.min.io:9000")
 	db := setupSvcDB(t)
 	ctx := context.Background()
 	svc := svcInstanceService(db)
@@ -519,7 +519,7 @@ func TestUpdateContextPreservesEnvSnapshot(t *testing.T) {
 	if !ok {
 		t.Fatalf("context = %s, want env root carried forward", got.Context)
 	}
-	if env["SIMPWF_S3_ENDPOINT"] != "play.min.io:9000" {
+	if env["BEELINEWF_S3_ENDPOINT"] != "play.min.io:9000" {
 		t.Errorf("env = %v, want stored snapshot preserved", env)
 	}
 	if nested, ok := m["y"].(map[string]any); !ok || nested["nested"] != float64(2) {

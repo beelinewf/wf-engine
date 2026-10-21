@@ -3,11 +3,11 @@ package configuration_test
 import (
 	"testing"
 
-	"github.com/simpwf/workflow-engine/pkg/configuration"
+	"github.com/beelinewf/wf-engine/pkg/configuration"
 )
 
 func TestLoadParallelDefaults(t *testing.T) {
-	setenv(t, "SIMPWF_INFRA_POSTGRESQL_DSN", testDSN)
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
 
 	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
 	if err != nil {

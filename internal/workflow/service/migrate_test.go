@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/auth"
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
-	"github.com/simpwf/workflow-engine/internal/workflow/repository"
-	"github.com/simpwf/workflow-engine/internal/workflow/service"
+	"github.com/beelinewf/wf-engine/internal/workflow/auth"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/repository"
+	"github.com/beelinewf/wf-engine/internal/workflow/service"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
@@ -683,7 +683,7 @@ func TestMigrateContextMergeAndSnapshotPrecedence(t *testing.T) {
 	ctx := context.Background()
 	svc, v1, v2, n1, _ := migrateTwoVersions(t, db)
 
-	t.Setenv("SIMPWF_MIGRATE_PROBE", "old-env")
+	t.Setenv("BEELINEWF_MIGRATE_PROBE", "old-env")
 	secrets := repository.NewSecretRepository(db)
 	if _, err := secrets.Create(ctx, "MIGRATE_KEY", "old-secret"); err != nil {
 		t.Fatal(err)
@@ -699,7 +699,7 @@ func TestMigrateContextMergeAndSnapshotPrecedence(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Rotate both snapshots after the source was snapshotted.
-	t.Setenv("SIMPWF_MIGRATE_PROBE", "fresh-env")
+	t.Setenv("BEELINEWF_MIGRATE_PROBE", "fresh-env")
 	if err := secrets.Delete(ctx, "MIGRATE_KEY"); err != nil {
 		t.Fatal(err)
 	}
@@ -713,7 +713,7 @@ func TestMigrateContextMergeAndSnapshotPrecedence(t *testing.T) {
 		StartNodeID:          n1,
 		StartPaused:          true,
 		ContextPatch: json.RawMessage(`{"nested":{"y":2},"arr":[3],"b":3,` +
-			`"env":{"SIMPWF_MIGRATE_PROBE":"smuggled"},"secret":{"MIGRATE_KEY":"smuggled"}}`),
+			`"env":{"BEELINEWF_MIGRATE_PROBE":"smuggled"},"secret":{"MIGRATE_KEY":"smuggled"}}`),
 	})
 	if err != nil {
 		t.Fatalf("Migrate() error = %v", err)
@@ -730,8 +730,8 @@ func TestMigrateContextMergeAndSnapshotPrecedence(t *testing.T) {
 		t.Errorf("arr = %v, want replaced", m["arr"])
 	}
 	env, _ := m["env"].(map[string]any)
-	if env["SIMPWF_MIGRATE_PROBE"] != "fresh-env" {
-		t.Errorf("env probe = %v, want fresh snapshot (patch must lose)", env["SIMPWF_MIGRATE_PROBE"])
+	if env["BEELINEWF_MIGRATE_PROBE"] != "fresh-env" {
+		t.Errorf("env probe = %v, want fresh snapshot (patch must lose)", env["BEELINEWF_MIGRATE_PROBE"])
 	}
 	secret, _ := m["secret"].(map[string]any)
 	if secret["MIGRATE_KEY"] != "fresh-secret" {

@@ -15,9 +15,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/executor"
-	"github.com/simpwf/workflow-engine/pkg/contextpath"
-	"github.com/simpwf/workflow-engine/pkg/customnode"
+	"github.com/beelinewf/wf-engine/internal/workflow/executor"
+	"github.com/beelinewf/wf-engine/pkg/contextpath"
+	"github.com/beelinewf/wf-engine/pkg/customnode"
 )
 
 const (
@@ -46,7 +46,7 @@ var configSchema = json.RawMessage(`{
     "api": { "type": "string", "enum": ["chat", "responses"], "default": "chat" },
     "model": { "type": "string", "default": "openai/gpt-4o-mini" },
     "endpoint": { "type": "string", "description": "Absolute http(s) url or a {{ path }} template; defaults per api." },
-    "api_key": { "type": "string", "minLength": 1, "description": "Templated, e.g. {{ env.SIMPWF_OPENROUTER_KEY }}." },
+    "api_key": { "type": "string", "minLength": 1, "description": "Templated, e.g. {{ env.BEELINEWF_OPENROUTER_KEY }}." },
     "prompt": { "type": "string", "minLength": 1, "description": "Single-turn shorthand. Mutually exclusive with messages; system requires prompt." },
     "system": { "type": "string", "minLength": 1, "description": "System instruction. Only allowed together with prompt." },
     "messages": {

@@ -1,8 +1,8 @@
 package handler
 
 import (
+	"github.com/beelinewf/wf-engine/internal/workflow/auth"
 	"github.com/gin-gonic/gin"
-	"github.com/simpwf/workflow-engine/internal/workflow/auth"
 )
 
 // PrincipalContextKey is the Gin context key under which the authenticated

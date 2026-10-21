@@ -3,8 +3,8 @@ package service
 import (
 	"context"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/auth"
-	"github.com/simpwf/workflow-engine/internal/workflow/repository"
+	"github.com/beelinewf/wf-engine/internal/workflow/auth"
+	"github.com/beelinewf/wf-engine/internal/workflow/repository"
 )
 
 // StatisticsService is the use-case boundary for workflow statistics.

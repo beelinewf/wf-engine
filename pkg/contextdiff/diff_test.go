@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/simpwf/workflow-engine/pkg/contextdiff"
+	"github.com/beelinewf/wf-engine/pkg/contextdiff"
 )
 
 func TestDiffApplyRoundtrip(t *testing.T) {

@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )

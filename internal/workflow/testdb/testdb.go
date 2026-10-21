@@ -16,8 +16,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/beelinewf/wf-engine/pkg/database"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/simpwf/workflow-engine/pkg/database"
 	"gorm.io/gorm"
 )
 
@@ -28,12 +28,12 @@ const baseEnv = "TEST_DATABASE_DSN"
 // suiteDBs maps each test suite to its scratch database. Suites never share
 // a database: parallel packages plus per-test TRUNCATE forbid it.
 var suiteDBs = map[string]string{
-	"app":          "simpwf_test_app",
-	"database":     "simpwf_test_database",
-	"engine":       "simpwf_test_engine",
-	"repository":   "simpwf_test_repository",
-	"service":      "simpwf_test_service",
-	"statusupdate": "simpwf_test_statusupdate",
+	"app":          "beelinewf_test_app",
+	"database":     "beelinewf_test_database",
+	"engine":       "beelinewf_test_engine",
+	"repository":   "beelinewf_test_repository",
+	"service":      "beelinewf_test_service",
+	"statusupdate": "beelinewf_test_statusupdate",
 }
 
 // suiteEnv returns the suite-specific override var, e.g. TEST_DATABASE_DSN_ENGINE.

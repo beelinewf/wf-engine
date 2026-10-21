@@ -1,11 +1,11 @@
-# SimpWF — Durable Workflow Engine on PostgreSQL
+# BeelineWF — Durable Workflow Engine on PostgreSQL
 
-[![CI](https://github.com/didasy/simpwf/actions/workflows/ci.yml/badge.svg)](https://github.com/didasy/simpwf/actions/workflows/ci.yml)
+[![CI](https://github.com/beelinewf/wf-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/beelinewf/wf-engine/actions/workflows/ci.yml)
 ![Coverage](https://img.shields.io/badge/Coverage-80.3%25-brightgreen)
 [![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)](go.mod)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-SimpWF is a durable workflow engine in Go. Workflow definitions are
+BeelineWF is a durable workflow engine in Go. Workflow definitions are
 immutable and versioned, execution state lives in PostgreSQL, and workers
 claim work with `SELECT ... FOR UPDATE SKIP LOCKED` under leases and
 heartbeats. An HTTP API covers definitions, instances, input delivery,
@@ -15,7 +15,7 @@ status notifications. Both stay fully disabled when their DSN is absent.
 
 ## Contents
 
-- [Why SimpWF](#why-simpwf)
+- [Why BeelineWF](#why-beelinewf)
 - [Features](#features)
 - [How it works](#how-it-works)
 - [Requirements](#requirements)
@@ -32,7 +32,7 @@ status notifications. Both stay fully disabled when their DSN is absent.
 - [Security](#security)
 - [License](#license)
 
-## Why SimpWF
+## Why BeelineWF
 
 - **Durable by default.** Every state transition is checkpointed in
   PostgreSQL with lease plus revision fencing, so crashed workers never
@@ -143,25 +143,25 @@ curl http://localhost:8080/health/ready
 
 - App: `http://localhost:8080` (PostgreSQL `9921`, Redis `6379`,
   RabbitMQ `5672`, management UI `http://localhost:15672` with
-  `simpwf` / `simpwf`).
+  `beelinewf` / `beelinewf`).
 - Swagger UI: `http://localhost:8080/swagger/index.html`.
 - Auth is disabled in the compose defaults. To require the service credential,
-  set `SIMPWF_AUTH_ENABLED=true` and pass `X-Api-Token: wadidaw` on `/v1` calls.
-  To accept human tokens too, set `SIMPWF_AUTH_OIDC_ISSUER` and
-  `SIMPWF_AUTH_OIDC_CLIENT_ID` — or use the bundled `mock-oidc` service for a
+  set `BEELINEWF_AUTH_ENABLED=true` and pass `X-Api-Token: wadidaw` on `/v1` calls.
+  To accept human tokens too, set `BEELINEWF_AUTH_OIDC_ISSUER` and
+  `BEELINEWF_AUTH_OIDC_CLIENT_ID` — or use the bundled `mock-oidc` service for a
   zero-setup provider (test only: it mints a JWT for anyone who asks):
-  `SIMPWF_AUTH_OIDC_ENABLED=true SIMPWF_AUTH_OIDC_ISSUER=http://mock-oidc:9099
-  SIMPWF_AUTH_OIDC_CLIENT_ID=simpwf docker compose up --build`, then
+  `BEELINEWF_AUTH_OIDC_ENABLED=true BEELINEWF_AUTH_OIDC_ISSUER=http://mock-oidc:9099
+  BEELINEWF_AUTH_OIDC_CLIENT_ID=beelinewf docker compose up --build`, then
   `curl http://localhost:9099/token/admin` (`auditor`/`finance` cover the other
   shipped roles). The stack's role catalog mirrors `config.yaml`.
-- Broker-free mode: unset `SIMPWF_INFRA_REDIS_DSN` and
-  `SIMPWF_INFRA_RABBITMQ_DSN` on the `app` service.
+- Broker-free mode: unset `BEELINEWF_INFRA_REDIS_DSN` and
+  `BEELINEWF_INFRA_RABBITMQ_DSN` on the `app` service.
 
 ### Option B: Local Go
 
 ```bash
 # PostgreSQL (matches config.yaml)
-docker run -d --name simpwf-pg -p 9921:5432 \
+docker run -d --name beelinewf-pg -p 9921:5432 \
   -e POSTGRES_USER=gorm -e POSTGRES_PASSWORD=gorm -e POSTGRES_DB=gorm \
   postgres:16-alpine
 
@@ -174,7 +174,7 @@ go run ./cmd/app -config config.yaml
 # -> http://localhost:9999 (health: /health/live, /health/ready)
 ```
 
-Without a config file, the same keys are read from `SIMPWF_*` environment
+Without a config file, the same keys are read from `BEELINEWF_*` environment
 variables (see [.env.example](.env.example)).
 
 ## Your first workflow
@@ -219,7 +219,7 @@ different role, the same caller accepted once the role matches, the
 `record_actor` envelope recording the deliverer, and the `public: true`
 path: anonymous delivery accepted on a public node, refused on a private one,
 an invalid credential refused on both, and an anonymous status read still
-401. Set `SIMPWF_API_TOKEN` to also exercise the service-principal bypass.
+401. Set `BEELINEWF_API_TOKEN` to also exercise the service-principal bypass.
 The app must be started with a catalog that grants the roles the script
 uses; `config.e2e-oidc.yaml` is a working example.
 
@@ -258,12 +258,12 @@ system audit user. Key settings:
 | `infra.http.host`                                        | `localhost:9999`       | Compose overrides to `0.0.0.0:8080`                                                                             |
 | `infra.http.swagger_enabled`                             | `true`                 | Serves UI at `/swagger/index.html`                                                                              |
 | `infra.postgresql.dsn`                                   | local `gorm` DSN       | pgx/postgres wire format                                                                                        |
-| `infra.postgresql.max_open_conns`                        | `25`                   | Per-replica pool ceiling; exhaustion queues (`SIMPWF_INFRA_POSTGRESQL_MAX_OPEN_CONNS`)                          |
-| `infra.postgresql.max_idle_conns`                        | `25`                   | Warm idle cap per replica (`SIMPWF_INFRA_POSTGRESQL_MAX_IDLE_CONNS`)                                            |
-| `infra.postgresql.conn_max_lifetime`                     | `5m`                   | Max connection age before recycle (`SIMPWF_INFRA_POSTGRESQL_CONN_MAX_LIFETIME`); `0` = unlimited                |
-| `infra.postgresql.conn_max_idle_time`                    | `5m`                   | Max idle time before eviction (`SIMPWF_INFRA_POSTGRESQL_CONN_MAX_IDLE_TIME`); `0` = unlimited                   |
+| `infra.postgresql.max_open_conns`                        | `25`                   | Per-replica pool ceiling; exhaustion queues (`BEELINEWF_INFRA_POSTGRESQL_MAX_OPEN_CONNS`)                          |
+| `infra.postgresql.max_idle_conns`                        | `25`                   | Warm idle cap per replica (`BEELINEWF_INFRA_POSTGRESQL_MAX_IDLE_CONNS`)                                            |
+| `infra.postgresql.conn_max_lifetime`                     | `5m`                   | Max connection age before recycle (`BEELINEWF_INFRA_POSTGRESQL_CONN_MAX_LIFETIME`); `0` = unlimited                |
+| `infra.postgresql.conn_max_idle_time`                    | `5m`                   | Max idle time before eviction (`BEELINEWF_INFRA_POSTGRESQL_CONN_MAX_IDLE_TIME`); `0` = unlimited                   |
 | `infra.redis.dsn`                                        | `""` (disabled)        | e.g. `redis://localhost:6379/0`; unreachable broker fails startup                                               |
-| `infra.rabbitmq.dsn`                                     | `""` (disabled)        | e.g. `amqp://simpwf:simpwf@localhost:5672/`; queues default to `simpwf.input`, `simpwf.output`, `simpwf.status` |
+| `infra.rabbitmq.dsn`                                     | `""` (disabled)        | e.g. `amqp://beelinewf:beelinewf@localhost:5672/`; queues default to `beelinewf.input`, `beelinewf.output`, `beelinewf.status` |
 | `engine.default_node_timeout` / `max_node_timeout`       | `30s` / `5m`           | Caps script, `external_call`, and `output` nodes                                                                |
 | `engine.condition_timeout`                               | `5s`                   | Fixed budget for conditions, input validation, poller predicates, join scripts                                  |
 | `engine.parallel.max_depth`                              | `4`                    | Max parallel nesting depth (groups add no depth)                                                                |
@@ -275,14 +275,14 @@ system audit user. Key settings:
 | `engine.http_max_in_flight_per_host`                     | `16`                   | Per-host outbound HTTP cap; fleet-wide concurrency is replicas x this                                           |
 | `auth.enabled` / `api_token`                             | `false`                | When enabled, `/v1` requires `X-Api-Token` (the service principal)                                              |
 | `auth.oidc.*`                                            | disabled               | OIDC resource server; needs `issuer` and `client_id`                                                            |
-| `auth.role_permissions` / `SIMPWF_AUTH_ROLE_PERMISSIONS` | file / `{}`            | Role-to-action catalog as YAML map or JSON object; env overrides file; invalid JSON fails startup               |
+| `auth.role_permissions` / `BEELINEWF_AUTH_ROLE_PERMISSIONS` | file / `{}`            | Role-to-action catalog as YAML map or JSON object; env overrides file; invalid JSON fails startup               |
 
 List-valued keys accept comma-separated env values, e.g.
-`SIMPWF_ENGINE_HTTP_ALLOWLIST="api.example.com,jsonplaceholder.typicode.com"`.
-`SIMPWF_AUTH_ROLE_PERMISSIONS` takes a JSON object of role name to action
+`BEELINEWF_ENGINE_HTTP_ALLOWLIST="api.example.com,jsonplaceholder.typicode.com"`.
+`BEELINEWF_AUTH_ROLE_PERMISSIONS` takes a JSON object of role name to action
 list, e.g. `{"admin":["definitions:read","roles:read"]}`. A set value
 overrides the config file; blank falls back to it. Invalid JSON fails
-startup with a `configuration: SIMPWF_AUTH_ROLE_PERMISSIONS: invalid JSON`
+startup with a `configuration: BEELINEWF_AUTH_ROLE_PERMISSIONS: invalid JSON`
 error.
 
 ## Authentication and authorization
@@ -340,7 +340,7 @@ auth:
     auditor: ["definitions:read", "instances:read", "statistics:read", "roles:read"]
 ```
 
-Same catalog via env: `SIMPWF_AUTH_ROLE_PERMISSIONS='{"admin":["*"],"finance":["instances:read","input:deliver"]}'` (overrides the file).
+Same catalog via env: `BEELINEWF_AUTH_ROLE_PERMISSIONS='{"admin":["*"],"finance":["instances:read","input:deliver"]}'` (overrides the file).
 
 `"*"` is the wildcard: a role holding it passes every gate, the same bypass
 the service principal gets. The other two lines are the shipped defaults from
@@ -559,7 +559,7 @@ Covered transitions: `waiting_for_input`, `input_received`, `paused`,
 `resumed`, `finished`, `failed`, `stopped`. Each event fans out to one
 outbox row per configured transport sharing one logical event id, delivered
 in per-instance/per-transport order, at-least-once. Receivers dedupe on the
-id (`Idempotency-Key` / `X-SimpWF-Event-ID` on HTTP, AMQP `message_id` on
+id (`Idempotency-Key` / `X-BeelineWF-Event-ID` on HTTP, AMQP `message_id` on
 RabbitMQ, embedded `id` on Redis). A transport configured without its
 broker DSN dead-letters. Full payload and ordering guarantees are in
 [ARCHITECTURE.md](ARCHITECTURE.md).
@@ -585,7 +585,7 @@ CREATEDB once; afterwards the existence check is a no-op). Without Postgres,
 Postgres one-liner:
 
 ```bash
-docker run -d --name simpwf-pg -e POSTGRES_USER=gorm -e POSTGRES_PASSWORD=gorm -e POSTGRES_DB=gorm -p 9921:5432 postgres:16
+docker run -d --name beelinewf-pg -e POSTGRES_USER=gorm -e POSTGRES_PASSWORD=gorm -e POSTGRES_DB=gorm -p 9921:5432 postgres:16
 ```
 
 Validation before opening a PR:
@@ -692,4 +692,4 @@ is clean, and `task test` passes.
 
 MIT. See [LICENSE](LICENSE).
 
-Copyright (c) 2026 didasy.
+Copyright (c) 2026 BeelineWF.

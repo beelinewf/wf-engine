@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/repository"
+	"github.com/beelinewf/wf-engine/pkg/ids"
 	"github.com/gin-gonic/gin"
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
-	"github.com/simpwf/workflow-engine/internal/workflow/repository"
-	"github.com/simpwf/workflow-engine/pkg/ids"
 )
 
 const (

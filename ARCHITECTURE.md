@@ -1,6 +1,6 @@
-# SimpWF Architecture
+# BeelineWF Architecture
 
-SimpWF is a PostgreSQL-backed durable workflow engine: immutable definitions,
+BeelineWF is a PostgreSQL-backed durable workflow engine: immutable definitions,
 a leased state machine, HTTP input/control/debug APIs, and optional
 Redis/RabbitMQ transports for broker input nodes, output nodes, and
 multi-transport status notifications. A transactional outbox is the durable
@@ -563,10 +563,10 @@ for a healthy database, applies `migrations/versions`), Redis 7 and
 RabbitMQ 4 (with management UI), and `app` (waits for the migration to
 complete and both brokers to be healthy, then serves the API, dispatcher,
 status dispatcher, and broker consumers). The compose stack ships with
-authentication **disabled** (`SIMPWF_AUTH_ENABLED=false`) and the wildcard
-HTTP allowlist for dev; the `SIMPWF_API_TOKEN` value present in the file is
-inert while auth is off, and is ignored unless `SIMPWF_AUTH_ENABLED=true` is
-set. Turning auth on therefore takes two variables, not one. The role catalog comes from `config.yaml` unless `SIMPWF_AUTH_ROLE_PERMISSIONS` holds a JSON object, which overrides the file; invalid JSON fails startup. The app never
+authentication **disabled** (`BEELINEWF_AUTH_ENABLED=false`) and the wildcard
+HTTP allowlist for dev; the `BEELINEWF_API_TOKEN` value present in the file is
+inert while auth is off, and is ignored unless `BEELINEWF_AUTH_ENABLED=true` is
+set. Turning auth on therefore takes two variables, not one. The role catalog comes from `config.yaml` unless `BEELINEWF_AUTH_ROLE_PERMISSIONS` holds a JSON object, which overrides the file; invalid JSON fails startup. The app never
 migrates. Broker
 DSNs are optional: without them the app runs HTTP-only. Horizontal scaling
 is safe: multiple `app` replicas share the database; leases and SKIP LOCKED

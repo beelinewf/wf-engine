@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/kernel"
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/kernel"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
 )
 
 // mapGraph is a test graph over hardcoded node ids.

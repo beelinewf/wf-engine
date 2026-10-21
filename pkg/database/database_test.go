@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/testdb"
-	"github.com/simpwf/workflow-engine/pkg/database"
+	"github.com/beelinewf/wf-engine/internal/workflow/testdb"
+	"github.com/beelinewf/wf-engine/pkg/database"
 )
 
 func TestNewRejectsEmptyDSN(t *testing.T) {

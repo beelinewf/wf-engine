@@ -13,7 +13,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/simpwf/workflow-engine/pkg/envsnapshot"
+	"github.com/beelinewf/wf-engine/pkg/envsnapshot"
 )
 
 // ErrPathNotFound is returned when a path does not resolve in the context.

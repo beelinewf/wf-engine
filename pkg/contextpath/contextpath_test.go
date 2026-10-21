@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/simpwf/workflow-engine/pkg/contextpath"
+	"github.com/beelinewf/wf-engine/pkg/contextpath"
 )
 
 func TestParse(t *testing.T) {
@@ -163,23 +163,23 @@ func TestRenderTemplateMissingPath(t *testing.T) {
 
 func TestRenderTemplateDeniedEnvAsMissing(t *testing.T) {
 	ctx := map[string]any{"env": map[string]any{
-		"SIMPWF_API_TOKEN":    "tok",
-		"SIMPWF_AUTH_ENABLED": "true",
-		"SIMPWF_S3_ENDPOINT":  "play.min.io:9000",
+		"BEELINEWF_API_TOKEN":    "tok",
+		"BEELINEWF_AUTH_ENABLED": "true",
+		"BEELINEWF_S3_ENDPOINT":  "play.min.io:9000",
 	}}
-	if _, err := contextpath.RenderTemplate("{{ env.SIMPWF_API_TOKEN }}", ctx); !errors.Is(err, contextpath.ErrPathNotFound) {
+	if _, err := contextpath.RenderTemplate("{{ env.BEELINEWF_API_TOKEN }}", ctx); !errors.Is(err, contextpath.ErrPathNotFound) {
 		t.Fatalf("want ErrPathNotFound, got %v", err)
 	}
-	if _, err := contextpath.RenderTemplate("x {{ env.SIMPWF_AUTH_ENABLED }}", ctx); !errors.Is(err, contextpath.ErrPathNotFound) {
+	if _, err := contextpath.RenderTemplate("x {{ env.BEELINEWF_AUTH_ENABLED }}", ctx); !errors.Is(err, contextpath.ErrPathNotFound) {
 		t.Fatalf("interpolation: want ErrPathNotFound, got %v", err)
 	}
-	if _, err := contextpath.Get(ctx, "env.SIMPWF_SYSTEM_NAME"); !errors.Is(err, contextpath.ErrPathNotFound) {
+	if _, err := contextpath.Get(ctx, "env.BEELINEWF_SYSTEM_NAME"); !errors.Is(err, contextpath.ErrPathNotFound) {
 		t.Fatalf("Get: want ErrPathNotFound, got %v", err)
 	}
-	if _, err := contextpath.RenderJSON([]byte(`{"a":"{{ env.SIMPWF_INFRA_POSTGRESQL_DSN }}"}`), ctx); !errors.Is(err, contextpath.ErrPathNotFound) {
+	if _, err := contextpath.RenderJSON([]byte(`{"a":"{{ env.BEELINEWF_INFRA_POSTGRESQL_DSN }}"}`), ctx); !errors.Is(err, contextpath.ErrPathNotFound) {
 		t.Fatalf("RenderJSON: want ErrPathNotFound, got %v", err)
 	}
-	got, err := contextpath.RenderTemplate("{{ env.SIMPWF_S3_ENDPOINT }}", ctx)
+	got, err := contextpath.RenderTemplate("{{ env.BEELINEWF_S3_ENDPOINT }}", ctx)
 	if err != nil || got != "play.min.io:9000" {
 		t.Fatalf("allowed broke: %v %v", got, err)
 	}

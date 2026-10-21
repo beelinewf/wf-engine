@@ -6,8 +6,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/defcache"
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/defcache"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )

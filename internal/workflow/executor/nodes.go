@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
-	"github.com/simpwf/workflow-engine/pkg/jsfunc"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/pkg/jsfunc"
 )
 
 var errMissingExternalConfig = errors.New("external_call node has neither http nor execution config")

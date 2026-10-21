@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/beelinewf/wf-engine/internal/workflow/repository"
 	"github.com/panjf2000/ants/v2"
-	"github.com/simpwf/workflow-engine/internal/workflow/repository"
 )
 
 // DispatcherOptions tunes the claim loop. Zero values get defaults.

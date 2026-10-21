@@ -5,7 +5,7 @@
 package all
 
 import (
-	_ "github.com/simpwf/workflow-engine/pkg/customnode/jev"
-	_ "github.com/simpwf/workflow-engine/pkg/customnode/openrouter"
-	_ "github.com/simpwf/workflow-engine/pkg/customnode/s3fetch"
+	_ "github.com/beelinewf/wf-engine/pkg/customnode/jev"
+	_ "github.com/beelinewf/wf-engine/pkg/customnode/openrouter"
+	_ "github.com/beelinewf/wf-engine/pkg/customnode/s3fetch"
 )

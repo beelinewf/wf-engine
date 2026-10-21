@@ -4,8 +4,8 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
 	"github.com/gin-gonic/gin"
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
 )
 
 // Problem is an RFC 7807 application/problem+json body.

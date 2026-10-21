@@ -14,10 +14,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/repository"
+	"github.com/beelinewf/wf-engine/internal/workflow/service"
 	"github.com/robfig/cron/v3"
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
-	"github.com/simpwf/workflow-engine/internal/workflow/repository"
-	"github.com/simpwf/workflow-engine/internal/workflow/service"
 )
 
 // fireTimeout bounds one tick's instance creation.

@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/simpwf/workflow-engine/pkg/contextpath"
+	"github.com/beelinewf/wf-engine/pkg/contextpath"
 )
 
 // Diff stores changed values and removed paths. Unset is always encoded

@@ -1,6 +1,6 @@
 # FE integration guide
 
-FE entry point for SimpWF REST API. Three files:
+FE entry point for BeelineWF REST API. Three files:
 
 - `README.md` (this file): base URL, auth, conventions, errors, pagination, happy-path flow.
 - `endpoints.md`: every endpoint, what it requires, what it returns, status codes.
@@ -106,8 +106,8 @@ Every `GET` list returns the same envelope:
 2. Create a workflow definition (`POST /v1/workflow/definition`) with `start_node_id`, `nodes`, optional `keys`,
    optional `context_mode`, optional `status_update`. Full sample: `workflow.yaml` at repo root.
 3. Start an instance (`POST /v1/workflow/instance`) with `workflow_definition_id` and optional `context` object.
-   Creation freezes `SIMPWF_*` process env under the `env` root and the secrets table under the `secret` root, so
-   definition templates (`{{ env.SIMPWF_X }}`, `{{ secret.KEY }}`) and scripts (`context.env`, `context.secret`)
+   Creation freezes `BEELINEWF_*` process env under the `env` root and the secrets table under the `secret` root, so
+   definition templates (`{{ env.BEELINEWF_X }}`, `{{ secret.KEY }}`) and scripts (`context.env`, `context.secret`)
    resolve from the frozen copy (details in `fields.md`).
    Normal runs start `waiting`. Pass `"debug": true` for a step-through run: it starts `paused` (runnable,
    `waiting_reason: null`) and re-pauses after every node until termination, so each `POST .../resume` advances

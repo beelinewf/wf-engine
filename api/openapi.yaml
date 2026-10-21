@@ -1,6 +1,6 @@
 openapi: 3.1.0
 info:
-  title: SimpWF Workflow Engine
+  title: BeelineWF Workflow Engine
   version: 1.0.0
   description: |
     Durable PostgreSQL-backed workflow engine. Definitions are immutable;
@@ -8,8 +8,8 @@ info:
     and expose status, context, input, and node-level debugging APIs, plus a
     live status stream over server-sent events.
     Lean-context mode stores per-node context as replayable set/unset diffs
-    with periodic anchors. Fleet default: SIMPWF_ENGINE_LEAN_CONTEXT_DEFAULT
-    (also SIMPWF_ENGINE_LEAN_ANCHOR_EVERY, SIMPWF_ENGINE_LEAN_REPLAY_MAX).
+    with periodic anchors. Fleet default: BEELINEWF_ENGINE_LEAN_CONTEXT_DEFAULT
+    (also BEELINEWF_ENGINE_LEAN_ANCHOR_EVERY, BEELINEWF_ENGINE_LEAN_REPLAY_MAX).
 servers:
   - url: /
 tags:
@@ -1548,7 +1548,7 @@ components:
           type: object
           description: |
             Workflow content. Optional top-level `context_mode: full|lean`
-            overrides the SIMPWF_ENGINE_LEAN_CONTEXT_DEFAULT fleet default
+            overrides the BEELINEWF_ENGINE_LEAN_CONTEXT_DEFAULT fleet default
             and is snapshotted onto each created instance.
     WorkflowDefinition:
       type: object
@@ -1657,7 +1657,7 @@ components:
         context_mode:
           type: string
           enum: [full, lean]
-          description: Snapshotted at instance create from the definition context_mode or SIMPWF_ENGINE_LEAN_CONTEXT_DEFAULT
+          description: Snapshotted at instance create from the definition context_mode or BEELINEWF_ENGINE_LEAN_CONTEXT_DEFAULT
         debug:
           type: boolean
           description: Step-through run created with debug true; re-pauses after every node

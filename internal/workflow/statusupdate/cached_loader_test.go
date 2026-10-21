@@ -6,8 +6,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
-	"github.com/simpwf/workflow-engine/internal/workflow/statusupdate"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/statusupdate"
 )
 
 type countingConfigLoader struct {
