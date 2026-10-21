@@ -2,12 +2,12 @@
 // and environment variables, merged per key.
 //
 // Precedence (highest first): environment variables > config file > defaults.
-// Every key can be set as a SIMPWF_-prefixed environment variable (dots in
-// keys become underscores, e.g. SIMPWF_WORKER_POOL_SIZE); a key absent from
+// Every key can be set as a BEELINEWF_-prefixed environment variable (dots in
+// keys become underscores, e.g. BEELINEWF_WORKER_POOL_SIZE); a key absent from
 // the environment falls back to the config file, then to the code default.
 // A set-but-empty variable is treated as unset and falls back the same way.
 // The role catalog is the exception: maps cannot ride AutomaticEnv, so
-// auth.role_permissions is applied from SIMPWF_AUTH_ROLE_PERMISSIONS as a
+// auth.role_permissions is applied from BEELINEWF_AUTH_ROLE_PERMISSIONS as a
 // post-unmarshal JSON override, where a set non-blank value wins over the
 // file and blank falls back to it.
 package configuration
@@ -21,13 +21,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/beelinewf/wf-engine/pkg/ids"
 	"github.com/go-viper/mapstructure/v2"
-	"github.com/simpwf/workflow-engine/pkg/ids"
 	"github.com/spf13/viper"
 )
 
 const (
-	envPrefix         = "SIMPWF"
+	envPrefix         = "BEELINEWF"
 	defaultConfigFile = "config.yaml"
 )
 
@@ -244,39 +244,39 @@ func Load(opts ...Option) (*Config, error) {
 	setDefaults(v)
 	v.SetEnvPrefix(envPrefix)
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
-	// auth.api_token is exposed as SIMPWF_API_TOKEN (not
-	// SIMPWF_AUTH_API_TOKEN) to match the requested env contract.
-	_ = v.BindEnv("auth.api_token", "SIMPWF_API_TOKEN")
-	// auth.enabled is bound explicitly because SIMPWF_AUTH_ENABLED is the
+	// auth.api_token is exposed as BEELINEWF_API_TOKEN (not
+	// BEELINEWF_AUTH_API_TOKEN) to match the requested env contract.
+	_ = v.BindEnv("auth.api_token", "BEELINEWF_API_TOKEN")
+	// auth.enabled is bound explicitly because BEELINEWF_AUTH_ENABLED is the
 	// switch compose and the e2e harness use to turn authentication on
 	// without rewriting config.yaml.
-	_ = v.BindEnv("auth.enabled", "SIMPWF_AUTH_ENABLED")
-	// auth.oidc.* is exposed as SIMPWF_AUTH_OIDC_* (the default mapping),
+	_ = v.BindEnv("auth.enabled", "BEELINEWF_AUTH_ENABLED")
+	// auth.oidc.* is exposed as BEELINEWF_AUTH_OIDC_* (the default mapping),
 	// which is bound explicitly so the keys resolve without a config file.
 	for _, key := range []string{
 		"enabled", "issuer", "client_id", "audience",
 		"roles_claim", "username_claim", "clock_skew", "cache_ttl",
 	} {
-		_ = v.BindEnv("auth.oidc."+key, "SIMPWF_AUTH_OIDC_"+strings.ToUpper(key))
+		_ = v.BindEnv("auth.oidc."+key, "BEELINEWF_AUTH_OIDC_"+strings.ToUpper(key))
 	}
 	// Lean settings are operator toggles and must override config.yaml.
-	_ = v.BindEnv("engine.lean_context_default", "SIMPWF_ENGINE_LEAN_CONTEXT_DEFAULT")
-	_ = v.BindEnv("engine.lean_anchor_every", "SIMPWF_ENGINE_LEAN_ANCHOR_EVERY")
-	_ = v.BindEnv("engine.lean_replay_max", "SIMPWF_ENGINE_LEAN_REPLAY_MAX")
+	_ = v.BindEnv("engine.lean_context_default", "BEELINEWF_ENGINE_LEAN_CONTEXT_DEFAULT")
+	_ = v.BindEnv("engine.lean_anchor_every", "BEELINEWF_ENGINE_LEAN_ANCHOR_EVERY")
+	_ = v.BindEnv("engine.lean_replay_max", "BEELINEWF_ENGINE_LEAN_REPLAY_MAX")
 	// Env snapshot deny adjustments are operator toggles and must override
 	// config.yaml.
-	_ = v.BindEnv("engine.env_deny_extra", "SIMPWF_ENGINE_ENV_DENY_EXTRA")
-	_ = v.BindEnv("engine.env_allow_exceptions", "SIMPWF_ENGINE_ENV_ALLOW_EXCEPTIONS")
+	_ = v.BindEnv("engine.env_deny_extra", "BEELINEWF_ENGINE_ENV_DENY_EXTRA")
+	_ = v.BindEnv("engine.env_allow_exceptions", "BEELINEWF_ENGINE_ENV_ALLOW_EXCEPTIONS")
 	// Consumer retry knobs are operator toggles and must override
 	// config.yaml.
-	_ = v.BindEnv("engine.consumer_retry.max_attempts", "SIMPWF_ENGINE_CONSUMER_RETRY_MAX_ATTEMPTS")
-	_ = v.BindEnv("engine.consumer_retry.initial_backoff", "SIMPWF_ENGINE_CONSUMER_RETRY_INITIAL_BACKOFF")
-	_ = v.BindEnv("engine.consumer_retry.max_backoff", "SIMPWF_ENGINE_CONSUMER_RETRY_MAX_BACKOFF")
-	_ = v.BindEnv("engine.consumer_retry.min_healthy_run", "SIMPWF_ENGINE_CONSUMER_RETRY_MIN_HEALTHY_RUN")
+	_ = v.BindEnv("engine.consumer_retry.max_attempts", "BEELINEWF_ENGINE_CONSUMER_RETRY_MAX_ATTEMPTS")
+	_ = v.BindEnv("engine.consumer_retry.initial_backoff", "BEELINEWF_ENGINE_CONSUMER_RETRY_INITIAL_BACKOFF")
+	_ = v.BindEnv("engine.consumer_retry.max_backoff", "BEELINEWF_ENGINE_CONSUMER_RETRY_MAX_BACKOFF")
+	_ = v.BindEnv("engine.consumer_retry.min_healthy_run", "BEELINEWF_ENGINE_CONSUMER_RETRY_MIN_HEALTHY_RUN")
 	// HTTP bulkhead caps are operator toggles and must override
 	// config.yaml.
-	_ = v.BindEnv("engine.http_max_in_flight", "SIMPWF_ENGINE_HTTP_MAX_IN_FLIGHT")
-	_ = v.BindEnv("engine.http_max_in_flight_per_host", "SIMPWF_ENGINE_HTTP_MAX_IN_FLIGHT_PER_HOST")
+	_ = v.BindEnv("engine.http_max_in_flight", "BEELINEWF_ENGINE_HTTP_MAX_IN_FLIGHT")
+	_ = v.BindEnv("engine.http_max_in_flight_per_host", "BEELINEWF_ENGINE_HTTP_MAX_IN_FLIGHT_PER_HOST")
 
 	if _, err := os.Stat(path); err == nil {
 		v.SetConfigFile(path)
@@ -285,11 +285,11 @@ func Load(opts ...Option) (*Config, error) {
 		}
 	}
 	// auth.role_permissions cannot ride AutomaticEnv: a set-but-blank
-	// SIMPWF_AUTH_ROLE_PERMISSIONS would shadow the file subtree with an
+	// BEELINEWF_AUTH_ROLE_PERMISSIONS would shadow the file subtree with an
 	// empty catalog during unmarshal. When the JSON override below will
 	// not run (unset or blank), pin the file value above the environment
 	// so it survives.
-	if strings.TrimSpace(os.Getenv("SIMPWF_AUTH_ROLE_PERMISSIONS")) == "" {
+	if strings.TrimSpace(os.Getenv("BEELINEWF_AUTH_ROLE_PERMISSIONS")) == "" {
 		if fileVal := v.Get("auth.role_permissions"); fileVal != nil {
 			v.Set("auth.role_permissions", fileVal)
 		}
@@ -305,14 +305,14 @@ func Load(opts ...Option) (*Config, error) {
 	))); err != nil {
 		return nil, fmt.Errorf("configuration: unmarshal: %w", err)
 	}
-	// auth.role_permissions is exposed as SIMPWF_AUTH_ROLE_PERMISSIONS, a JSON
+	// auth.role_permissions is exposed as BEELINEWF_AUTH_ROLE_PERMISSIONS, a JSON
 	// object of role name to action list. Applied as a post-unmarshal override
 	// (not BindEnv): a map cannot ride AutomaticEnv, and an explicit override
 	// gives env-wins precedence plus a fail-fast JSON error.
-	if raw := strings.TrimSpace(os.Getenv("SIMPWF_AUTH_ROLE_PERMISSIONS")); raw != "" {
+	if raw := strings.TrimSpace(os.Getenv("BEELINEWF_AUTH_ROLE_PERMISSIONS")); raw != "" {
 		var catalog map[string][]string
 		if err := json.Unmarshal([]byte(raw), &catalog); err != nil {
-			return nil, fmt.Errorf("configuration: SIMPWF_AUTH_ROLE_PERMISSIONS: invalid JSON: %w", err)
+			return nil, fmt.Errorf("configuration: BEELINEWF_AUTH_ROLE_PERMISSIONS: invalid JSON: %w", err)
 		}
 		cfg.Auth.RolePermissions = catalog
 	}
@@ -333,7 +333,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("auth.enabled", false)
 	v.SetDefault("auth.api_token", "")
 	// auth.role_permissions has no default: Load reads it from
-	// SIMPWF_AUTH_ROLE_PERMISSIONS as a post-unmarshal override. Registering
+	// BEELINEWF_AUTH_ROLE_PERMISSIONS as a post-unmarshal override. Registering
 	// it here would put it in AllKeys and let AutomaticEnv hand the raw JSON
 	// string to the map decoder in env-only mode. Omitting it leaves the
 	// catalog nil until the file or the override supplies one, which
@@ -359,9 +359,9 @@ func setDefaults(v *viper.Viper) {
 	// safe defaults so an enabled RabbitMQ always has valid destinations.
 	v.SetDefault("infra.redis.dsn", "")
 	v.SetDefault("infra.rabbitmq.dsn", "")
-	v.SetDefault("infra.rabbitmq.input_queue", "simpwf.input")
-	v.SetDefault("infra.rabbitmq.output_queue", "simpwf.output")
-	v.SetDefault("infra.rabbitmq.status_queue", "simpwf.status")
+	v.SetDefault("infra.rabbitmq.input_queue", "beelinewf.input")
+	v.SetDefault("infra.rabbitmq.output_queue", "beelinewf.output")
+	v.SetDefault("infra.rabbitmq.status_queue", "beelinewf.status")
 	v.SetDefault("worker.pool.size", 1000)
 	v.SetDefault("worker.status_pool.size", 20)
 	v.SetDefault("scheduler.enabled", true)
@@ -532,7 +532,7 @@ func validateEnvPatterns(field string, patterns []string) error {
 		if p == "" {
 			continue
 		}
-		if _, err := path.Match(p, "SIMPWF_PROBE"); err != nil {
+		if _, err := path.Match(p, "BEELINEWF_PROBE"); err != nil {
 			return fmt.Errorf("configuration: %s: %w", field, err)
 		}
 	}

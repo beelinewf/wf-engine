@@ -10,9 +10,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/executor"
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
-	"github.com/simpwf/workflow-engine/internal/workflow/repository"
+	"github.com/beelinewf/wf-engine/internal/workflow/executor"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/repository"
 )
 
 // DefaultHTTPTimeout bounds each webhook request.
@@ -36,7 +36,7 @@ func NewHTTPPublisher(client *executor.HTTPExecutor, timeout time.Duration) *HTT
 }
 
 // Publish delivers one event. The logical event id travels as both
-// Idempotency-Key and X-SimpWF-Event-ID so receivers can dedupe
+// Idempotency-Key and X-BeelineWF-Event-ID so receivers can dedupe
 // at-least-once deliveries across all transports.
 func (p *HTTPPublisher) Publish(ctx context.Context, cfg *model.StatusUpdateConfig, ev repository.PendingStatusUpdate) error {
 	if cfg.HTTP == nil {
@@ -48,9 +48,9 @@ func (p *HTTPPublisher) Publish(ctx context.Context, cfg *model.StatusUpdateConf
 		method = "POST"
 	}
 	headers := map[string]string{
-		"Content-Type":      "application/json",
-		"Idempotency-Key":   ev.LogicalID,
-		"X-SimpWF-Event-ID": ev.LogicalID,
+		"Content-Type":         "application/json",
+		"Idempotency-Key":      ev.LogicalID,
+		"X-BeelineWF-Event-ID": ev.LogicalID,
 	}
 	for k, v := range httpCfg.Headers {
 		headers[k] = v

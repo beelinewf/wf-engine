@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SimpWF black-box end-to-end checks against a running app.
+# BeelineWF black-box end-to-end checks against a running app.
 #
 #   bash scripts/e2e.sh [BASE_URL] [WORKFLOW_JSON]
 #

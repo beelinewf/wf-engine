@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/form"
+	"github.com/beelinewf/wf-engine/internal/workflow/form"
 )
 
 func TestCheckSchemaAcceptsValid(t *testing.T) {

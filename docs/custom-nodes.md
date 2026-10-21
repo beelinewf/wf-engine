@@ -114,17 +114,17 @@ custom type. Other builtins reject it at parse.
 ## `{{ env.* }}` — allowlisted env in templates
 
 At instance creation, `Create` snapshots process env vars starting with
-`SIMPWF_` into the instance context under the reserved `env` root, so
-configs address them as `{{ env.SIMPWF_X }}`:
+`BEELINEWF_` into the instance context under the reserved `env` root, so
+configs address them as `{{ env.BEELINEWF_X }}`:
 
-- Only `SIMPWF_*` is visible. Anything else (`NOT_MINE`, `PATH`, …) never
+- Only `BEELINEWF_*` is visible. Anything else (`NOT_MINE`, `PATH`, …) never
   enters the context.
-- Credentials are denied, not snapshotted: `SIMPWF_API_TOKEN`, `SIMPWF_AUTH_*`,
-  `SIMPWF_SYSTEM_*`, and any `SIMPWF_*_DSN` (PostgreSQL/Redis/RabbitMQ DSNs)
+- Credentials are denied, not snapshotted: `BEELINEWF_API_TOKEN`, `BEELINEWF_AUTH_*`,
+  `BEELINEWF_SYSTEM_*`, and any `BEELINEWF_*_DSN` (PostgreSQL/Redis/RabbitMQ DSNs)
   are excluded, and `{{ env.<denied> }}` resolves as missing. Operators add
   patterns with `engine.env_deny_extra` and narrow them with
-  `engine.env_allow_exceptions` (env: `SIMPWF_ENGINE_ENV_DENY_EXTRA`,
-  `SIMPWF_ENGINE_ENV_ALLOW_EXCEPTIONS`, comma-separated globs); the hardcoded
+  `engine.env_allow_exceptions` (env: `BEELINEWF_ENGINE_ENV_DENY_EXTRA`,
+  `BEELINEWF_ENGINE_ENV_ALLOW_EXCEPTIONS`, comma-separated globs); the hardcoded
   defaults always apply, so the lists only ever tighten or extend.
 - The snapshot is per-instance, taken once at creation. Later process-env
   changes do not affect running instances.
@@ -161,8 +161,8 @@ Worked examples: [`pkg/customnode/s3fetch/README.md`](../pkg/customnode/s3fetch/
 Bundled `openrouter` custom node calls OpenRouter Chat Completions or
 Responses API through shared `executor.HTTPExecutor`. It supports a
 `prompt`/`system` shorthand or explicit `messages[]`; API key is rendered
-from `{{ env.SIMPWF_OPENROUTER_KEY }}` and never returned or logged.
+from `{{ env.BEELINEWF_OPENROUTER_KEY }}` and never returned or logged.
 `openrouter.ai` must be present in `engine.http_allowlist` (or
-`SIMPWF_ENGINE_HTTP_ALLOWLIST` when running without a config file). Full
+`BEELINEWF_ENGINE_HTTP_ALLOWLIST` when running without a config file). Full
 schema, output shape, example YAML, and seed workflow are documented in
 [`pkg/customnode/openrouter/README.md`](../pkg/customnode/openrouter/README.md).

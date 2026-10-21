@@ -5,7 +5,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )

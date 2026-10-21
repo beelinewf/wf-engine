@@ -12,13 +12,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/executor"
-	"github.com/simpwf/workflow-engine/internal/workflow/kernel"
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
-	"github.com/simpwf/workflow-engine/internal/workflow/repository"
-	"github.com/simpwf/workflow-engine/pkg/contextdiff"
-	"github.com/simpwf/workflow-engine/pkg/contextpath"
-	"github.com/simpwf/workflow-engine/pkg/ids"
+	"github.com/beelinewf/wf-engine/internal/workflow/executor"
+	"github.com/beelinewf/wf-engine/internal/workflow/kernel"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/repository"
+	"github.com/beelinewf/wf-engine/pkg/contextdiff"
+	"github.com/beelinewf/wf-engine/pkg/contextpath"
+	"github.com/beelinewf/wf-engine/pkg/ids"
 )
 
 // WorkflowLoader resolves the materialized executable node tree for an

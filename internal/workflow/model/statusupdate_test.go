@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
 )
 
 const (
-	validURL    = "https://hooks.example.com/simpwf"
+	validURL    = "https://hooks.example.com/beelinewf"
 	validNodeID = "11111111-1111-7111-8111-111111111111"
 )
 

@@ -6,10 +6,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/beelinewf/wf-engine/internal/workflow/defcache"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/repository"
 	"github.com/panjf2000/ants/v2"
-	"github.com/simpwf/workflow-engine/internal/workflow/defcache"
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
-	"github.com/simpwf/workflow-engine/internal/workflow/repository"
 )
 
 // ConfigLoader resolves the immutable status_update configuration of a

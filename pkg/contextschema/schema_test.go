@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simpwf/workflow-engine/pkg/contextschema"
+	"github.com/beelinewf/wf-engine/pkg/contextschema"
 )
 
 func decode(t *testing.T, raw string) any {

@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/beelinewf/wf-engine/pkg/jsfunc"
 	"github.com/dop251/goja"
-	"github.com/simpwf/workflow-engine/pkg/jsfunc"
 )
 
 // ErrScriptTimeout is returned when a script exceeds its budget.

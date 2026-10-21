@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
 	"github.com/santhosh-tekuri/jsonschema/v6"
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
 )
 
 // TestConfigSchemaIsRegistered proves the init registration carried the
@@ -106,7 +106,7 @@ func TestConfigSchemaNumericRanges(t *testing.T) {
 func TestConfigSchemaAcceptsShippedExamples(t *testing.T) {
 	chat := wrapNode("openrouter", json.RawMessage(`{
       "api": "chat", "model": "openai/gpt-4o-mini",
-      "api_key": "{{ env.SIMPWF_OPENROUTER_KEY }}",
+      "api_key": "{{ env.BEELINEWF_OPENROUTER_KEY }}",
       "system": "Answer briefly and accurately.",
       "prompt": "{{ question }}",
       "temperature": 0.2, "max_tokens": 256, "top_p": 0.9
@@ -115,7 +115,7 @@ func TestConfigSchemaAcceptsShippedExamples(t *testing.T) {
 
 	responses := wrapNode("openrouter", json.RawMessage(`{
       "api": "responses", "model": "openai/gpt-4o-mini",
-      "api_key": "{{ env.SIMPWF_OPENROUTER_KEY }}",
+      "api_key": "{{ env.BEELINEWF_OPENROUTER_KEY }}",
       "messages": [
         {"role": "developer", "content": "Use the prior chat answer and produce a concise follow-up."},
         {"role": "user", "content": "Question: {{ question }}"}

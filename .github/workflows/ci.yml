@@ -124,10 +124,10 @@ jobs:
           version: v1.3.0
       - name: Atlas validate (replay migration directory on a clean DB)
         run: |
-          PGPASSWORD=gorm createdb -h localhost -p 9921 -U gorm simpwf_ci_validate
+          PGPASSWORD=gorm createdb -h localhost -p 9921 -U gorm beelinewf_ci_validate
           atlas migrate validate \
             --config file://migrations/atlas.hcl --env gorm \
-            --var dev_url='postgres://gorm:gorm@localhost:9921/simpwf_ci_validate?sslmode=disable'
+            --var dev_url='postgres://gorm:gorm@localhost:9921/beelinewf_ci_validate?sslmode=disable'
       - name: Atlas apply
         run: |
           atlas migrate apply \

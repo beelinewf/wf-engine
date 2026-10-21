@@ -3,7 +3,7 @@
 // choice, score) and returns the raw probabilities verbatim — no
 // thresholds live in this node; downstream conditions/script nodes gate.
 //
-// Configs address the server-side key as {{ env.SIMPWF_OPENROUTER_KEY }};
+// Configs address the server-side key as {{ env.BEELINEWF_OPENROUTER_KEY }};
 // the snapshot is per-instance at creation. The host openrouter.ai must
 // be in the engine HTTP allowlist.
 package jev
@@ -19,9 +19,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/executor"
-	"github.com/simpwf/workflow-engine/pkg/contextpath"
-	"github.com/simpwf/workflow-engine/pkg/customnode"
+	"github.com/beelinewf/wf-engine/internal/workflow/executor"
+	"github.com/beelinewf/wf-engine/pkg/contextpath"
+	"github.com/beelinewf/wf-engine/pkg/customnode"
 )
 
 // Defaults for the Decisions API surface.
@@ -57,7 +57,7 @@ var configSchema = json.RawMessage(`{
   "properties": {
     "model": { "type": "string", "default": "typesafe/jev-1.13" },
     "endpoint": { "type": "string", "default": "https://openrouter.ai/api/alpha/decisions", "description": "Absolute http(s) url." },
-    "api_key": { "type": "string", "minLength": 1, "description": "Templated, e.g. {{ env.SIMPWF_OPENROUTER_KEY }}." },
+    "api_key": { "type": "string", "minLength": 1, "description": "Templated, e.g. {{ env.BEELINEWF_OPENROUTER_KEY }}." },
     "state": { "description": "String, object, or array sent with the questions; templated." },
     "questions": {
       "type": "object",
@@ -154,7 +154,7 @@ type Question struct {
 type Config struct {
 	Model     string              `json:"model"`
 	Endpoint  string              `json:"endpoint"`
-	APIKey    string              `json:"api_key"` // templated, e.g. {{ env.SIMPWF_OPENROUTER_KEY }}
+	APIKey    string              `json:"api_key"` // templated, e.g. {{ env.BEELINEWF_OPENROUTER_KEY }}
 	State     json.RawMessage     `json:"state"`   // string | object | array, templated
 	Questions map[string]Question `json:"questions"`
 }
@@ -177,7 +177,7 @@ type rawConfig struct {
 
 // ValidateConfig owns the jev schema. It checks raw presence only:
 // templates are unresolved at parse, so values containing {{ }} shapes
-// (e.g. {{ env.SIMPWF_OPENROUTER_KEY }}) are accepted here and resolved
+// (e.g. {{ env.BEELINEWF_OPENROUTER_KEY }}) are accepted here and resolved
 // at runtime against the instance context. Unknown fields are ignored.
 func ValidateConfig(raw json.RawMessage) (any, error) {
 	if len(raw) == 0 || strings.TrimSpace(string(raw)) == "null" {

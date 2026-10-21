@@ -5,7 +5,7 @@
 package main
 
 import (
-	// @title SimpWF API
+	// @title BeelineWF API
 	// @version 1.0
 	// @description Workflow definition and execution API.
 	// @BasePath /
@@ -33,21 +33,21 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/auth"
-	"github.com/simpwf/workflow-engine/internal/workflow/engine"
-	"github.com/simpwf/workflow-engine/internal/workflow/executor"
-	"github.com/simpwf/workflow-engine/internal/workflow/handler"
-	"github.com/simpwf/workflow-engine/internal/workflow/inputtransport"
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
-	"github.com/simpwf/workflow-engine/internal/workflow/repository"
-	"github.com/simpwf/workflow-engine/internal/workflow/scheduler"
-	"github.com/simpwf/workflow-engine/internal/workflow/service"
-	"github.com/simpwf/workflow-engine/internal/workflow/statusupdate"
-	"github.com/simpwf/workflow-engine/internal/workflow/transport"
-	"github.com/simpwf/workflow-engine/pkg/configuration"
-	_ "github.com/simpwf/workflow-engine/pkg/customnode/all"
-	"github.com/simpwf/workflow-engine/pkg/database"
-	"github.com/simpwf/workflow-engine/pkg/envsnapshot"
+	"github.com/beelinewf/wf-engine/internal/workflow/auth"
+	"github.com/beelinewf/wf-engine/internal/workflow/engine"
+	"github.com/beelinewf/wf-engine/internal/workflow/executor"
+	"github.com/beelinewf/wf-engine/internal/workflow/handler"
+	"github.com/beelinewf/wf-engine/internal/workflow/inputtransport"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/repository"
+	"github.com/beelinewf/wf-engine/internal/workflow/scheduler"
+	"github.com/beelinewf/wf-engine/internal/workflow/service"
+	"github.com/beelinewf/wf-engine/internal/workflow/statusupdate"
+	"github.com/beelinewf/wf-engine/internal/workflow/transport"
+	"github.com/beelinewf/wf-engine/pkg/configuration"
+	_ "github.com/beelinewf/wf-engine/pkg/customnode/all"
+	"github.com/beelinewf/wf-engine/pkg/database"
+	"github.com/beelinewf/wf-engine/pkg/envsnapshot"
 	"github.com/sirupsen/logrus"
 )
 

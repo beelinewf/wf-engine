@@ -1,4 +1,4 @@
-# SimpWF developer task runner (go-task: https://taskfile.dev).
+# BeelineWF developer task runner (go-task: https://taskfile.dev).
 # Usage: task build, task test, task migrate-up, ...
 
 version: "3"
@@ -87,18 +87,18 @@ tasks:
       - |
         set -euo pipefail
         # The single source for the service credential: the app reads it
-        # through auth.api_token's SIMPWF_API_TOKEN binding, and the script
+        # through auth.api_token's BEELINEWF_API_TOKEN binding, and the script
         # reads the same variable. config.e2e-oidc.yaml deliberately leaves
         # the key out.
-        export SIMPWF_API_TOKEN="e2e-service-token"
+        export BEELINEWF_API_TOKEN="e2e-service-token"
         # Throwaway database for this run. Recreating it keeps a previous
         # run's definitions and instances from changing what the checks see.
         export PGPASSWORD=gorm
-        psql -h localhost -p 9921 -U gorm -d postgres -c 'DROP DATABASE IF EXISTS simpwf_e2e WITH (FORCE)' >/dev/null
-        psql -h localhost -p 9921 -U gorm -d postgres -c 'CREATE DATABASE simpwf_e2e' >/dev/null
+        psql -h localhost -p 9921 -U gorm -d postgres -c 'DROP DATABASE IF EXISTS beelinewf_e2e WITH (FORCE)' >/dev/null
+        psql -h localhost -p 9921 -U gorm -d postgres -c 'CREATE DATABASE beelinewf_e2e' >/dev/null
         docker run --rm --network host -v "$PWD/migrations:/migrations:ro" arigaio/atlas:1.3.0@sha256:aa51fd9b86d27a4dde60e51e4ceeaf5b8080b5b37b94c6c591cd9f9526a32dc1 \
           migrate apply \
-          --url "postgres://gorm:gorm@localhost:9921/simpwf_e2e?sslmode=disable" \
+          --url "postgres://gorm:gorm@localhost:9921/beelinewf_e2e?sslmode=disable" \
           --dir "file:///migrations/versions" >/dev/null
         python3 scripts/mock_oidc_provider.py http://127.0.0.1:9099 &
         mock_pid=$!
@@ -127,19 +127,19 @@ tasks:
       - |
         set -euo pipefail
         export PGPASSWORD=gorm
-        psql -h localhost -p 9921 -U gorm -d postgres -c 'DROP DATABASE IF EXISTS simpwf_e2e_plain WITH (FORCE)' >/dev/null
-        psql -h localhost -p 9921 -U gorm -d postgres -c 'CREATE DATABASE simpwf_e2e_plain' >/dev/null
+        psql -h localhost -p 9921 -U gorm -d postgres -c 'DROP DATABASE IF EXISTS beelinewf_e2e_plain WITH (FORCE)' >/dev/null
+        psql -h localhost -p 9921 -U gorm -d postgres -c 'CREATE DATABASE beelinewf_e2e_plain' >/dev/null
         docker run --rm --network host -v "$PWD/migrations:/migrations:ro" arigaio/atlas:1.3.0@sha256:aa51fd9b86d27a4dde60e51e4ceeaf5b8080b5b37b94c6c591cd9f9526a32dc1 \
           migrate apply \
-          --url "postgres://gorm:gorm@localhost:9921/simpwf_e2e_plain?sslmode=disable" \
+          --url "postgres://gorm:gorm@localhost:9921/beelinewf_e2e_plain?sslmode=disable" \
           --dir "file:///migrations/versions" >/dev/null
         WORK_DIR=$(mktemp -d)
         trap 'rm -rf "$WORK_DIR"' EXIT
-        go build -o "$WORK_DIR/simpwf-e2e" ./cmd/app
-        "$WORK_DIR/simpwf-e2e" -config config.e2e.yaml &
+        go build -o "$WORK_DIR/beelinewf-e2e" ./cmd/app
+        "$WORK_DIR/beelinewf-e2e" -config config.e2e.yaml &
         # No $!/kill: task's embedded shell expands $! to a job id (g1) and
         # lacks the kill builtin, so match this run's unique binary path.
-        trap 'pkill -f "$WORK_DIR/simpwf-e2e" 2>/dev/null || true; rm -rf "$WORK_DIR"' EXIT
+        trap 'pkill -f "$WORK_DIR/beelinewf-e2e" 2>/dev/null || true; rm -rf "$WORK_DIR"' EXIT
         for _ in $(seq 1 60); do
           curl -fsS http://127.0.0.1:9999/health/ready >/dev/null 2>&1 && break
           sleep 1

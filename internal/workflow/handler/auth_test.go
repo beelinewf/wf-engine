@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/beelinewf/wf-engine/internal/workflow/auth"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
 	"github.com/gin-gonic/gin"
-	"github.com/simpwf/workflow-engine/internal/workflow/auth"
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
 )
 
 const testSystemUserID = "11111111-1111-7111-8111-111111111111"

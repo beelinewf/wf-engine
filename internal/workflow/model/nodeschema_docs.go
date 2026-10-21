@@ -24,7 +24,7 @@ const commonNodeSchemaFields = `
     "post_script": { "$ref": "#/$defs/hook" }`
 
 const scriptNodeSchemaJSON = `{
-  "title": "simpwf script node",
+  "title": "beelinewf script node",
   "description": "Runs a script against the workflow context. Go parsers stay authoritative.",
   "type": "object",
   "properties": {
@@ -41,7 +41,7 @@ const scriptNodeSchemaJSON = `{
 }`
 
 const conditionsNodeSchemaJSON = `{
-  "title": "simpwf conditions node",
+  "title": "beelinewf conditions node",
   "description": "Routes execution to a workflow or group key. Carries neither next_node nor output_property. Go parsers stay authoritative.",
   "type": "object",
   "properties": {
@@ -71,7 +71,7 @@ const conditionsNodeSchemaJSON = `{
 }`
 
 const inputNodeSchemaJSON = `{
-  "title": "simpwf input node",
+  "title": "beelinewf input node",
   "description": "Parks the instance until a payload arrives on a channel. Go parsers stay authoritative.",
   "type": "object",
   "properties": {
@@ -110,7 +110,7 @@ const inputNodeSchemaJSON = `{
 }`
 
 const groupNodeSchemaJSON = `{
-  "title": "simpwf group node",
+  "title": "beelinewf group node",
   "description": "Runs a nested node graph starting at start_node_id. Nested children follow the same per-type rules; go parsers stay authoritative.",
   "type": "object",
   "properties": {
@@ -134,7 +134,7 @@ const groupNodeSchemaJSON = `{
 }`
 
 const externalCallNodeSchemaJSON = `{
-  "title": "simpwf external_call node",
+  "title": "beelinewf external_call node",
   "description": "Makes exactly one outbound HTTP call or executes an allowlisted command. Go parsers stay authoritative.",
   "type": "object",
   "properties": {
@@ -173,7 +173,7 @@ const externalCallNodeSchemaJSON = `{
 }`
 
 const outputNodeSchemaJSON = `{
-  "title": "simpwf output node",
+  "title": "beelinewf output node",
   "description": "Publishes the exact JSON at context_path to a broker channel. Go parsers stay authoritative.",
   "type": "object",
   "properties": {
@@ -192,7 +192,7 @@ const outputNodeSchemaJSON = `{
 }`
 
 const pollerNodeSchemaJSON = `{
-  "title": "simpwf poller node",
+  "title": "beelinewf poller node",
   "description": "Repeatedly calls a transport or waits on one until the until predicate returns true. Exactly one transport block is required. Go parsers stay authoritative.",
   "type": "object",
   "properties": {
@@ -257,7 +257,7 @@ const pollerNodeSchemaJSON = `{
 }`
 
 const parallelStartNodeSchemaJSON = `{
-  "title": "simpwf parallel_start node",
+  "title": "beelinewf parallel_start node",
   "description": "Forks execution into named branches that each run with an isolated context; the parent resumes at parallel_end_node_id after every branch reaches the join. Go parsers stay authoritative.",
   "type": "object",
   "properties": {
@@ -276,7 +276,7 @@ const parallelStartNodeSchemaJSON = `{
 }`
 
 const parallelEndNodeSchemaJSON = `{
-  "title": "simpwf parallel_end node",
+  "title": "beelinewf parallel_end node",
   "description": "Barrier join: runs once after every branch of the matching parallel_start arrives, merging branch contexts into the parent via combining_script. Go parsers stay authoritative.",
   "type": "object",
   "properties": {
@@ -290,7 +290,7 @@ const parallelEndNodeSchemaJSON = `{
 }`
 
 const delayNodeSchemaJSON = `{
-  "title": "simpwf delay node",
+  "title": "beelinewf delay node",
   "description": "Waits the configured duration on arrival, then completes. The explicit form of start_delay, which delay nodes do not accept. Go parsers stay authoritative.",
   "type": "object",
   "properties": {

@@ -69,7 +69,7 @@ def main() -> None:
 
     def token(subject, roles):
         return mint({
-            "iss": issuer, "aud": "simpwf", "sub": subject, "iat": now - 60, "exp": now + 3600,
+            "iss": issuer, "aud": "beelinewf", "sub": subject, "iat": now - 60, "exp": now + 3600,
             "name": subject, "email": f"{subject}@example.test", "roles": roles,
         })
 

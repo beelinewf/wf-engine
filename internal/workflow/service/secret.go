@@ -6,8 +6,8 @@ import (
 	"regexp"
 	"unicode/utf8"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
-	"github.com/simpwf/workflow-engine/internal/workflow/repository"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/repository"
 )
 
 var secretKeyPattern = regexp.MustCompile(`^[A-Za-z0-9_]{1,128}$`)

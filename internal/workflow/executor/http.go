@@ -17,8 +17,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
-	"github.com/simpwf/workflow-engine/pkg/contextpath"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/pkg/contextpath"
 )
 
 // HTTPExecutor performs outbound HTTP calls under the configured target

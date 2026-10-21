@@ -11,11 +11,11 @@ supports both API shapes:
 
 ## Ops prerequisites
 
-- Set server env `SIMPWF_OPENROUTER_KEY`. Instance creation snapshots
-  `SIMPWF_*` values under `env`; reference it as
-  `{{ env.SIMPWF_OPENROUTER_KEY }}`. Snapshot is per-instance and taken once.
+- Set server env `BEELINEWF_OPENROUTER_KEY`. Instance creation snapshots
+  `BEELINEWF_*` values under `env`; reference it as
+  `{{ env.BEELINEWF_OPENROUTER_KEY }}`. Snapshot is per-instance and taken once.
 - Add `openrouter.ai` to `engine.http_allowlist` in `config.yaml`, or to
-  comma-separated `SIMPWF_ENGINE_HTTP_ALLOWLIST` when running without a
+  comma-separated `BEELINEWF_ENGINE_HTTP_ALLOWLIST` when running without a
   config file. Shared HTTP allowlist, DNS, redirect, and output-cap policy
   applies unchanged.
 - Workflow authors can read snapshot values through templates. Treat
@@ -30,7 +30,7 @@ supports both API shapes:
 - `endpoint`: optional absolute `http(s)` URL; template allowed. Defaults
   per API as listed above. Rendered endpoint is revalidated before request.
 - `api_key`: required, non-blank raw string, template allowed. Typical
-  value: `{{ env.SIMPWF_OPENROUTER_KEY }}`. Never returned or logged.
+  value: `{{ env.BEELINEWF_OPENROUTER_KEY }}`. Never returned or logged.
 - Exactly one input form:
   - `prompt` required non-blank string, template allowed. Optional
     `system` non-blank string is prepended as a system message. `system`
@@ -62,7 +62,7 @@ nodes:
     config:
       api: chat
       model: openai/gpt-4o-mini
-      api_key: "{{ env.SIMPWF_OPENROUTER_KEY }}"
+      api_key: "{{ env.BEELINEWF_OPENROUTER_KEY }}"
       system: "Answer briefly and accurately."
       prompt: "{{ question }}"
       temperature: 0.2
@@ -78,7 +78,7 @@ nodes:
     config:
       api: responses
       model: openai/gpt-4o-mini
-      api_key: "{{ env.SIMPWF_OPENROUTER_KEY }}"
+      api_key: "{{ env.BEELINEWF_OPENROUTER_KEY }}"
       messages:
         - role: developer
           content: "Use the chat answer and produce a concise follow-up."

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/simpwf/workflow-engine/pkg/ids"
+	"github.com/beelinewf/wf-engine/pkg/ids"
 )
 
 // WorkflowContent is the validated top-level content of a workflow

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/simpwf/workflow-engine/pkg/configuration"
-	"github.com/simpwf/workflow-engine/pkg/ids"
+	"github.com/beelinewf/wf-engine/pkg/configuration"
+	"github.com/beelinewf/wf-engine/pkg/ids"
 )
 
 const testDSN = "host=localhost user=gorm password=gorm dbname=gorm port=9921 sslmode=disable"
@@ -35,9 +35,9 @@ func setenv(t *testing.T, key, value string) {
 }
 
 func TestLoadEnvOnly(t *testing.T) {
-	setenv(t, "SIMPWF_INFRA_POSTGRESQL_DSN", testDSN)
-	setenv(t, "SIMPWF_INFRA_HTTP_HOST", "localhost:9999")
-	setenv(t, "SIMPWF_INFRA_HTTP_SWAGGER_ENABLED", "false")
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+	setenv(t, "BEELINEWF_INFRA_HTTP_HOST", "localhost:9999")
+	setenv(t, "BEELINEWF_INFRA_HTTP_SWAGGER_ENABLED", "false")
 
 	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
 	if err != nil {
@@ -66,8 +66,8 @@ worker:
   pool:
     size: 4
 `)
-	setenv(t, "SIMPWF_INFRA_HTTP_HOST", "env-host:5678")
-	setenv(t, "SIMPWF_WORKER_POOL_SIZE", "7")
+	setenv(t, "BEELINEWF_INFRA_HTTP_HOST", "env-host:5678")
+	setenv(t, "BEELINEWF_WORKER_POOL_SIZE", "7")
 
 	cfg, err := configuration.Load(configuration.WithConfigFile(path))
 	if err != nil {
@@ -96,7 +96,7 @@ infra:
   postgresql:
     dsn: "file-dsn"
 `)
-	setenv(t, "SIMPWF_WORKER_POOL_SIZE", "7")
+	setenv(t, "BEELINEWF_WORKER_POOL_SIZE", "7")
 
 	cfg, err := configuration.Load(configuration.WithConfigFile(path))
 	if err != nil {
@@ -107,7 +107,7 @@ infra:
 	}
 }
 
-// The SIMPWF_API_TOKEN alias keeps working with a file present: the
+// The BEELINEWF_API_TOKEN alias keeps working with a file present: the
 // explicit binding wins over the file value.
 func TestLoadAPITokenAliasOverridesFile(t *testing.T) {
 	path := writeConfig(t, `
@@ -118,14 +118,14 @@ auth:
   enabled: true
   api_token: "file-token"
 `)
-	setenv(t, "SIMPWF_API_TOKEN", "env-token")
+	setenv(t, "BEELINEWF_API_TOKEN", "env-token")
 
 	cfg, err := configuration.Load(configuration.WithConfigFile(path))
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
 	if cfg.Auth.APIToken != "env-token" {
-		t.Errorf("auth.api_token = %q, want env-token from SIMPWF_API_TOKEN", cfg.Auth.APIToken)
+		t.Errorf("auth.api_token = %q, want env-token from BEELINEWF_API_TOKEN", cfg.Auth.APIToken)
 	}
 }
 
@@ -140,7 +140,7 @@ infra:
   postgresql:
     dsn: "file-dsn"
 `)
-	setenv(t, "SIMPWF_INFRA_HTTP_HOST", "")
+	setenv(t, "BEELINEWF_INFRA_HTTP_HOST", "")
 
 	cfg, err := configuration.Load(configuration.WithConfigFile(path))
 	if err != nil {
@@ -152,7 +152,7 @@ infra:
 }
 
 func TestLoadDefaultsApplied(t *testing.T) {
-	setenv(t, "SIMPWF_INFRA_POSTGRESQL_DSN", testDSN)
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
 
 	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
 	if err != nil {
@@ -170,7 +170,7 @@ func TestLoadDefaultsApplied(t *testing.T) {
 }
 
 func TestLoadDispatcherTuningDefaults(t *testing.T) {
-	setenv(t, "SIMPWF_INFRA_POSTGRESQL_DSN", testDSN)
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
 
 	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
 	if err != nil {
@@ -188,10 +188,10 @@ func TestLoadDispatcherTuningDefaults(t *testing.T) {
 }
 
 func TestLoadDispatcherTuningFromEnv(t *testing.T) {
-	setenv(t, "SIMPWF_INFRA_POSTGRESQL_DSN", testDSN)
-	setenv(t, "SIMPWF_WORKER_STATUS_POOL_SIZE", "7")
-	setenv(t, "SIMPWF_ENGINE_POLL_INTERVAL", "50ms")
-	setenv(t, "SIMPWF_ENGINE_HEARTBEAT_INTERVAL", "9s")
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+	setenv(t, "BEELINEWF_WORKER_STATUS_POOL_SIZE", "7")
+	setenv(t, "BEELINEWF_ENGINE_POLL_INTERVAL", "50ms")
+	setenv(t, "BEELINEWF_ENGINE_HEARTBEAT_INTERVAL", "9s")
 
 	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
 	if err != nil {
@@ -214,14 +214,14 @@ func TestLoadRejectsNonPositiveDispatcherTuning(t *testing.T) {
 		name   string
 		values []string
 	}{
-		{"SIMPWF_WORKER_STATUS_POOL_SIZE", "worker.status_pool.size", []string{"0", "-2"}},
-		{"SIMPWF_ENGINE_POLL_INTERVAL", "engine.poll_interval", []string{"0", "-5s"}},
-		{"SIMPWF_ENGINE_HEARTBEAT_INTERVAL", "engine.heartbeat_interval", []string{"0", "-5s"}},
+		{"BEELINEWF_WORKER_STATUS_POOL_SIZE", "worker.status_pool.size", []string{"0", "-2"}},
+		{"BEELINEWF_ENGINE_POLL_INTERVAL", "engine.poll_interval", []string{"0", "-5s"}},
+		{"BEELINEWF_ENGINE_HEARTBEAT_INTERVAL", "engine.heartbeat_interval", []string{"0", "-5s"}},
 	}
 	for _, tc := range cases {
 		for _, value := range tc.values {
 			t.Run(tc.env+"="+value, func(t *testing.T) {
-				setenv(t, "SIMPWF_INFRA_POSTGRESQL_DSN", testDSN)
+				setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
 				setenv(t, tc.env, value)
 				if _, err := configuration.Load(configuration.WithConfigFile(missingPath(t))); err == nil {
 					t.Errorf("%s = %q: error = nil, want a rejection", tc.env, value)
@@ -244,8 +244,8 @@ func TestLoadRejectsMissingDSN(t *testing.T) {
 }
 
 func TestLoadRejectsInvalidPoolSize(t *testing.T) {
-	setenv(t, "SIMPWF_INFRA_POSTGRESQL_DSN", testDSN)
-	setenv(t, "SIMPWF_WORKER_POOL_SIZE", "0")
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+	setenv(t, "BEELINEWF_WORKER_POOL_SIZE", "0")
 
 	_, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
 	if err == nil {
@@ -254,8 +254,8 @@ func TestLoadRejectsInvalidPoolSize(t *testing.T) {
 }
 
 func TestLoadRejectsInvalidDuration(t *testing.T) {
-	setenv(t, "SIMPWF_INFRA_POSTGRESQL_DSN", testDSN)
-	setenv(t, "SIMPWF_ENGINE_POLL_INTERVAL", "not-a-duration")
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+	setenv(t, "BEELINEWF_ENGINE_POLL_INTERVAL", "not-a-duration")
 
 	_, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
 	if err == nil {
@@ -273,7 +273,7 @@ func TestLoadRejectsInvalidConfigFile(t *testing.T) {
 }
 
 func TestLoadEngineDefaults(t *testing.T) {
-	setenv(t, "SIMPWF_INFRA_POSTGRESQL_DSN", testDSN)
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
 	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
@@ -300,7 +300,7 @@ infra:
 engine:
   lean_context_default: false
 `)
-	setenv(t, "SIMPWF_ENGINE_LEAN_CONTEXT_DEFAULT", "true")
+	setenv(t, "BEELINEWF_ENGINE_LEAN_CONTEXT_DEFAULT", "true")
 
 	cfg, err := configuration.Load(configuration.WithConfigFile(path))
 	if err != nil {
@@ -318,15 +318,15 @@ engine:
 }
 
 func TestLoadEngineSettingsFromEnv(t *testing.T) {
-	setenv(t, "SIMPWF_INFRA_POSTGRESQL_DSN", testDSN)
-	setenv(t, "SIMPWF_ENGINE_MAX_PER_NODE_EXECUTIONS", "50")
-	setenv(t, "SIMPWF_ENGINE_MAX_TOTAL_EXECUTIONS", "500")
-	setenv(t, "SIMPWF_ENGINE_LEASE_DURATION", "45s")
-	setenv(t, "SIMPWF_ENGINE_CLAIM_BATCH_SIZE", "7")
-	setenv(t, "SIMPWF_ENGINE_MAX_OUTPUT_BYTES", "2048")
-	setenv(t, "SIMPWF_ENGINE_MAX_REDIRECTS", "3")
-	setenv(t, "SIMPWF_ENGINE_HTTP_ALLOWLIST", "*")
-	setenv(t, "SIMPWF_ENGINE_EXEC_ALLOWLIST", "echo")
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+	setenv(t, "BEELINEWF_ENGINE_MAX_PER_NODE_EXECUTIONS", "50")
+	setenv(t, "BEELINEWF_ENGINE_MAX_TOTAL_EXECUTIONS", "500")
+	setenv(t, "BEELINEWF_ENGINE_LEASE_DURATION", "45s")
+	setenv(t, "BEELINEWF_ENGINE_CLAIM_BATCH_SIZE", "7")
+	setenv(t, "BEELINEWF_ENGINE_MAX_OUTPUT_BYTES", "2048")
+	setenv(t, "BEELINEWF_ENGINE_MAX_REDIRECTS", "3")
+	setenv(t, "BEELINEWF_ENGINE_HTTP_ALLOWLIST", "*")
+	setenv(t, "BEELINEWF_ENGINE_EXEC_ALLOWLIST", "echo")
 
 	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
 	if err != nil {
@@ -359,9 +359,9 @@ func TestLoadEngineSettingsFromEnv(t *testing.T) {
 }
 
 func TestLoadEngineAllowlistsFromEnvCommaSeparated(t *testing.T) {
-	setenv(t, "SIMPWF_INFRA_POSTGRESQL_DSN", testDSN)
-	setenv(t, "SIMPWF_ENGINE_HTTP_ALLOWLIST", "api.example.com,jsonplaceholder.typicode.com")
-	setenv(t, "SIMPWF_ENGINE_EXEC_ALLOWLIST", "echo,ls")
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+	setenv(t, "BEELINEWF_ENGINE_HTTP_ALLOWLIST", "api.example.com,jsonplaceholder.typicode.com")
+	setenv(t, "BEELINEWF_ENGINE_EXEC_ALLOWLIST", "echo,ls")
 
 	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
 	if err != nil {
@@ -376,46 +376,46 @@ func TestLoadEngineAllowlistsFromEnvCommaSeparated(t *testing.T) {
 }
 
 func TestLoadEnvDenyOverridesFromEnvCommaSeparated(t *testing.T) {
-	setenv(t, "SIMPWF_INFRA_POSTGRESQL_DSN", testDSN)
-	setenv(t, "SIMPWF_ENGINE_ENV_DENY_EXTRA", "SIMPWF_OPENROUTER*,SIMPWF_FOO")
-	setenv(t, "SIMPWF_ENGINE_ENV_ALLOW_EXCEPTIONS", "SIMPWF_OPENROUTER_MODEL")
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+	setenv(t, "BEELINEWF_ENGINE_ENV_DENY_EXTRA", "BEELINEWF_OPENROUTER*,BEELINEWF_FOO")
+	setenv(t, "BEELINEWF_ENGINE_ENV_ALLOW_EXCEPTIONS", "BEELINEWF_OPENROUTER_MODEL")
 
 	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if !slices.Equal(cfg.Engine.EnvDenyExtra, []string{"SIMPWF_OPENROUTER*", "SIMPWF_FOO"}) {
+	if !slices.Equal(cfg.Engine.EnvDenyExtra, []string{"BEELINEWF_OPENROUTER*", "BEELINEWF_FOO"}) {
 		t.Errorf("env_deny_extra = %q", cfg.Engine.EnvDenyExtra)
 	}
-	if !slices.Equal(cfg.Engine.EnvAllowExceptions, []string{"SIMPWF_OPENROUTER_MODEL"}) {
+	if !slices.Equal(cfg.Engine.EnvAllowExceptions, []string{"BEELINEWF_OPENROUTER_MODEL"}) {
 		t.Errorf("env_allow_exceptions = %q", cfg.Engine.EnvAllowExceptions)
 	}
 }
 
 func TestLoadRejectsInvalidEnvDenyGlob(t *testing.T) {
-	setenv(t, "SIMPWF_INFRA_POSTGRESQL_DSN", testDSN)
-	setenv(t, "SIMPWF_ENGINE_ENV_DENY_EXTRA", "SIMPWF_[")
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+	setenv(t, "BEELINEWF_ENGINE_ENV_DENY_EXTRA", "BEELINEWF_[")
 	if _, err := configuration.Load(configuration.WithConfigFile(missingPath(t))); err == nil {
 		t.Fatal("Load() error = nil, want error for malformed glob")
 	}
-	setenv(t, "SIMPWF_ENGINE_ENV_DENY_EXTRA", "")
-	setenv(t, "SIMPWF_ENGINE_ENV_ALLOW_EXCEPTIONS", "SIMPWF_*[")
+	setenv(t, "BEELINEWF_ENGINE_ENV_DENY_EXTRA", "")
+	setenv(t, "BEELINEWF_ENGINE_ENV_ALLOW_EXCEPTIONS", "BEELINEWF_*[")
 	if _, err := configuration.Load(configuration.WithConfigFile(missingPath(t))); err == nil {
 		t.Fatal("Load() error = nil, want error for malformed allow glob")
 	}
 }
 
 func TestLoadRejectsMaxBelowDefault(t *testing.T) {
-	setenv(t, "SIMPWF_INFRA_POSTGRESQL_DSN", testDSN)
-	setenv(t, "SIMPWF_ENGINE_DEFAULT_NODE_TIMEOUT", "10m")
-	setenv(t, "SIMPWF_ENGINE_MAX_NODE_TIMEOUT", "5m")
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+	setenv(t, "BEELINEWF_ENGINE_DEFAULT_NODE_TIMEOUT", "10m")
+	setenv(t, "BEELINEWF_ENGINE_MAX_NODE_TIMEOUT", "5m")
 	if _, err := configuration.Load(configuration.WithConfigFile(missingPath(t))); err == nil {
 		t.Fatal("Load() error = nil, want error when max < default")
 	}
 }
 
 func TestLoadBrokerDefaults(t *testing.T) {
-	setenv(t, "SIMPWF_INFRA_POSTGRESQL_DSN", testDSN)
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
 
 	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
 	if err != nil {
@@ -427,24 +427,24 @@ func TestLoadBrokerDefaults(t *testing.T) {
 	if cfg.Infra.RabbitMQ.DSN != "" {
 		t.Errorf("rabbitmq dsn = %q, want empty (optional)", cfg.Infra.RabbitMQ.DSN)
 	}
-	if cfg.Infra.RabbitMQ.InputQueue != "simpwf.input" {
-		t.Errorf("input_queue = %q, want simpwf.input", cfg.Infra.RabbitMQ.InputQueue)
+	if cfg.Infra.RabbitMQ.InputQueue != "beelinewf.input" {
+		t.Errorf("input_queue = %q, want beelinewf.input", cfg.Infra.RabbitMQ.InputQueue)
 	}
-	if cfg.Infra.RabbitMQ.OutputQueue != "simpwf.output" {
-		t.Errorf("output_queue = %q, want simpwf.output", cfg.Infra.RabbitMQ.OutputQueue)
+	if cfg.Infra.RabbitMQ.OutputQueue != "beelinewf.output" {
+		t.Errorf("output_queue = %q, want beelinewf.output", cfg.Infra.RabbitMQ.OutputQueue)
 	}
-	if cfg.Infra.RabbitMQ.StatusQueue != "simpwf.status" {
-		t.Errorf("status_queue = %q, want simpwf.status", cfg.Infra.RabbitMQ.StatusQueue)
+	if cfg.Infra.RabbitMQ.StatusQueue != "beelinewf.status" {
+		t.Errorf("status_queue = %q, want beelinewf.status", cfg.Infra.RabbitMQ.StatusQueue)
 	}
 }
 
 func TestLoadBrokersFromEnv(t *testing.T) {
-	setenv(t, "SIMPWF_INFRA_POSTGRESQL_DSN", testDSN)
-	setenv(t, "SIMPWF_INFRA_REDIS_DSN", "redis://localhost:6379/0")
-	setenv(t, "SIMPWF_INFRA_RABBITMQ_DSN", "amqp://simpwf:simpwf@localhost:5672/")
-	setenv(t, "SIMPWF_INFRA_RABBITMQ_INPUT_QUEUE", "workflow.input")
-	setenv(t, "SIMPWF_INFRA_RABBITMQ_OUTPUT_QUEUE", "workflow.output")
-	setenv(t, "SIMPWF_INFRA_RABBITMQ_STATUS_QUEUE", "workflow.status")
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+	setenv(t, "BEELINEWF_INFRA_REDIS_DSN", "redis://localhost:6379/0")
+	setenv(t, "BEELINEWF_INFRA_RABBITMQ_DSN", "amqp://beelinewf:beelinewf@localhost:5672/")
+	setenv(t, "BEELINEWF_INFRA_RABBITMQ_INPUT_QUEUE", "workflow.input")
+	setenv(t, "BEELINEWF_INFRA_RABBITMQ_OUTPUT_QUEUE", "workflow.output")
+	setenv(t, "BEELINEWF_INFRA_RABBITMQ_STATUS_QUEUE", "workflow.status")
 
 	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
 	if err != nil {
@@ -453,7 +453,7 @@ func TestLoadBrokersFromEnv(t *testing.T) {
 	if cfg.Infra.Redis.DSN != "redis://localhost:6379/0" {
 		t.Errorf("redis dsn = %q, want redis://localhost:6379/0", cfg.Infra.Redis.DSN)
 	}
-	if cfg.Infra.RabbitMQ.DSN != "amqp://simpwf:simpwf@localhost:5672/" {
+	if cfg.Infra.RabbitMQ.DSN != "amqp://beelinewf:beelinewf@localhost:5672/" {
 		t.Errorf("rabbitmq dsn = %q, want amqp://...", cfg.Infra.RabbitMQ.DSN)
 	}
 	if cfg.Infra.RabbitMQ.InputQueue != "workflow.input" || cfg.Infra.RabbitMQ.OutputQueue != "workflow.output" || cfg.Infra.RabbitMQ.StatusQueue != "workflow.status" {
@@ -482,8 +482,8 @@ infra:
 		t.Errorf("rabbitmq dsn = %q, want file value", cfg.Infra.RabbitMQ.DSN)
 	}
 	// Queue defaults still apply when the file omits them.
-	if cfg.Infra.RabbitMQ.InputQueue != "simpwf.input" {
-		t.Errorf("input_queue = %q, want default simpwf.input", cfg.Infra.RabbitMQ.InputQueue)
+	if cfg.Infra.RabbitMQ.InputQueue != "beelinewf.input" {
+		t.Errorf("input_queue = %q, want default beelinewf.input", cfg.Infra.RabbitMQ.InputQueue)
 	}
 }
 
@@ -515,8 +515,8 @@ infra:
 // that pins the fallback.
 func TestLoadRejectsNonUUIDSystemUserID(t *testing.T) {
 	for _, id := range []string{"system", "not-a-uuid", "  ", "00000000-0000-7000-8000-00000000000", "00000000000070008000000000000001"} {
-		setenv(t, "SIMPWF_INFRA_POSTGRESQL_DSN", testDSN)
-		setenv(t, "SIMPWF_SYSTEM_USER_ID", id)
+		setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+		setenv(t, "BEELINEWF_SYSTEM_USER_ID", id)
 		_, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
 		if err == nil {
 			t.Errorf("system.user_id = %q: error = nil, want a rejection", id)
@@ -530,8 +530,8 @@ func TestLoadRejectsNonUUIDSystemUserID(t *testing.T) {
 
 // A valid system user id still loads.
 func TestLoadAcceptsUUIDSystemUserID(t *testing.T) {
-	setenv(t, "SIMPWF_INFRA_POSTGRESQL_DSN", testDSN)
-	setenv(t, "SIMPWF_SYSTEM_USER_ID", "00000000-0000-7000-8000-000000000001")
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+	setenv(t, "BEELINEWF_SYSTEM_USER_ID", "00000000-0000-7000-8000-000000000001")
 	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
@@ -544,8 +544,8 @@ func TestLoadAcceptsUUIDSystemUserID(t *testing.T) {
 // The validation is new, so the default the code falls back to has to
 // satisfy it: a deployment that never sets system.user_id must still boot.
 func TestShippedConfigUsesAUUIDSystemUserByDefault(t *testing.T) {
-	setenv(t, "SIMPWF_INFRA_POSTGRESQL_DSN", testDSN)
-	setenv(t, "SIMPWF_SYSTEM_USER_ID", "")
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+	setenv(t, "BEELINEWF_SYSTEM_USER_ID", "")
 	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
@@ -559,7 +559,7 @@ func TestShippedConfigUsesAUUIDSystemUserByDefault(t *testing.T) {
 // the new validation must not reject either. config.e2e-oidc.yaml is started
 // by `task e2e-oidc`, which exports the API token the same way.
 func TestShippedConfigsPassSystemUserValidation(t *testing.T) {
-	setenv(t, "SIMPWF_API_TOKEN", "e2e-service-token")
+	setenv(t, "BEELINEWF_API_TOKEN", "e2e-service-token")
 	for _, name := range []string{"config.yaml", "config.e2e-oidc.yaml"} {
 		path := filepath.Join("..", "..", name)
 		if _, err := os.Stat(path); err != nil {
@@ -595,7 +595,7 @@ func TestShippedConfigParsesClockSkew(t *testing.T) {
 func TestMockOIDCCoversShippedRoles(t *testing.T) {
 	// Blank out the JSON override so the file catalog is what is checked,
 	// not whatever the ambient environment carries.
-	setenv(t, "SIMPWF_AUTH_ROLE_PERMISSIONS", "")
+	setenv(t, "BEELINEWF_AUTH_ROLE_PERMISSIONS", "")
 	path := filepath.Join("..", "..", "config.yaml")
 	if _, err := os.Stat(path); err != nil {
 		t.Skipf("shipped config not available: %v", err)
@@ -619,8 +619,8 @@ func TestMockOIDCCoversShippedRoles(t *testing.T) {
 // The role catalog is a map, which cannot ride Viper's AutomaticEnv, so it
 // is exposed through an explicit post-unmarshal JSON override.
 func TestLoadRolePermissionsFromEnvJSON(t *testing.T) {
-	setenv(t, "SIMPWF_INFRA_POSTGRESQL_DSN", testDSN)
-	setenv(t, "SIMPWF_AUTH_ROLE_PERMISSIONS", `{"admin":["definitions:read","roles:read"],"finance":["instances:read"]}`)
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+	setenv(t, "BEELINEWF_AUTH_ROLE_PERMISSIONS", `{"admin":["definitions:read","roles:read"],"finance":["instances:read"]}`)
 
 	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
 	if err != nil {
@@ -643,7 +643,7 @@ auth:
   role_permissions:
     admin: ["definitions:read"]
 `)
-	setenv(t, "SIMPWF_AUTH_ROLE_PERMISSIONS", `{"finance":["instances:read"]}`)
+	setenv(t, "BEELINEWF_AUTH_ROLE_PERMISSIONS", `{"finance":["instances:read"]}`)
 
 	cfg, err := configuration.Load(configuration.WithConfigFile(path))
 	if err != nil {
@@ -655,15 +655,15 @@ auth:
 }
 
 func TestLoadRolePermissionsInvalidJSONFails(t *testing.T) {
-	setenv(t, "SIMPWF_INFRA_POSTGRESQL_DSN", testDSN)
-	setenv(t, "SIMPWF_AUTH_ROLE_PERMISSIONS", `not-json`)
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+	setenv(t, "BEELINEWF_AUTH_ROLE_PERMISSIONS", `not-json`)
 
 	_, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
 	if err == nil {
 		t.Fatal("Load() error = nil, want fail-fast on invalid JSON")
 	}
-	if !strings.Contains(err.Error(), "SIMPWF_AUTH_ROLE_PERMISSIONS") {
-		t.Errorf("error = %q, want it to name SIMPWF_AUTH_ROLE_PERMISSIONS", err.Error())
+	if !strings.Contains(err.Error(), "BEELINEWF_AUTH_ROLE_PERMISSIONS") {
+		t.Errorf("error = %q, want it to name BEELINEWF_AUTH_ROLE_PERMISSIONS", err.Error())
 	}
 }
 
@@ -676,7 +676,7 @@ auth:
   role_permissions:
     admin: ["definitions:read"]
 `)
-	setenv(t, "SIMPWF_AUTH_ROLE_PERMISSIONS", "   ")
+	setenv(t, "BEELINEWF_AUTH_ROLE_PERMISSIONS", "   ")
 
 	cfg, err := configuration.Load(configuration.WithConfigFile(path))
 	if err != nil {
@@ -688,7 +688,7 @@ auth:
 }
 
 func TestLoadSchedulerDefaults(t *testing.T) {
-	setenv(t, "SIMPWF_INFRA_POSTGRESQL_DSN", testDSN)
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
 
 	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
 	if err != nil {
@@ -703,9 +703,9 @@ func TestLoadSchedulerDefaults(t *testing.T) {
 }
 
 func TestLoadSchedulerFromEnv(t *testing.T) {
-	setenv(t, "SIMPWF_INFRA_POSTGRESQL_DSN", testDSN)
-	setenv(t, "SIMPWF_SCHEDULER_ENABLED", "false")
-	setenv(t, "SIMPWF_SCHEDULER_REFRESH_INTERVAL", "10s")
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+	setenv(t, "BEELINEWF_SCHEDULER_ENABLED", "false")
+	setenv(t, "BEELINEWF_SCHEDULER_REFRESH_INTERVAL", "10s")
 
 	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
 	if err != nil {
@@ -720,8 +720,8 @@ func TestLoadSchedulerFromEnv(t *testing.T) {
 }
 
 func TestLoadRejectsInvalidSchedulerRefreshInterval(t *testing.T) {
-	setenv(t, "SIMPWF_INFRA_POSTGRESQL_DSN", testDSN)
-	setenv(t, "SIMPWF_SCHEDULER_REFRESH_INTERVAL", "0s")
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+	setenv(t, "BEELINEWF_SCHEDULER_REFRESH_INTERVAL", "0s")
 
 	if _, err := configuration.Load(configuration.WithConfigFile(missingPath(t))); err == nil {
 		t.Fatal("Load() error = nil, want validation error for refresh_interval 0")
@@ -729,7 +729,7 @@ func TestLoadRejectsInvalidSchedulerRefreshInterval(t *testing.T) {
 }
 
 func TestLoadConsumerRetryDefaults(t *testing.T) {
-	setenv(t, "SIMPWF_INFRA_POSTGRESQL_DSN", testDSN)
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
 
 	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
 	if err != nil {
@@ -775,10 +775,10 @@ engine:
     max_backoff: 1m
     min_healthy_run: 45s
 `)
-	setenv(t, "SIMPWF_ENGINE_CONSUMER_RETRY_MAX_ATTEMPTS", "7")
-	setenv(t, "SIMPWF_ENGINE_CONSUMER_RETRY_INITIAL_BACKOFF", "500ms")
-	setenv(t, "SIMPWF_ENGINE_CONSUMER_RETRY_MAX_BACKOFF", "10s")
-	setenv(t, "SIMPWF_ENGINE_CONSUMER_RETRY_MIN_HEALTHY_RUN", "20s")
+	setenv(t, "BEELINEWF_ENGINE_CONSUMER_RETRY_MAX_ATTEMPTS", "7")
+	setenv(t, "BEELINEWF_ENGINE_CONSUMER_RETRY_INITIAL_BACKOFF", "500ms")
+	setenv(t, "BEELINEWF_ENGINE_CONSUMER_RETRY_MAX_BACKOFF", "10s")
+	setenv(t, "BEELINEWF_ENGINE_CONSUMER_RETRY_MIN_HEALTHY_RUN", "20s")
 
 	cfg, err := configuration.Load(configuration.WithConfigFile(path))
 	if err != nil {
@@ -791,7 +791,7 @@ engine:
 }
 
 func TestLoadHTTPBulkheadDefaults(t *testing.T) {
-	setenv(t, "SIMPWF_INFRA_POSTGRESQL_DSN", testDSN)
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
 
 	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
 	if err != nil {
@@ -829,8 +829,8 @@ engine:
   http_max_in_flight: 64
   http_max_in_flight_per_host: 8
 `)
-	setenv(t, "SIMPWF_ENGINE_HTTP_MAX_IN_FLIGHT", "32")
-	setenv(t, "SIMPWF_ENGINE_HTTP_MAX_IN_FLIGHT_PER_HOST", "4")
+	setenv(t, "BEELINEWF_ENGINE_HTTP_MAX_IN_FLIGHT", "32")
+	setenv(t, "BEELINEWF_ENGINE_HTTP_MAX_IN_FLIGHT_PER_HOST", "4")
 
 	cfg, err := configuration.Load(configuration.WithConfigFile(path))
 	if err != nil {
@@ -886,7 +886,7 @@ func TestShippedConfigHTTPBulkheadCaps(t *testing.T) {
 }
 
 func TestLoadPostgreSQLPoolDefaults(t *testing.T) {
-	setenv(t, "SIMPWF_INFRA_POSTGRESQL_DSN", testDSN)
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
 
 	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
 	if err != nil {
@@ -930,10 +930,10 @@ infra:
     conn_max_lifetime: 10m
     conn_max_idle_time: 2m
 `)
-	setenv(t, "SIMPWF_INFRA_POSTGRESQL_MAX_OPEN_CONNS", "50")
-	setenv(t, "SIMPWF_INFRA_POSTGRESQL_MAX_IDLE_CONNS", "10")
-	setenv(t, "SIMPWF_INFRA_POSTGRESQL_CONN_MAX_LIFETIME", "1h")
-	setenv(t, "SIMPWF_INFRA_POSTGRESQL_CONN_MAX_IDLE_TIME", "30s")
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_MAX_OPEN_CONNS", "50")
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_MAX_IDLE_CONNS", "10")
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_CONN_MAX_LIFETIME", "1h")
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_CONN_MAX_IDLE_TIME", "30s")
 
 	cfg, err := configuration.Load(configuration.WithConfigFile(path))
 	if err != nil {
@@ -1008,12 +1008,12 @@ engine:
 }
 
 // auth.enabled is the master switch: with it off, a stray
-// SIMPWF_AUTH_OIDC_ENABLED=true is ignored and forced off, so /v1 stays
+// BEELINEWF_AUTH_OIDC_ENABLED=true is ignored and forced off, so /v1 stays
 // open and the OIDC issuer/client validation does not trip the boot.
 func TestLoadAuthDisabledForcesOIDCOff(t *testing.T) {
-	setenv(t, "SIMPWF_INFRA_POSTGRESQL_DSN", testDSN)
-	setenv(t, "SIMPWF_AUTH_ENABLED", "false")
-	setenv(t, "SIMPWF_AUTH_OIDC_ENABLED", "true")
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+	setenv(t, "BEELINEWF_AUTH_ENABLED", "false")
+	setenv(t, "BEELINEWF_AUTH_OIDC_ENABLED", "true")
 
 	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
 	if err != nil {

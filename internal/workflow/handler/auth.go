@@ -8,9 +8,9 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/beelinewf/wf-engine/internal/workflow/auth"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
 	"github.com/gin-gonic/gin"
-	"github.com/simpwf/workflow-engine/internal/workflow/auth"
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
 )
 
 // APIKeyHeader is the header expected when API token auth is enabled.

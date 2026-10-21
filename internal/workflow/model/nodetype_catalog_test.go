@@ -4,7 +4,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
 )
 
 // catalogByType indexes a catalog by type name, failing on duplicates.

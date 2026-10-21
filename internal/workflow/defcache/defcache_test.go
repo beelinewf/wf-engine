@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/defcache"
+	"github.com/beelinewf/wf-engine/internal/workflow/defcache"
 )
 
 func TestGetOrComputeComputesOnce(t *testing.T) {

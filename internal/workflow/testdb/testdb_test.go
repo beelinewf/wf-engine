@@ -56,7 +56,7 @@ func TestResolveMatrix(t *testing.T) {
 		{
 			name: "full unset fails naming suite vars and fix", suite: "engine",
 			wantAction: fatal,
-			wantMsg:    []string{`"engine"`, "TEST_DATABASE_DSN_ENGINE", "TEST_DATABASE_DSN", "simpwf_test_engine", "-short"},
+			wantMsg:    []string{`"engine"`, "TEST_DATABASE_DSN_ENGINE", "TEST_DATABASE_DSN", "beelinewf_test_engine", "-short"},
 		},
 		{
 			name: "full suite var honored verbatim", suite: "engine",
@@ -67,7 +67,7 @@ func TestResolveMatrix(t *testing.T) {
 			name: "full base only derives suite dbname", suite: "engine",
 			env:        map[string]string{"TEST_DATABASE_DSN": baseDSN},
 			wantAction: proceed,
-			wantDSN:    "host=localhost user=gorm password=gorm dbname=simpwf_test_engine port=9921 sslmode=disable",
+			wantDSN:    "host=localhost user=gorm password=gorm dbname=beelinewf_test_engine port=9921 sslmode=disable",
 		},
 		{
 			name: "full suite var beats base", suite: "engine",
@@ -136,13 +136,13 @@ func TestResolveDerivesEverySuite(t *testing.T) {
 
 func TestWithDBName(t *testing.T) {
 	tests := []struct{ name, dsn, nameArg, want string }{
-		{"appends when missing", "host=h user=u", "simpwf_test_engine", "host=h user=u dbname=simpwf_test_engine"},
-		{"replaces first", "dbname=old host=h", "simpwf_test_engine", "dbname=simpwf_test_engine host=h"},
-		{"replaces middle", "host=h dbname=old user=u", "simpwf_test_engine", "host=h dbname=simpwf_test_engine user=u"},
-		{"replaces last", "host=h dbname=old", "simpwf_test_engine", "host=h dbname=simpwf_test_engine"},
-		{"normalizes odd spacing", "host=h   dbname=old\tuser=u", "simpwf_test_engine", "host=h dbname=simpwf_test_engine user=u"},
-		{"matches key case-insensitively", "DBNAME=old host=h", "simpwf_test_engine", "dbname=simpwf_test_engine host=h"},
-		{"passes quoted values through", "host=h password='a b' dbname=old", "simpwf_test_engine", "host=h password='a b' dbname=simpwf_test_engine"},
+		{"appends when missing", "host=h user=u", "beelinewf_test_engine", "host=h user=u dbname=beelinewf_test_engine"},
+		{"replaces first", "dbname=old host=h", "beelinewf_test_engine", "dbname=beelinewf_test_engine host=h"},
+		{"replaces middle", "host=h dbname=old user=u", "beelinewf_test_engine", "host=h dbname=beelinewf_test_engine user=u"},
+		{"replaces last", "host=h dbname=old", "beelinewf_test_engine", "host=h dbname=beelinewf_test_engine"},
+		{"normalizes odd spacing", "host=h   dbname=old\tuser=u", "beelinewf_test_engine", "host=h dbname=beelinewf_test_engine user=u"},
+		{"matches key case-insensitively", "DBNAME=old host=h", "beelinewf_test_engine", "dbname=beelinewf_test_engine host=h"},
+		{"passes quoted values through", "host=h password='a b' dbname=old", "beelinewf_test_engine", "host=h password='a b' dbname=beelinewf_test_engine"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -192,7 +192,7 @@ func TestRedactDSN(t *testing.T) {
 
 func TestRequireDSNMatrix(t *testing.T) {
 	base := "host=localhost user=gorm password=topsecret dbname=ignored port=9921 sslmode=disable"
-	derived := "host=localhost user=gorm password=topsecret dbname=simpwf_test_engine port=9921 sslmode=disable"
+	derived := "host=localhost user=gorm password=topsecret dbname=beelinewf_test_engine port=9921 sslmode=disable"
 	tests := []struct {
 		name       string
 		short      bool
@@ -266,7 +266,7 @@ func TestRequireDSNMatrix(t *testing.T) {
 
 func TestOpen(t *testing.T) {
 	base := "host=localhost user=gorm password=topsecret dbname=ignored port=9921 sslmode=disable"
-	derived := "host=localhost user=gorm password=topsecret dbname=simpwf_test_engine port=9921 sslmode=disable"
+	derived := "host=localhost user=gorm password=topsecret dbname=beelinewf_test_engine port=9921 sslmode=disable"
 	baseOnly := func(k string) string {
 		if k == "TEST_DATABASE_DSN" {
 			return base

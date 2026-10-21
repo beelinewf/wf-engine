@@ -3,10 +3,10 @@ package envsnapshot
 import "testing"
 
 func TestSnapshotFiltersPrefix(t *testing.T) {
-	t.Setenv("SIMPWF_S3_ENDPOINT", "play.min.io:9000")
+	t.Setenv("BEELINEWF_S3_ENDPOINT", "play.min.io:9000")
 	t.Setenv("NOT_MINE", "x")
-	got := Snapshot("SIMPWF_")
-	if got["SIMPWF_S3_ENDPOINT"] != "play.min.io:9000" {
+	got := Snapshot("BEELINEWF_")
+	if got["BEELINEWF_S3_ENDPOINT"] != "play.min.io:9000" {
 		t.Fatal("want endpoint")
 	}
 	if _, ok := got["NOT_MINE"]; ok {
@@ -15,34 +15,34 @@ func TestSnapshotFiltersPrefix(t *testing.T) {
 }
 
 func TestSnapshotExcludesDenied(t *testing.T) {
-	t.Setenv("SIMPWF_INFRA_POSTGRESQL_DSN", "postgres://x")
-	t.Setenv("SIMPWF_API_TOKEN", "tok")
-	t.Setenv("SIMPWF_AUTH_ENABLED", "true")
-	t.Setenv("SIMPWF_SYSTEM_USER_ID", "u1")
-	t.Setenv("SIMPWF_S3_ENDPOINT", "play.min.io:9000")
+	t.Setenv("BEELINEWF_INFRA_POSTGRESQL_DSN", "postgres://x")
+	t.Setenv("BEELINEWF_API_TOKEN", "tok")
+	t.Setenv("BEELINEWF_AUTH_ENABLED", "true")
+	t.Setenv("BEELINEWF_SYSTEM_USER_ID", "u1")
+	t.Setenv("BEELINEWF_S3_ENDPOINT", "play.min.io:9000")
 	got := Snapshot(Prefix)
 	for _, k := range []string{
-		"SIMPWF_INFRA_POSTGRESQL_DSN",
-		"SIMPWF_API_TOKEN",
-		"SIMPWF_AUTH_ENABLED",
-		"SIMPWF_SYSTEM_USER_ID",
+		"BEELINEWF_INFRA_POSTGRESQL_DSN",
+		"BEELINEWF_API_TOKEN",
+		"BEELINEWF_AUTH_ENABLED",
+		"BEELINEWF_SYSTEM_USER_ID",
 	} {
 		if _, ok := got[k]; ok {
 			t.Fatalf("denied key %s snapshotted", k)
 		}
 	}
-	if got["SIMPWF_S3_ENDPOINT"] != "play.min.io:9000" {
+	if got["BEELINEWF_S3_ENDPOINT"] != "play.min.io:9000" {
 		t.Fatal("allowed key missing")
 	}
 }
 
 func TestMergeCannotSmuggleDenied(t *testing.T) {
-	base := map[string]any{"SIMPWF_API_TOKEN": "evil", "SIMPWF_S3_ENDPOINT": "ok"}
+	base := map[string]any{"BEELINEWF_API_TOKEN": "evil", "BEELINEWF_S3_ENDPOINT": "ok"}
 	got := Merge(StripDenied(base), Snapshot("TEST_PREFIX_THAT_MATCHES_NOTHING_"))
-	if _, ok := got["SIMPWF_API_TOKEN"]; ok {
+	if _, ok := got["BEELINEWF_API_TOKEN"]; ok {
 		t.Fatal("denied base key survived")
 	}
-	if got["SIMPWF_S3_ENDPOINT"] != "ok" {
+	if got["BEELINEWF_S3_ENDPOINT"] != "ok" {
 		t.Fatal("allowed base key dropped")
 	}
 }
@@ -54,16 +54,16 @@ func TestStripDeniedNonMap(t *testing.T) {
 }
 
 func TestIsDeniedOverride(t *testing.T) {
-	SetOverride([]string{"SIMPWF_OPENROUTER*"}, []string{"SIMPWF_OPENROUTER_MODEL"})
+	SetOverride([]string{"BEELINEWF_OPENROUTER*"}, []string{"BEELINEWF_OPENROUTER_MODEL"})
 	defer SetOverride(nil, nil)
 
-	if !IsDenied("SIMPWF_OPENROUTER_KEY") {
+	if !IsDenied("BEELINEWF_OPENROUTER_KEY") {
 		t.Fatal("extra pattern must deny")
 	}
-	if IsDenied("SIMPWF_OPENROUTER_MODEL") {
+	if IsDenied("BEELINEWF_OPENROUTER_MODEL") {
 		t.Fatal("allow exception must win")
 	}
-	if IsDenied("SIMPWF_S3_ENDPOINT") {
+	if IsDenied("BEELINEWF_S3_ENDPOINT") {
 		t.Fatal("unrelated key must stay allowed")
 	}
 }

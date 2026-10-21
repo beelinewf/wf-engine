@@ -7,8 +7,8 @@
 #
 #   docker compose up --build
 #   curl http://localhost:8080/health/ready
-#   UI: http://localhost:8081 (proxy serves simpwf-ui at /, engine API at /api)
-#   RabbitMQ management UI: http://localhost:15672 (simpwf/simpwf)
+#   UI: http://localhost:8081 (proxy serves beelinewf-ui at /, engine API at /api)
+#   RabbitMQ management UI: http://localhost:15672 (beelinewf/beelinewf)
 #   RustFS console: http://localhost:9001 (rustfsadmin/rustfsadmin)
 
 services:
@@ -44,8 +44,8 @@ services:
     image: rabbitmq:4-management-alpine@sha256:3ef7f7e89fed709a78f79b8b5f4e30e1312a1d4089da752e23595566d9d61a95
     environment:
       # Local-development credentials; change for anything beyond local use.
-      RABBITMQ_DEFAULT_USER: simpwf
-      RABBITMQ_DEFAULT_PASS: simpwf
+      RABBITMQ_DEFAULT_USER: beelinewf
+      RABBITMQ_DEFAULT_PASS: beelinewf
     ports:
       - "25672:5672"
       - "25673:15672"
@@ -94,7 +94,7 @@ services:
   # S3-compatible object storage backing the s3fetch example custom node.
   # Single node, 4 local drives (erasure layout needs >= 4 paths), plain
   # HTTP for local dev. s3fetch renders connection fields from
-  # {{ env.SIMPWF_S3_* }}, set on the app service below.
+  # {{ env.BEELINEWF_S3_* }}, set on the app service below.
   rustfs:
     image: rustfs/rustfs:latest@sha256:1803faef57627e2d9c2e7d89d655d712ddded5389040054987163043fecb6a3c
     depends_on:
@@ -156,69 +156,69 @@ services:
       dockerfile: Dockerfile
       target: app
     environment:
-      SIMPWF_INFRA_HTTP_HOST: 0.0.0.0:8080
-      SIMPWF_INFRA_POSTGRESQL_DSN: host=db user=gorm password=gorm dbname=gorm port=5432 sslmode=disable
-      SIMPWF_INFRA_REDIS_DSN: redis://redis:6379/0
-      SIMPWF_INFRA_RABBITMQ_DSN: amqp://simpwf:simpwf@rabbitmq:5672/
-      SIMPWF_INFRA_RABBITMQ_INPUT_QUEUE: simpwf.input
-      SIMPWF_INFRA_RABBITMQ_OUTPUT_QUEUE: simpwf.output
-      SIMPWF_INFRA_RABBITMQ_STATUS_QUEUE: simpwf.status
-      SIMPWF_AUTH_ENABLED: "false"
-      # Only consulted when SIMPWF_AUTH_ENABLED is true; with authentication
+      BEELINEWF_INFRA_HTTP_HOST: 0.0.0.0:8080
+      BEELINEWF_INFRA_POSTGRESQL_DSN: host=db user=gorm password=gorm dbname=gorm port=5432 sslmode=disable
+      BEELINEWF_INFRA_REDIS_DSN: redis://redis:6379/0
+      BEELINEWF_INFRA_RABBITMQ_DSN: amqp://beelinewf:beelinewf@rabbitmq:5672/
+      BEELINEWF_INFRA_RABBITMQ_INPUT_QUEUE: beelinewf.input
+      BEELINEWF_INFRA_RABBITMQ_OUTPUT_QUEUE: beelinewf.output
+      BEELINEWF_INFRA_RABBITMQ_STATUS_QUEUE: beelinewf.status
+      BEELINEWF_AUTH_ENABLED: "false"
+      # Only consulted when BEELINEWF_AUTH_ENABLED is true; with authentication
       # off the token is ignored and every route is open, exactly as before.
-      SIMPWF_API_TOKEN: "wadidaw"
+      BEELINEWF_API_TOKEN: "wadidaw"
       # OIDC resource server. Off by default so the local stack starts with
-      # no identity provider. To try a login, point SIMPWF_AUTH_OIDC_ISSUER
+      # no identity provider. To try a login, point BEELINEWF_AUTH_OIDC_ISSUER
       # at a reachable provider (Zitadel, Keycloak, Authentik, ...) and set
       # the client id it was registered with; the frontend then reads the
       # endpoints from GET /v1/auth/config and runs code+PKCE. The API is a
       # resource server only, so no client secret belongs here. For a
       # zero-setup provider, use the bundled mock-oidc service:
-      # SIMPWF_AUTH_OIDC_ISSUER=http://mock-oidc:9099,
-      # SIMPWF_AUTH_OIDC_CLIENT_ID=simpwf.
-      SIMPWF_AUTH_OIDC_ENABLED: "${SIMPWF_AUTH_OIDC_ENABLED:-true}"
-      SIMPWF_AUTH_OIDC_ISSUER: "${SIMPWF_AUTH_OIDC_ISSUER:-http://mock-oidc:9099}"
-      SIMPWF_AUTH_OIDC_CLIENT_ID: "${SIMPWF_AUTH_OIDC_CLIENT_ID:-simpwf}"
-      SIMPWF_AUTH_OIDC_AUDIENCE: "${SIMPWF_AUTH_OIDC_AUDIENCE:-}"
-      SIMPWF_AUTH_OIDC_ROLES_CLAIM: "${SIMPWF_AUTH_OIDC_ROLES_CLAIM:-roles}"
-      SIMPWF_AUTH_OIDC_USERNAME_CLAIM: "${SIMPWF_AUTH_OIDC_USERNAME_CLAIM:-name}"
+      # BEELINEWF_AUTH_OIDC_ISSUER=http://mock-oidc:9099,
+      # BEELINEWF_AUTH_OIDC_CLIENT_ID=beelinewf.
+      BEELINEWF_AUTH_OIDC_ENABLED: "${BEELINEWF_AUTH_OIDC_ENABLED:-true}"
+      BEELINEWF_AUTH_OIDC_ISSUER: "${BEELINEWF_AUTH_OIDC_ISSUER:-http://mock-oidc:9099}"
+      BEELINEWF_AUTH_OIDC_CLIENT_ID: "${BEELINEWF_AUTH_OIDC_CLIENT_ID:-beelinewf}"
+      BEELINEWF_AUTH_OIDC_AUDIENCE: "${BEELINEWF_AUTH_OIDC_AUDIENCE:-}"
+      BEELINEWF_AUTH_OIDC_ROLES_CLAIM: "${BEELINEWF_AUTH_OIDC_ROLES_CLAIM:-roles}"
+      BEELINEWF_AUTH_OIDC_USERNAME_CLAIM: "${BEELINEWF_AUTH_OIDC_USERNAME_CLAIM:-name}"
       # Role catalog: mirrors config.yaml role_permissions so OIDC tokens
       # asserting the shipped roles grant the shipped permissions. A role a
       # token carries that is absent here grants nothing (deny by default).
-      SIMPWF_AUTH_ROLE_PERMISSIONS: >-
+      BEELINEWF_AUTH_ROLE_PERMISSIONS: >-
         {"admin": ["definitions:read", "definitions:write", "secrets:read", "secrets:write",
           "instances:create", "instances:read", "instances:update-context", "input:deliver",
           "instances:control", "instances:migrate", "statistics:read", "roles:read", "schedules:read", "schedules:write"],
          "finance": ["instances:read", "input:deliver"],
          "auditor": ["definitions:read", "instances:read", "statistics:read", "roles:read"]}
-      SIMPWF_WORKER_POOL_SIZE: "50"
-      # SIMPWF_* is snapshotted per instance under {{ env.* }}, except the
-      # denied credentials: SIMPWF_API_TOKEN, SIMPWF_AUTH_*, SIMPWF_SYSTEM_*,
-      # and any SIMPWF_*_DSN (the DSNs set just above). A denied name resolves
+      BEELINEWF_WORKER_POOL_SIZE: "50"
+      # BEELINEWF_* is snapshotted per instance under {{ env.* }}, except the
+      # denied credentials: BEELINEWF_API_TOKEN, BEELINEWF_AUTH_*, BEELINEWF_SYSTEM_*,
+      # and any BEELINEWF_*_DSN (the DSNs set just above). A denied name resolves
       # as "path not found". Extend or narrow with the patterns below, e.g.
-      # SIMPWF_ENGINE_ENV_DENY_EXTRA: "SIMPWF_OPENROUTER_KEY".
-      SIMPWF_ENGINE_DEFAULT_NODE_TIMEOUT: 30s
-      SIMPWF_ENGINE_MAX_NODE_TIMEOUT: 5m
-      SIMPWF_ENGINE_CONDITION_TIMEOUT: 5s
-      SIMPWF_ENGINE_LEASE_DURATION: 30s
-      SIMPWF_ENGINE_CLAIM_BATCH_SIZE: "10"
+      # BEELINEWF_ENGINE_ENV_DENY_EXTRA: "BEELINEWF_OPENROUTER_KEY".
+      BEELINEWF_ENGINE_DEFAULT_NODE_TIMEOUT: 30s
+      BEELINEWF_ENGINE_MAX_NODE_TIMEOUT: 5m
+      BEELINEWF_ENGINE_CONDITION_TIMEOUT: 5s
+      BEELINEWF_ENGINE_LEASE_DURATION: 30s
+      BEELINEWF_ENGINE_CLAIM_BATCH_SIZE: "10"
       # Dev convenience: allow any outbound HTTP target (the engine logs a
       # warning). Remove or tighten for anything beyond local testing.
-      SIMPWF_ENGINE_HTTP_ALLOWLIST: "*"
+      BEELINEWF_ENGINE_HTTP_ALLOWLIST: "*"
       # OpenRouter key for openrouter and jev custom nodes. Replace locally;
-      # instance creation snapshots SIMPWF_* under {{ env.* }}.
-      SIMPWF_OPENROUTER_KEY: "${SIMPWF_OPENROUTER_KEY:-}"
-      SIMPWF_SYSTEM_USER_ID: "00000000-0000-7000-8000-000000000001"
-      SIMPWF_SYSTEM_NAME: system
-      SIMPWF_SYSTEM_EMAIL: system@localhost
+      # instance creation snapshots BEELINEWF_* under {{ env.* }}.
+      BEELINEWF_OPENROUTER_KEY: "${BEELINEWF_OPENROUTER_KEY:-}"
+      BEELINEWF_SYSTEM_USER_ID: "00000000-0000-7000-8000-000000000001"
+      BEELINEWF_SYSTEM_NAME: system
+      BEELINEWF_SYSTEM_EMAIL: system@localhost
       # S3 connection for the s3fetch example custom node. Create snapshots
-      # SIMPWF_* into each instance context under {{ env.* }}, so s3fetch
-      # configs use {{ env.SIMPWF_S3_ENDPOINT }} etc. (see
+      # BEELINEWF_* into each instance context under {{ env.* }}, so s3fetch
+      # configs use {{ env.BEELINEWF_S3_ENDPOINT }} etc. (see
       # pkg/customnode/s3fetch/README.md). rustfs runs plain HTTP locally,
       # so use_ssl=false configs match; console at localhost:9001.
-      SIMPWF_S3_ENDPOINT: rustfs:9000
-      SIMPWF_S3_ACCESS_KEY: rustfsadmin
-      SIMPWF_S3_SECRET_KEY: rustfsadmin
+      BEELINEWF_S3_ENDPOINT: rustfs:9000
+      BEELINEWF_S3_ACCESS_KEY: rustfsadmin
+      BEELINEWF_S3_SECRET_KEY: rustfsadmin
     ports:
       - "8080:8080"
     depends_on:

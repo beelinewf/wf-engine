@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/executor"
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
-	"github.com/simpwf/workflow-engine/internal/workflow/repository"
-	"github.com/simpwf/workflow-engine/internal/workflow/statusupdate"
+	"github.com/beelinewf/wf-engine/internal/workflow/executor"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/repository"
+	"github.com/beelinewf/wf-engine/internal/workflow/statusupdate"
 )
 
 func testPublisher(t *testing.T, allowlist []string) *statusupdate.HTTPPublisher {
@@ -50,7 +50,7 @@ func TestHTTPPublisherSendsEvent(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotMethod = r.Method
 		gotAuth = r.Header.Get("Authorization")
-		gotID = r.Header.Get("X-SimpWF-Event-ID")
+		gotID = r.Header.Get("X-BeelineWF-Event-ID")
 		if r.Header.Get("Idempotency-Key") != gotID {
 			t.Errorf("Idempotency-Key = %q, want event id %q", r.Header.Get("Idempotency-Key"), gotID)
 		}
@@ -76,7 +76,7 @@ func TestHTTPPublisherSendsEvent(t *testing.T) {
 		t.Errorf("authorization = %q", gotAuth)
 	}
 	if gotID != "event-123" {
-		t.Errorf("X-SimpWF-Event-ID = %q, want event-123", gotID)
+		t.Errorf("X-BeelineWF-Event-ID = %q, want event-123", gotID)
 	}
 	if string(gotBody) != `{"event":"finished"}` {
 		t.Errorf("body = %q", gotBody)
@@ -173,12 +173,12 @@ func TestHTTPPublisherSendsCustomHeadersOverridingDefaults(t *testing.T) {
 	ev := testEvent("event-123")
 	p := testPublisher(t, []string{allowlistHost(srv.URL)})
 	err := p.Publish(context.Background(), httpCfg(srv.URL, "", map[string]string{
-		"Content-Type": "application/vnd.simpwf+json",
+		"Content-Type": "application/vnd.beelinewf+json",
 	}), ev)
 	if err != nil {
 		t.Fatalf("Publish() error = %v", err)
 	}
-	if gotCT != "application/vnd.simpwf+json" {
+	if gotCT != "application/vnd.beelinewf+json" {
 		t.Errorf("Content-Type = %q, want custom override", gotCT)
 	}
 }

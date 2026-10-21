@@ -1,4 +1,4 @@
-# SimpWF workflow definition sample.
+# BeelineWF workflow definition sample.
 #
 # This YAML is the source a workflow builder would save as the workflow
 # definition content (JSON). Every node id is a UUIDv7 and must be unique.

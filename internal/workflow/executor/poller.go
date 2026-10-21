@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
-	"github.com/simpwf/workflow-engine/internal/workflow/transport"
-	"github.com/simpwf/workflow-engine/pkg/contextpath"
-	"github.com/simpwf/workflow-engine/pkg/jsfunc"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/transport"
+	"github.com/beelinewf/wf-engine/pkg/contextpath"
+	"github.com/beelinewf/wf-engine/pkg/jsfunc"
 )
 
 // PollerResponse is the normalized response injected as the "response"

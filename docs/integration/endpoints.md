@@ -34,7 +34,7 @@ Response is the full definition
 
 FE note: `content` for a `group` definition must not contain `keys`; keys are supplied at the workflow occurrence.
 Referencing occurrence may add `keys`, `next_node`, `output_property`, `on_failure` (external_call/poller only), hooks,
-`start_delay`, metadata. Executable string fields may template the frozen instance roots (`{{ env.SIMPWF_* }}`, `{{ secret.KEY }}`);
+`start_delay`, metadata. Executable string fields may template the frozen instance roots (`{{ env.BEELINEWF_* }}`, `{{ secret.KEY }}`);
 definitions store the template text as-is, values resolve at instance runtime (see `fields.md` reserved roots).
 
 ### `GET /v1/node/definition` → `200`

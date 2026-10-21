@@ -12,8 +12,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/executor"
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/executor"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
 )
 
 func httpNode(cfg *model.HTTPConfig) *model.NodeContent {
@@ -518,7 +518,7 @@ func TestHTTPExecutorRejectsBadScheme(t *testing.T) {
 func TestHTTPExecutorRejectsUnknownHostDNS(t *testing.T) {
 	ex := executor.NewExecutors(executor.Limits{HTTPAllowlist: []string{"*"}, MaxRedirects: 5}, nil, executor.Dependencies{})[model.NodeTypeExternalCall]
 	_, err := ex.Execute(context.Background(), executor.Request{
-		Node:    httpNode(&model.HTTPConfig{URL: "http://no-such-host-simpwf.invalid/x", Method: "GET"}),
+		Node:    httpNode(&model.HTTPConfig{URL: "http://no-such-host-beelinewf.invalid/x", Method: "GET"}),
 		Context: map[string]any{},
 	})
 	if err == nil {

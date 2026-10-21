@@ -1,8 +1,8 @@
 // Package s3fetch is the bundled example custom node: it pipes a URL into
 // S3-compatible storage (pipe) or presigns an existing key (presign).
 // S3 connection fields are templated from the instance context, where
-// Create snapshots SIMPWF_* process env under the reserved env root, so
-// configs use shapes like {{ env.SIMPWF_S3_ENDPOINT }}.
+// Create snapshots BEELINEWF_* process env under the reserved env root, so
+// configs use shapes like {{ env.BEELINEWF_S3_ENDPOINT }}.
 //
 // The node returns a small output object {bucket,key,url,expires_at[,size]}
 // and never file bytes.
@@ -17,11 +17,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/beelinewf/wf-engine/internal/workflow/executor"
+	"github.com/beelinewf/wf-engine/pkg/contextpath"
+	"github.com/beelinewf/wf-engine/pkg/customnode"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
-	"github.com/simpwf/workflow-engine/internal/workflow/executor"
-	"github.com/simpwf/workflow-engine/pkg/contextpath"
-	"github.com/simpwf/workflow-engine/pkg/customnode"
 )
 
 // Operations supported by the s3fetch node.
@@ -53,15 +53,15 @@ var configSchema = json.RawMessage(`{
       "enum": ["pipe", "presign"],
       "description": "pipe uploads source_url under key; presign only presigns an existing key."
     },
-    "endpoint": { "type": "string", "minLength": 1, "description": "Bare host:port (an http(s):// prefix is tolerated). Templated, e.g. {{ env.SIMPWF_S3_ENDPOINT }}." },
+    "endpoint": { "type": "string", "minLength": 1, "description": "Bare host:port (an http(s):// prefix is tolerated). Templated, e.g. {{ env.BEELINEWF_S3_ENDPOINT }}." },
     "region": { "type": "string", "default": "us-east-1" },
-    "bucket": { "type": "string", "minLength": 1, "description": "Templated, e.g. {{ env.SIMPWF_S3_BUCKET }}." },
+    "bucket": { "type": "string", "minLength": 1, "description": "Templated, e.g. {{ env.BEELINEWF_S3_BUCKET }}." },
     "key": { "type": "string", "minLength": 1, "description": "Templated object key." },
     "source_url": { "type": "string", "minLength": 1, "description": "Templated URL downloaded and uploaded. Required for pipe, forbidden for presign." },
     "expiry_seconds": { "type": "integer", "minimum": 1, "maximum": 604800, "default": 3600, "description": "Presigned URL lifetime; the S3 ceiling is 7 days." },
     "use_ssl": { "type": "boolean", "default": true },
-    "access_key": { "type": "string", "minLength": 1, "description": "Templated, e.g. {{ env.SIMPWF_S3_ACCESS_KEY }}." },
-    "secret_key": { "type": "string", "minLength": 1, "description": "Templated, e.g. {{ env.SIMPWF_S3_SECRET_KEY }}." }
+    "access_key": { "type": "string", "minLength": 1, "description": "Templated, e.g. {{ env.BEELINEWF_S3_ACCESS_KEY }}." },
+    "secret_key": { "type": "string", "minLength": 1, "description": "Templated, e.g. {{ env.BEELINEWF_S3_SECRET_KEY }}." }
   },
   "required": ["operation", "endpoint", "bucket", "key", "access_key", "secret_key"],
   "allOf": [
@@ -97,13 +97,13 @@ type Config struct {
 	SourceURL string `json:"source_url,omitempty"`     // pipe only, templated
 	Expiry    int    `json:"expiry_seconds,omitempty"` // default 3600, clamp 1..604800
 	UseSSL    *bool  `json:"use_ssl,omitempty"`        // default true
-	AccessKey string `json:"access_key"`               // templated, e.g. {{ env.SIMPWF_S3_ACCESS_KEY }}
+	AccessKey string `json:"access_key"`               // templated, e.g. {{ env.BEELINEWF_S3_ACCESS_KEY }}
 	SecretKey string `json:"secret_key"`
 }
 
 // ValidateConfig owns the s3fetch schema. It checks raw presence only:
 // templates are unresolved at parse, so values containing {{ }} shapes
-// (e.g. {{ env.SIMPWF_S3_ACCESS_KEY }}) are accepted here and resolved
+// (e.g. {{ env.BEELINEWF_S3_ACCESS_KEY }}) are accepted here and resolved
 // at runtime against the instance context.
 func ValidateConfig(raw json.RawMessage) (any, error) {
 	if len(raw) == 0 || strings.TrimSpace(string(raw)) == "null" {

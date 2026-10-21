@@ -5,7 +5,7 @@ package kernel
 import (
 	"fmt"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
 )
 
 // Graph is the read view of a materialized workflow definition the cursor

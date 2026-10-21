@@ -3,7 +3,7 @@ package engine
 import (
 	"fmt"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
 )
 
 // workflowGraph indexes a materialized node tree by node id for cursor

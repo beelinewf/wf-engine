@@ -9,8 +9,8 @@ packages under `pkg/customnode/<name>`; copy this package as template.
 `docker-compose.yml` runs RustFS (`rustfs/rustfs`, plain HTTP) with dev
 credentials `rustfsadmin`/`rustfsadmin`: S3 API on `localhost:9000`,
 console on `localhost:9001`. The `app` service sets
-`SIMPWF_S3_ENDPOINT=rustfs:9000` plus the same credentials, so instance
-contexts carry them under `{{ env.SIMPWF_S3_* }}`. Local runs use
+`BEELINEWF_S3_ENDPOINT=rustfs:9000` plus the same credentials, so instance
+contexts carry them under `{{ env.BEELINEWF_S3_* }}`. Local runs use
 `"use_ssl": false` (RustFS is plain HTTP here); buckets must exist before
 `pipe` (create once in console or via `mc mb`).
 
@@ -23,15 +23,15 @@ contexts carry them under `{{ env.SIMPWF_S3_* }}`. Local runs use
   "name": "fetch-report",
   "config": {
     "operation": "pipe",
-    "endpoint": "{{ env.SIMPWF_S3_ENDPOINT }}",
+    "endpoint": "{{ env.BEELINEWF_S3_ENDPOINT }}",
     "region": "us-east-1",
     "bucket": "reports",
     "key": "daily/{{ run_id }}.pdf",
     "source_url": "https://example.com/report.pdf",
     "expiry_seconds": 3600,
     "use_ssl": true,
-    "access_key": "{{ env.SIMPWF_S3_ACCESS_KEY }}",
-    "secret_key": "{{ env.SIMPWF_S3_SECRET_KEY }}"
+    "access_key": "{{ env.BEELINEWF_S3_ACCESS_KEY }}",
+    "secret_key": "{{ env.BEELINEWF_S3_SECRET_KEY }}"
   },
   "timeout": "120s",
   "output_property": "report",
@@ -48,12 +48,12 @@ Presign (no download, key must exist):
   "name": "share-report",
   "config": {
     "operation": "presign",
-    "endpoint": "{{ env.SIMPWF_S3_ENDPOINT }}",
+    "endpoint": "{{ env.BEELINEWF_S3_ENDPOINT }}",
     "bucket": "reports",
     "key": "daily/abc.pdf",
     "expiry_seconds": 3600,
-    "access_key": "{{ env.SIMPWF_S3_ACCESS_KEY }}",
-    "secret_key": "{{ env.SIMPWF_S3_SECRET_KEY }}"
+    "access_key": "{{ env.BEELINEWF_S3_ACCESS_KEY }}",
+    "secret_key": "{{ env.BEELINEWF_S3_SECRET_KEY }}"
   },
   "timeout": "30s",
   "output_property": "report"
@@ -77,7 +77,7 @@ parsed/validated by core (timeout cap, hooks, `on_failure`,
   ceiling is 7 days). `0`/omitted = default.
 - `use_ssl` bool, defaults `true`.
 - `access_key`, `secret_key` strings, required, templated — e.g.
-  `{{ env.SIMPWF_S3_ACCESS_KEY }}`.
+  `{{ env.BEELINEWF_S3_ACCESS_KEY }}`.
 
 Bad config fails at parse (definition + workflow create time, never
 runtime): `node type "s3fetch": invalid config: <reason>`. Presence
@@ -111,10 +111,10 @@ only (reports, thumbnails, CSVs), not multi-GB objects.
 
 ## Trusted-author env note
 
-Only `SIMPWF_*` process env is visible to workflows, snapshotted at
-instance creation under the reserved `env` root (`{{ env.SIMPWF_X }}`).
-Denied credentials (`SIMPWF_API_TOKEN`, `SIMPWF_AUTH_*`, `SIMPWF_SYSTEM_*`,
-`SIMPWF_*_DSN`) are never snapshotted and resolve as missing, so the
+Only `BEELINEWF_*` process env is visible to workflows, snapshotted at
+instance creation under the reserved `env` root (`{{ env.BEELINEWF_X }}`).
+Denied credentials (`BEELINEWF_API_TOKEN`, `BEELINEWF_AUTH_*`, `BEELINEWF_SYSTEM_*`,
+`BEELINEWF_*_DSN`) are never snapshotted and resolve as missing, so the
 endpoint/keys above work while the deployment's own credentials cannot be
 read this way.
 Workflow authors who can set config templates can exfiltrate those

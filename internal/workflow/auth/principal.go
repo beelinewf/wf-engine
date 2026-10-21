@@ -11,7 +11,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/simpwf/workflow-engine/pkg/configuration"
+	"github.com/beelinewf/wf-engine/pkg/configuration"
 )
 
 // Context keys used to carry the principal and the resolved permissions

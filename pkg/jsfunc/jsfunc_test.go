@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simpwf/workflow-engine/pkg/jsfunc"
+	"github.com/beelinewf/wf-engine/pkg/jsfunc"
 )
 
 func TestRegisterAndGet(t *testing.T) {

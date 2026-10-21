@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/auth"
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
-	"github.com/simpwf/workflow-engine/internal/workflow/repository"
-	"github.com/simpwf/workflow-engine/internal/workflow/service"
-	"github.com/simpwf/workflow-engine/internal/workflow/transport"
+	"github.com/beelinewf/wf-engine/internal/workflow/auth"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/repository"
+	"github.com/beelinewf/wf-engine/internal/workflow/service"
+	"github.com/beelinewf/wf-engine/internal/workflow/transport"
 )
 
 // fakeInstanceService implements service.InstanceService for broker input

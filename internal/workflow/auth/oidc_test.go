@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/beelinewf/wf-engine/internal/workflow/auth"
+	"github.com/beelinewf/wf-engine/pkg/configuration"
 	"github.com/go-jose/go-jose/v4"
-	"github.com/simpwf/workflow-engine/internal/workflow/auth"
-	"github.com/simpwf/workflow-engine/pkg/configuration"
 )
 
 // oidcFixture is a mock provider: it serves the discovery document and a
@@ -36,7 +36,7 @@ func newOIDCFixture(t *testing.T) *oidcFixture {
 	if err != nil {
 		t.Fatalf("generate rsa key: %v", err)
 	}
-	f := &oidcFixture{key: key, keyID: "test-key-1", audience: "simpwf"}
+	f := &oidcFixture{key: key, keyID: "test-key-1", audience: "beelinewf"}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -74,7 +74,7 @@ func (f *oidcFixture) authenticator(t *testing.T) *auth.OIDCAuthenticator {
 	a, err := auth.NewOIDCAuthenticator(context.Background(), configuration.OIDC{
 		Enabled:       true,
 		Issuer:        f.issuer,
-		ClientID:      "simpwf",
+		ClientID:      "beelinewf",
 		RolesClaim:    "roles",
 		UsernameClaim: "name",
 		ClockSkew:     time.Minute,
@@ -162,7 +162,7 @@ func TestVerifyRejectsExpiredToken(t *testing.T) {
 	f := newOIDCFixture(t)
 	// No skew: an expired token must fail.
 	a, err := auth.NewOIDCAuthenticator(context.Background(), configuration.OIDC{
-		Issuer: f.issuer, ClientID: "simpwf", ClockSkew: 0,
+		Issuer: f.issuer, ClientID: "beelinewf", ClockSkew: 0,
 	})
 	if err != nil {
 		t.Fatalf("NewOIDCAuthenticator() error = %v", err)
@@ -289,7 +289,7 @@ func TestVerifyMissingRolesClaimGrantsNothing(t *testing.T) {
 func TestVerifySupportsDottedClaimPaths(t *testing.T) {
 	f := newOIDCFixture(t)
 	a, err := auth.NewOIDCAuthenticator(context.Background(), configuration.OIDC{
-		Issuer: f.issuer, ClientID: "simpwf",
+		Issuer: f.issuer, ClientID: "beelinewf",
 		RolesClaim: "realm_access.roles", UsernameClaim: "profile.display",
 		ClockSkew: time.Minute,
 	})
@@ -319,7 +319,7 @@ func TestVerifySupportsDottedClaimPaths(t *testing.T) {
 func TestVerifyDottedPathDoesNotMatchFlatKey(t *testing.T) {
 	f := newOIDCFixture(t)
 	a, err := auth.NewOIDCAuthenticator(context.Background(), configuration.OIDC{
-		Issuer: f.issuer, ClientID: "simpwf",
+		Issuer: f.issuer, ClientID: "beelinewf",
 		RolesClaim: "realm_access.roles", UsernameClaim: "profile.display",
 		ClockSkew: time.Minute,
 	})
@@ -350,7 +350,7 @@ func TestVerifyDottedPathDoesNotMatchFlatKey(t *testing.T) {
 func TestVerifyClaimPathEdgeCases(t *testing.T) {
 	f := newOIDCFixture(t)
 	a, err := auth.NewOIDCAuthenticator(context.Background(), configuration.OIDC{
-		Issuer: f.issuer, ClientID: "simpwf",
+		Issuer: f.issuer, ClientID: "beelinewf",
 		RolesClaim: "realm_access.roles", ClockSkew: time.Minute,
 	})
 	if err != nil {
@@ -374,7 +374,7 @@ func TestVerifyClaimPathEdgeCases(t *testing.T) {
 func TestVerifyDisplayNameFallbacks(t *testing.T) {
 	f := newOIDCFixture(t)
 	a, err := auth.NewOIDCAuthenticator(context.Background(), configuration.OIDC{
-		Issuer: f.issuer, ClientID: "simpwf", UsernameClaim: "login_hint", ClockSkew: time.Minute,
+		Issuer: f.issuer, ClientID: "beelinewf", UsernameClaim: "login_hint", ClockSkew: time.Minute,
 	})
 	if err != nil {
 		t.Fatalf("NewOIDCAuthenticator() error = %v", err)
@@ -410,8 +410,8 @@ func TestConfigExposesLoginContract(t *testing.T) {
 	if cfg.Issuer != f.issuer {
 		t.Errorf("Issuer = %q, want %q", cfg.Issuer, f.issuer)
 	}
-	if cfg.ClientID != "simpwf" {
-		t.Errorf("ClientID = %q, want simpwf", cfg.ClientID)
+	if cfg.ClientID != "beelinewf" {
+		t.Errorf("ClientID = %q, want beelinewf", cfg.ClientID)
 	}
 	if cfg.AuthorizationURL != f.issuer+"/authorize" {
 		t.Errorf("AuthorizationURL = %q, want the discovery endpoint", cfg.AuthorizationURL)
@@ -424,8 +424,8 @@ func TestConfigExposesLoginContract(t *testing.T) {
 	}
 	// The fixture sets no audience, so the contract reports the fallback
 	// rather than leaving a frontend to guess which aud it must request.
-	if cfg.Audience != "simpwf" {
-		t.Errorf("Audience = %q, want the client id fallback simpwf", cfg.Audience)
+	if cfg.Audience != "beelinewf" {
+		t.Errorf("Audience = %q, want the client id fallback beelinewf", cfg.Audience)
 	}
 }
 
@@ -434,7 +434,7 @@ func TestConfigExposesLoginContract(t *testing.T) {
 func TestConfigReportsConfiguredAudience(t *testing.T) {
 	f := newOIDCFixture(t)
 	a, err := auth.NewOIDCAuthenticator(context.Background(), configuration.OIDC{
-		Issuer: f.issuer, ClientID: "simpwf", Audience: "https://api.example.com",
+		Issuer: f.issuer, ClientID: "beelinewf", Audience: "https://api.example.com",
 		RolesClaim: "roles", UsernameClaim: "name",
 	})
 	if err != nil {
@@ -444,12 +444,12 @@ func TestConfigReportsConfiguredAudience(t *testing.T) {
 	if cfg.Audience != "https://api.example.com" {
 		t.Errorf("Audience = %q, want the configured resource audience", cfg.Audience)
 	}
-	if cfg.ClientID != "simpwf" {
-		t.Errorf("ClientID = %q, want simpwf unchanged", cfg.ClientID)
+	if cfg.ClientID != "beelinewf" {
+		t.Errorf("ClientID = %q, want beelinewf unchanged", cfg.ClientID)
 	}
 	// The verifier is pinned to the configured audience, not the client id.
 	claims := f.validClaims("u-1")
-	claims["aud"] = "simpwf"
+	claims["aud"] = "beelinewf"
 	if _, err := a.Verify(context.Background(), f.token(t, claims)); !errors.Is(err, auth.ErrUnauthenticated) {
 		t.Errorf("Verify(aud=client_id) error = %v, want ErrUnauthorized: the verifier must use the configured audience", err)
 	}
@@ -469,7 +469,7 @@ func TestDisabledAuthenticatorRefusesEverything(t *testing.T) {
 
 func TestNewOIDCAuthenticatorRejectsUnreachableIssuer(t *testing.T) {
 	_, err := auth.NewOIDCAuthenticator(context.Background(), configuration.OIDC{
-		Issuer: "http://127.0.0.1:1/never", ClientID: "simpwf",
+		Issuer: "http://127.0.0.1:1/never", ClientID: "beelinewf",
 	})
 	if err == nil {
 		t.Fatal("NewOIDCAuthenticator() error = nil, want a discovery failure")

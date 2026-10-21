@@ -14,17 +14,17 @@ import (
 )
 
 // Prefix is the only env namespace snapshotted into workflow contexts.
-// Workflows address values as {{ env.SIMPWF_X }}.
-const Prefix = "SIMPWF_"
+// Workflows address values as {{ env.BEELINEWF_X }}.
+const Prefix = "BEELINEWF_"
 
 // Denied names are patterns matched against the full env var name. Globs are
 // supported so an operator can add patterns without code changes; a pattern
 // without a wildcard is an exact match.
 var defaultDenied = []string{
-	"SIMPWF_API_TOKEN",
-	"SIMPWF_AUTH_*",
-	"SIMPWF_SYSTEM_*",
-	"SIMPWF_*_DSN",
+	"BEELINEWF_API_TOKEN",
+	"BEELINEWF_AUTH_*",
+	"BEELINEWF_SYSTEM_*",
+	"BEELINEWF_*_DSN",
 }
 
 // override holds the operator-supplied patterns installed by SetOverride.

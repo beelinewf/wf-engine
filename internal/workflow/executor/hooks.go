@@ -3,8 +3,8 @@ package executor
 import (
 	"context"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
-	"github.com/simpwf/workflow-engine/pkg/jsfunc"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/pkg/jsfunc"
 )
 
 // HookRunner executes lifecycle hooks in the same Goja sandbox as node

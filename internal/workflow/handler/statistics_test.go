@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/beelinewf/wf-engine/internal/workflow/auth"
+	"github.com/beelinewf/wf-engine/internal/workflow/repository"
 	"github.com/gin-gonic/gin"
-	"github.com/simpwf/workflow-engine/internal/workflow/auth"
-	"github.com/simpwf/workflow-engine/internal/workflow/repository"
 )
 
 // fakeStatisticsSvc is an in-memory statistics service for handler tests.

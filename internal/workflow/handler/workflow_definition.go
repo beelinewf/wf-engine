@@ -3,10 +3,10 @@ package handler
 import (
 	"net/http"
 
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/service"
+	"github.com/beelinewf/wf-engine/pkg/ids"
 	"github.com/gin-gonic/gin"
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
-	"github.com/simpwf/workflow-engine/internal/workflow/service"
-	"github.com/simpwf/workflow-engine/pkg/ids"
 )
 
 // WorkflowDefinitionHandler serves /v1/workflow/definition routes.

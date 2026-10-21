@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
 	"github.com/santhosh-tekuri/jsonschema/v6"
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
 )
 
 // TestConfigSchemaIsRegistered proves the init registration carried the
@@ -78,28 +78,28 @@ func TestConfigSchemaIfThenOnSourceURL(t *testing.T) {
 func TestConfigSchemaAcceptsShippedExamples(t *testing.T) {
 	pipe := wrapNode("s3fetch", json.RawMessage(`{
       "operation": "pipe",
-      "endpoint": "{{ env.SIMPWF_S3_ENDPOINT }}",
+      "endpoint": "{{ env.BEELINEWF_S3_ENDPOINT }}",
       "region": "us-east-1",
       "bucket": "reports",
       "key": "seed/pipe-probe.pdf",
       "source_url": "https://example.com/report.pdf",
       "expiry_seconds": 3600,
       "use_ssl": false,
-      "access_key": "{{ env.SIMPWF_S3_ACCESS_KEY }}",
-      "secret_key": "{{ env.SIMPWF_S3_SECRET_KEY }}"
+      "access_key": "{{ env.BEELINEWF_S3_ACCESS_KEY }}",
+      "secret_key": "{{ env.BEELINEWF_S3_SECRET_KEY }}"
     }`), json.RawMessage(`{"output_property":"report","timeout":"120s"}`))
 	validate(t, pipe)
 
 	presign := wrapNode("s3fetch", json.RawMessage(`{
       "operation": "presign",
-      "endpoint": "{{ env.SIMPWF_S3_ENDPOINT }}",
+      "endpoint": "{{ env.BEELINEWF_S3_ENDPOINT }}",
       "region": "us-east-1",
       "bucket": "reports",
       "key": "seed/pipe-probe.pdf",
       "expiry_seconds": 3600,
       "use_ssl": false,
-      "access_key": "{{ env.SIMPWF_S3_ACCESS_KEY }}",
-      "secret_key": "{{ env.SIMPWF_S3_SECRET_KEY }}"
+      "access_key": "{{ env.BEELINEWF_S3_ACCESS_KEY }}",
+      "secret_key": "{{ env.BEELINEWF_S3_SECRET_KEY }}"
     }`), json.RawMessage(`{"output_property":"report","timeout":"30s"}`))
 	validate(t, presign)
 }

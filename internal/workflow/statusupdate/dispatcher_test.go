@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/executor"
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
-	"github.com/simpwf/workflow-engine/internal/workflow/repository"
-	"github.com/simpwf/workflow-engine/internal/workflow/statusupdate"
-	"github.com/simpwf/workflow-engine/internal/workflow/testdb"
+	"github.com/beelinewf/wf-engine/internal/workflow/executor"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/repository"
+	"github.com/beelinewf/wf-engine/internal/workflow/statusupdate"
+	"github.com/beelinewf/wf-engine/internal/workflow/testdb"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
@@ -119,7 +119,7 @@ type webhookRecorder struct {
 func (w *webhookRecorder) handler() http.HandlerFunc {
 	return func(rw http.ResponseWriter, r *http.Request) {
 		w.mu.Lock()
-		id := r.Header.Get("X-SimpWF-Event-ID")
+		id := r.Header.Get("X-BeelineWF-Event-ID")
 		w.ids = append(w.ids, id)
 		fail := w.fails > 0
 		if fail {

@@ -3,14 +3,14 @@ package handler
 import (
 	"net/http"
 
+	"github.com/beelinewf/wf-engine/internal/workflow/auth"
+	"github.com/beelinewf/wf-engine/internal/workflow/service"
+	"github.com/beelinewf/wf-engine/pkg/configuration"
 	"github.com/gin-gonic/gin"
-	"github.com/simpwf/workflow-engine/internal/workflow/auth"
-	"github.com/simpwf/workflow-engine/internal/workflow/service"
-	"github.com/simpwf/workflow-engine/pkg/configuration"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 
-	_ "github.com/simpwf/workflow-engine/docs"
+	_ "github.com/beelinewf/wf-engine/docs"
 )
 
 // Deps carries the handlers the router wires. The router stays a thin

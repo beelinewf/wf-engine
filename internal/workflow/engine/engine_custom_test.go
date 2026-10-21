@@ -6,11 +6,11 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/engine"
-	"github.com/simpwf/workflow-engine/internal/workflow/executor"
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
-	"github.com/simpwf/workflow-engine/pkg/customnode"
-	_ "github.com/simpwf/workflow-engine/pkg/customnode/s3fetch"
+	"github.com/beelinewf/wf-engine/internal/workflow/engine"
+	"github.com/beelinewf/wf-engine/internal/workflow/executor"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/pkg/customnode"
+	_ "github.com/beelinewf/wf-engine/pkg/customnode/s3fetch"
 	"gorm.io/gorm"
 )
 

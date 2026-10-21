@@ -210,9 +210,9 @@ url/method/key/channel/queue. Header names and body property names never render.
 `workflow_instance_id`, `node_instance_id` (usable in templates, never persisted).
 
 Reserved context roots (`env`, `secret`): snapshotted into every instance context at creation, readable everywhere
-context is readable. `env` holds process env vars starting `SIMPWF_` (`{{ env.SIMPWF_S3_ENDPOINT }}`,
-`context.env.SIMPWF_S3_ENDPOINT` in scripts); only that prefix ever enters context, and denied credentials
-(`SIMPWF_API_TOKEN`, `SIMPWF_AUTH_*`, `SIMPWF_SYSTEM_*`, `SIMPWF_*_DSN`) are excluded — a denied name is dropped
+context is readable. `env` holds process env vars starting `BEELINEWF_` (`{{ env.BEELINEWF_S3_ENDPOINT }}`,
+`context.env.BEELINEWF_S3_ENDPOINT` in scripts); only that prefix ever enters context, and denied credentials
+(`BEELINEWF_API_TOKEN`, `BEELINEWF_AUTH_*`, `BEELINEWF_SYSTEM_*`, `BEELINEWF_*_DSN`) are excluded — a denied name is dropped
 from the snapshot, stripped from any caller-supplied `env` root, and resolves as `contextpath: path not found` even
 if a value was written there, so a create body cannot inject one. `secret` holds the frozen
 `/v1/secrets` table keyed by secret key (`{{ secret.API_KEY }}`, `context.secret.API_KEY`). Definitions carry only the

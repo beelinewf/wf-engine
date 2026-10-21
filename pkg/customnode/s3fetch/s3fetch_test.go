@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/executor"
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
-	"github.com/simpwf/workflow-engine/pkg/customnode"
-	"github.com/simpwf/workflow-engine/pkg/customnode/s3fetch"
-	_ "github.com/simpwf/workflow-engine/pkg/customnode/s3fetch"
+	"github.com/beelinewf/wf-engine/internal/workflow/executor"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/pkg/customnode"
+	"github.com/beelinewf/wf-engine/pkg/customnode/s3fetch"
+	_ "github.com/beelinewf/wf-engine/pkg/customnode/s3fetch"
 )
 
 type fakeHTTP struct {
@@ -122,7 +122,7 @@ func TestValidateReject(t *testing.T) {
 		"missing endpoint":     `{"operation":"pipe","bucket":"b","key":"k","source_url":"https://x","access_key":"a","secret_key":"s"}`,
 		"expiry negative":      `{"operation":"pipe","endpoint":"e","bucket":"b","key":"k","source_url":"https://x","access_key":"a","secret_key":"s","expiry_seconds":-5}`,
 		"expiry too big":       `{"operation":"pipe","endpoint":"e","bucket":"b","key":"k","source_url":"https://x","access_key":"a","secret_key":"s","expiry_seconds":9999999}`,
-		"template shapes pass": `{"operation":"pipe","endpoint":"{{ env.SIMPWF_S3_ENDPOINT }}","bucket":"b","key":"k","source_url":"https://x","access_key":"{{ env.SIMPWF_S3_ACCESS_KEY }}","secret_key":"{{ env.SIMPWF_S3_SECRET_KEY }}"}`,
+		"template shapes pass": `{"operation":"pipe","endpoint":"{{ env.BEELINEWF_S3_ENDPOINT }}","bucket":"b","key":"k","source_url":"https://x","access_key":"{{ env.BEELINEWF_S3_ACCESS_KEY }}","secret_key":"{{ env.BEELINEWF_S3_SECRET_KEY }}"}`,
 		"not object":           `[1,2]`,
 		"null":                 `null`,
 	} {

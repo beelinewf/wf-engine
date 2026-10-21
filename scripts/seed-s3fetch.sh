@@ -21,12 +21,12 @@ fail() {
 command -v curl >/dev/null 2>&1 || fail "curl is required"
 command -v jq >/dev/null 2>&1 || fail "jq is required"
 
-# api_curl wraps curl with the optional API-key header: when SIMPWF_API_TOKEN
+# api_curl wraps curl with the optional API-key header: when BEELINEWF_API_TOKEN
 # is set, requests authenticate as the service principal, otherwise this is
 # plain curl (no-auth deployments keep working unchanged).
 api_curl() {
-  if [[ -n "${SIMPWF_API_TOKEN:-}" ]]; then
-    curl -H "X-Api-Token: $SIMPWF_API_TOKEN" "$@"
+  if [[ -n "${BEELINEWF_API_TOKEN:-}" ]]; then
+    curl -H "X-Api-Token: $BEELINEWF_API_TOKEN" "$@"
   else
     curl "$@"
   fi
@@ -41,15 +41,15 @@ node_definitions=$(cat <<'JSON'
       "type": "s3fetch",
       "config": {
         "operation": "pipe",
-        "endpoint": "{{ env.SIMPWF_S3_ENDPOINT }}",
+        "endpoint": "{{ env.BEELINEWF_S3_ENDPOINT }}",
         "region": "us-east-1",
         "bucket": "reports",
         "key": "seed/pipe-probe.pdf",
         "source_url": "https://example.com/report.pdf",
         "expiry_seconds": 3600,
         "use_ssl": false,
-        "access_key": "{{ env.SIMPWF_S3_ACCESS_KEY }}",
-        "secret_key": "{{ env.SIMPWF_S3_SECRET_KEY }}"
+        "access_key": "{{ env.BEELINEWF_S3_ACCESS_KEY }}",
+        "secret_key": "{{ env.BEELINEWF_S3_SECRET_KEY }}"
       },
       "output_property": "report",
       "timeout": "120s"
@@ -62,14 +62,14 @@ node_definitions=$(cat <<'JSON'
       "type": "s3fetch",
       "config": {
         "operation": "presign",
-        "endpoint": "{{ env.SIMPWF_S3_ENDPOINT }}",
+        "endpoint": "{{ env.BEELINEWF_S3_ENDPOINT }}",
         "region": "us-east-1",
         "bucket": "reports",
         "key": "seed/pipe-probe.pdf",
         "expiry_seconds": 3600,
         "use_ssl": false,
-        "access_key": "{{ env.SIMPWF_S3_ACCESS_KEY }}",
-        "secret_key": "{{ env.SIMPWF_S3_SECRET_KEY }}"
+        "access_key": "{{ env.BEELINEWF_S3_ACCESS_KEY }}",
+        "secret_key": "{{ env.BEELINEWF_S3_SECRET_KEY }}"
       },
       "output_property": "report",
       "timeout": "30s"

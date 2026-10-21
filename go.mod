@@ -1,6 +1,6 @@
-module github.com/simpwf/workflow-engine
+module github.com/beelinewf/wf-engine
 
-go 1.27.2
+go 1.27.3
 
 require (
 	ariga.io/atlas-provider-gorm v0.6.1

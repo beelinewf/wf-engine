@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/auth"
+	"github.com/beelinewf/wf-engine/internal/workflow/auth"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 )

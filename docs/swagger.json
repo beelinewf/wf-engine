@@ -5,7 +5,7 @@
     "swagger": "2.0",
     "info": {
         "description": "Workflow definition and execution API.",
-        "title": "SimpWF API",
+        "title": "BeelineWF API",
         "contact": {},
         "version": "1.0"
     },

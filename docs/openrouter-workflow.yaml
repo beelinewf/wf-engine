@@ -10,7 +10,7 @@ nodes:
     config:
       api: chat
       model: openai/gpt-4o-mini
-      api_key: "{{ env.SIMPWF_OPENROUTER_KEY }}"
+      api_key: "{{ env.BEELINEWF_OPENROUTER_KEY }}"
       system: "Answer briefly and accurately."
       prompt: "{{ question }}"
       temperature: 0.2
@@ -26,7 +26,7 @@ nodes:
     config:
       api: responses
       model: openai/gpt-4o-mini
-      api_key: "{{ env.SIMPWF_OPENROUTER_KEY }}"
+      api_key: "{{ env.BEELINEWF_OPENROUTER_KEY }}"
       messages:
         - role: developer
           content: "Use the chat answer and produce a concise follow-up."

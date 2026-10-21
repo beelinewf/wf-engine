@@ -2,8 +2,8 @@
 # Seed openrouter custom-node definitions plus a chat-to-responses demo.
 #
 # Prereqs (server side):
-#   - SIMPWF_OPENROUTER_KEY set in the server env (snapshotted per
-#     instance under {{ env.SIMPWF_OPENROUTER_KEY }} at creation).
+#   - BEELINEWF_OPENROUTER_KEY set in the server env (snapshotted per
+#     instance under {{ env.BEELINEWF_OPENROUTER_KEY }} at creation).
 #   - openrouter.ai in the engine HTTP allowlist.
 #
 # Usage: scripts/seed_openrouter.sh [BASE_URL]
@@ -20,18 +20,18 @@ fail() {
 command -v curl >/dev/null 2>&1 || fail "curl is required"
 command -v jq >/dev/null 2>&1 || fail "jq is required"
 
-# api_curl wraps curl with the optional API-key header: when SIMPWF_API_TOKEN
+# api_curl wraps curl with the optional API-key header: when BEELINEWF_API_TOKEN
 # is set, requests authenticate as the service principal, otherwise this is
 # plain curl (no-auth deployments keep working unchanged).
 api_curl() {
-  if [[ -n "${SIMPWF_API_TOKEN:-}" ]]; then
-    curl -H "X-Api-Token: $SIMPWF_API_TOKEN" "$@"
+  if [[ -n "${BEELINEWF_API_TOKEN:-}" ]]; then
+    curl -H "X-Api-Token: $BEELINEWF_API_TOKEN" "$@"
   else
     curl "$@"
   fi
 }
 
-echo "seed-openrouter: prereqs: SIMPWF_OPENROUTER_KEY in server env, openrouter.ai allowlisted" >&2
+echo "seed-openrouter: prereqs: BEELINEWF_OPENROUTER_KEY in server env, openrouter.ai allowlisted" >&2
 
 node_definitions=$(cat <<'JSON'
 {
@@ -43,7 +43,7 @@ node_definitions=$(cat <<'JSON'
       "config": {
         "api": "chat",
         "model": "openai/gpt-4o-mini",
-        "api_key": "{{ env.SIMPWF_OPENROUTER_KEY }}",
+        "api_key": "{{ env.BEELINEWF_OPENROUTER_KEY }}",
         "system": "Answer briefly and accurately.",
         "prompt": "{{ question }}",
         "temperature": 0.2,
@@ -62,7 +62,7 @@ node_definitions=$(cat <<'JSON'
       "config": {
         "api": "responses",
         "model": "openai/gpt-4o-mini",
-        "api_key": "{{ env.SIMPWF_OPENROUTER_KEY }}",
+        "api_key": "{{ env.BEELINEWF_OPENROUTER_KEY }}",
         "messages": [
           {
             "role": "developer",

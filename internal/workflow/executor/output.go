@@ -6,9 +6,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/simpwf/workflow-engine/internal/workflow/model"
-	"github.com/simpwf/workflow-engine/internal/workflow/transport"
-	"github.com/simpwf/workflow-engine/pkg/contextpath"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/transport"
+	"github.com/beelinewf/wf-engine/pkg/contextpath"
 )
 
 // PublishReceipt is the metadata returned by a successful output publish;

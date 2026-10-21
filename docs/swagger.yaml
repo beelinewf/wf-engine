@@ -870,7 +870,7 @@ definitions:
 info:
   contact: {}
   description: Workflow definition and execution API.
-  title: SimpWF API
+  title: BeelineWF API
   version: "1.0"
 paths:
   /health/live:
