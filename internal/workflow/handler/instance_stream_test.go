@@ -209,6 +209,35 @@ func TestStatusStreamMidStreamError(t *testing.T) {
 	}
 }
 
+func TestStatusStreamMidStreamNotFound(t *testing.T) {
+	// Headers are already 200 when the row vanishes, so the not-found
+	// surfaces as a terminal error event carrying status 404.
+	svc := &fakeInstanceSvc{detailFunc: func(call int) (*service.StatusDetail, error) {
+		if call == 1 {
+			return streamTestDetail(model.WorkflowRunning, 1, ""), nil
+		}
+		return nil, model.ErrNotFound
+	}}
+	h := NewInstanceHandler(svc)
+	h.streamPoll = 5 * time.Millisecond
+	w := httptest.NewRecorder()
+	serveStreamTo(t, h, context.Background(), w)
+	evs := parseStreamBody(t, w.Body.String())
+	if len(statusEvents(evs)) != 1 {
+		t.Fatalf("status events = %d, want 1 before the error", len(statusEvents(evs)))
+	}
+	if len(evs) != 2 || evs[1].event != "error" {
+		t.Fatalf("events = %+v, want a terminal error event", evs)
+	}
+	var p Problem
+	if err := json.Unmarshal([]byte(evs[1].data), &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.Status != http.StatusNotFound {
+		t.Errorf("error event = %+v, want status 404", p)
+	}
+}
+
 func TestStatusStreamHeartbeatOnIdle(t *testing.T) {
 	// One shared detail: rebuilding per call would stamp fresh times and
 	// every poll would look like a change.

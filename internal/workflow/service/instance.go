@@ -687,7 +687,7 @@ func resolveActor(actor, fallback string) string {
 }
 
 func (s *instanceService) GetStatus(ctx context.Context, id string, p auth.Principal) (*model.WorkflowInstance, error) {
-	inst, err := s.instances.GetByID(ctx, id)
+	inst, err := s.instance(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -729,7 +729,7 @@ func (s *instanceService) List(ctx context.Context, q repository.InstanceListQue
 }
 
 func (s *instanceService) GetStatusDetail(ctx context.Context, id string, p auth.Principal) (*StatusDetail, error) {
-	inst, err := s.instances.GetByID(ctx, id)
+	inst, err := s.instance(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -816,7 +816,7 @@ func pendingInput(wc *model.WorkflowContent, inst *model.WorkflowInstance, curre
 }
 
 func (s *instanceService) GetContext(ctx context.Context, id string, p auth.Principal) (*model.WorkflowInstance, error) {
-	inst, err := s.instances.GetByID(ctx, id)
+	inst, err := s.instance(ctx, id)
 	if err != nil {
 		return nil, err
 	}
