@@ -539,6 +539,7 @@ func run(ctx context.Context, cfg *configuration.Config, logger *logrus.Logger) 
 		Auth:                authSvc,
 		SwaggerEnabled:      cfg.Infra.HTTP.SwaggerEnabled,
 		AuthSettings:        cfg.Auth,
+		CORS:                cfg.Infra.HTTP.CORS,
 		OIDC:                oidcVerifier,
 		Catalog:             catalog,
 		SystemUserID:        actor,
