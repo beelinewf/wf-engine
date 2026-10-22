@@ -328,3 +328,78 @@ func TestUpsertBySubjectSurvivesGenericPlan(t *testing.T) {
 		t.Fatalf("repeat upsert resolved to %s, want %s", again, first)
 	}
 }
+
+// TestUserListPaginationAndOrder: the users list serves newest first with a
+// stable id tie-break, and reports the total across pages. Every timestamp
+// is pinned so the expected order is fully deterministic.
+func TestUserListPaginationAndOrder(t *testing.T) {
+	db := setupTestDB(t)
+	ctx := context.Background()
+	repo := repository.NewUserRepository(db)
+
+	base := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	// The fixture seeds the system user with a fresh timestamp; pin it to
+	// the oldest slot.
+	if err := db.Model(&repository.UserModel{}).
+		Where("id = ?", "11111111-1111-7111-8111-111111111111").
+		Updates(map[string]any{"created_at": base, "updated_at": base}).Error; err != nil {
+		t.Fatalf("pin system user timestamp: %v", err)
+	}
+	seed := func(id, name string, at time.Time) {
+		t.Helper()
+		u := repository.UserToModel(model.User{
+			ID: id, Name: name, Email: name + "@example.test",
+			CreatedAt: at, UpdatedAt: at,
+		})
+		if err := db.Create(&u).Error; err != nil {
+			t.Fatalf("insert %s: %v", name, err)
+		}
+	}
+	ordered := []string{
+		"22222222-2222-7222-8222-222222222222",
+		"33333333-3333-7333-8333-333333333333",
+		"44444444-4444-7444-8444-444444444444",
+		"55555555-5555-7555-8555-555555555555",
+	}
+	for i, id := range ordered {
+		seed(id, fmt.Sprintf("user-%d", i), base.Add(time.Duration(i+1)*time.Minute))
+	}
+	// Two rows sharing one timestamp prove the id tie-break: the lower id
+	// sorts first regardless of insertion order.
+	tieLow := "0aaaaaaa-0000-7000-8000-000000000000"
+	tieHigh := "0bbbbbbb-0000-7000-8000-000000000000"
+	seed(tieHigh, "tie-high", base.Add(5*time.Minute))
+	seed(tieLow, "tie-low", base.Add(5*time.Minute))
+
+	byIDs := func(users []model.User) []string {
+		out := make([]string, 0, len(users))
+		for _, u := range users {
+			out = append(out, u.ID)
+		}
+		return out
+	}
+	assertPage := func(page, perPage int, want []string) {
+		t.Helper()
+		users, total, err := repo.List(ctx, page, perPage)
+		if err != nil {
+			t.Fatalf("List(%d, %d) error = %v", page, perPage, err)
+		}
+		if total != 7 {
+			t.Errorf("List(%d, %d) total = %d, want 7", page, perPage, total)
+		}
+		got := byIDs(users)
+		if len(got) != len(want) {
+			t.Fatalf("List(%d, %d) ids = %v, want %v", page, perPage, got, want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("List(%d, %d) ids = %v, want %v", page, perPage, got, want)
+			}
+		}
+	}
+
+	assertPage(1, 3, []string{tieLow, tieHigh, ordered[3]})
+	assertPage(2, 3, []string{ordered[2], ordered[1], ordered[0]})
+	assertPage(3, 3, []string{"11111111-1111-7111-8111-111111111111"})
+	assertPage(4, 3, []string{})
+}

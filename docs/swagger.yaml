@@ -419,6 +419,21 @@ definitions:
       total_pages:
         type: integer
     type: object
+  internal_workflow_handler.ListResponse-internal_workflow_handler_UserResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/internal_workflow_handler.UserResponse'
+        type: array
+      page:
+        type: integer
+      per_page:
+        type: integer
+      total:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
   internal_workflow_handler.ListResponse-internal_workflow_handler_WorkflowDefinitionResponse:
     properties:
       items:
@@ -836,6 +851,23 @@ definitions:
         type: string
       termination_pending:
         type: boolean
+    type: object
+  internal_workflow_handler.UserResponse:
+    properties:
+      created_at:
+        type: string
+      email:
+        type: string
+      id:
+        type: string
+      issuer:
+        type: string
+      name:
+        type: string
+      subject:
+        type: string
+      updated_at:
+        type: string
     type: object
   internal_workflow_handler.WorkflowDefinitionResponse:
     properties:
@@ -1717,6 +1749,87 @@ paths:
       summary: Get workflow run statistics
       tags:
       - statistics
+  /v1/users:
+    get:
+      parameters:
+      - description: Page number
+        in: query
+        name: page
+        type: integer
+      - description: Items per page
+        in: query
+        name: per_page
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.ListResponse-internal_workflow_handler_UserResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      summary: List users
+      tags:
+      - auth
+  /v1/users/{id}:
+    get:
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.UserResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      summary: Get one user
+      tags:
+      - auth
   /v1/workflow/definition:
     get:
       parameters:

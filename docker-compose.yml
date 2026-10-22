@@ -188,7 +188,7 @@ services:
       BEELINEWF_AUTH_ROLE_PERMISSIONS: >-
         {"admin": ["definitions:read", "definitions:write", "secrets:read", "secrets:write",
           "instances:create", "instances:read", "instances:update-context", "input:deliver",
-          "instances:control", "instances:migrate", "statistics:read", "roles:read", "schedules:read", "schedules:write"],
+          "instances:control", "instances:migrate", "statistics:read", "roles:read", "schedules:read", "schedules:write", "users:read"],
          "finance": ["instances:read", "input:deliver"],
          "auditor": ["definitions:read", "instances:read", "statistics:read", "roles:read"]}
       BEELINEWF_WORKER_POOL_SIZE: "50"

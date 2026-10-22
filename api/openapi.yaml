@@ -23,6 +23,7 @@ tags:
   - name: Statistics
   - name: Auth
   - name: Roles
+  - name: Users
   - name: Schedules
 paths:
   /v1/auth/config:
@@ -113,6 +114,60 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Role" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /v1/users:
+    get:
+      tags: [Users]
+      operationId: listUsers
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      summary: List users, newest first
+      description: |
+        One page of the users table with the total row count. Users are
+        created just in time when a caller first authenticates; this is a
+        read-only directory over those rows. The identity-cache metadata is
+        never exposed: it is debug-only and not authorization data.
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PerPage"
+      responses:
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "200":
+          description: One page of users
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserList" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /v1/users/{id}:
+    get:
+      tags: [Users]
+      operationId: getUser
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      summary: Get one user
+      description: |
+        A malformed id is 422 rather than 404: it names no user for any
+        caller, so no lookup could ever succeed against it. Subject and
+        issuer are null for a user with no provider identity.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "200":
+          description: User detail
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/Unprocessable" }
@@ -1445,6 +1500,32 @@ components:
         items:
           type: array
           items: { $ref: "#/components/schemas/Role" }
+    User:
+      type: object
+      required: [id, name, email, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid, description: users.id, the audit actor for this user }
+        subject:
+          type: string
+          nullable: true
+          description: Provider subject; null for a user with no provider identity
+        issuer:
+          type: string
+          nullable: true
+          description: Provider issuer; null for a user with no provider identity
+        name: { type: string }
+        email: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    UserList:
+      type: object
+      required: [items, page, per_page, total, total_pages]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/User" } }
+        page: { type: integer }
+        per_page: { type: integer }
+        total: { type: integer }
+        total_pages: { type: integer }
     SecretRequest:
       type: object
       required: [key, value]

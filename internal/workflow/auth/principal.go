@@ -51,6 +51,7 @@ const (
 	ActionInstancesMigrate = "instances:migrate"
 	ActionStatisticsRead   = "statistics:read"
 	ActionRolesRead        = "roles:read"
+	ActionUsersRead        = "users:read"
 	ActionSchedulesRead    = "schedules:read"
 	ActionSchedulesWrite   = "schedules:write"
 )
@@ -235,6 +236,7 @@ func KnownActions() []string {
 		ActionInstancesMigrate,
 		ActionStatisticsRead,
 		ActionRolesRead,
+		ActionUsersRead,
 		ActionSchedulesRead,
 		ActionSchedulesWrite,
 	}

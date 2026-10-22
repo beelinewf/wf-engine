@@ -146,6 +146,17 @@ func (f *fakeAuthSvc) Me(_ context.Context, p auth.Principal) (model.User, error
 	return model.User{ID: p.UserID, Name: p.Name, Email: p.Email}, nil
 }
 
+func (f *fakeAuthSvc) ListUsers(context.Context, int, int) ([]model.User, int64, error) {
+	return []model.User{{ID: testSystemUserID, Name: "system", Email: "system@localhost"}}, 1, nil
+}
+
+func (f *fakeAuthSvc) GetUser(_ context.Context, id string) (model.User, error) {
+	if id != testSystemUserID {
+		return model.User{}, fmt.Errorf("%w: user %s", model.ErrNotFound, id)
+	}
+	return model.User{ID: testSystemUserID, Name: "system", Email: "system@localhost"}, nil
+}
+
 func authConfigForTest() configuration.Auth {
 	return configuration.Auth{Enabled: true, APIToken: "test-token"}
 }
