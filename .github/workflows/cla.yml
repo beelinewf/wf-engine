@@ -1,0 +1,36 @@
+name: "CLA Assistant"
+on:
+  issue_comment:
+    types: [created]
+  pull_request_target:
+    types: [opened, closed, synchronize, reopened]
+
+# Serialize signature writes: all PRs share one cla.json file.
+concurrency:
+  group: cla-assistant
+  cancel-in-progress: false
+
+jobs:
+  CLAAssistant:
+    runs-on: ubuntu-latest
+    if: (github.event.comment.body == 'recheck' || github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA') || github.event_name == 'pull_request_target'
+    permissions:
+      actions: write
+      contents: write
+      pull-requests: write
+      statuses: write
+    steps:
+      - name: "CLA Assistant"
+        uses: contributor-assistant/github-action@ca4a40a7d1004f18d9960b404b97e5f30a505a08 # v2.6.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          path-to-signatures: 'signatures/version1/cla.json'
+          path-to-document: 'https://github.com/beelinewf/wf-engine/blob/main/CLA.md'
+          # Branch must exist and must not be protected against pushes.
+          # The action creates signatures/version1/cla.json itself; do not
+          # create that file by hand.
+          branch: 'cla-signatures'
+          # Only bot accounts are exempt; every human author signs the CLA
+          # (see CONTRIBUTING.md). Add bot accounts explicitly, no wildcards.
+          allowlist: 'dependabot[bot]'
