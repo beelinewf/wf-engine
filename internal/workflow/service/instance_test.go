@@ -4022,6 +4022,24 @@ func TestDeliverBranchInputPostHookFailureFailsBranch(t *testing.T) {
 	}
 }
 
+func TestGetStatusDetailUnknownInstance(t *testing.T) {
+	db := setupSvcDB(t)
+	ctx := context.Background()
+	svc := svcInstanceService(db)
+	if _, err := svc.GetStatusDetail(ctx, svcNewID(), auth.Principal{}); !errors.Is(err, model.ErrNotFound) {
+		t.Errorf("GetStatusDetail(unknown) error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestGetContextUnknownInstance(t *testing.T) {
+	db := setupSvcDB(t)
+	ctx := context.Background()
+	svc := svcInstanceService(db)
+	if _, err := svc.GetContext(ctx, svcNewID(), auth.Principal{}); !errors.Is(err, model.ErrNotFound) {
+		t.Errorf("GetContext(unknown) error = %v, want ErrNotFound", err)
+	}
+}
+
 func TestGetStatusDetailIncludesParallelTree(t *testing.T) {
 	db := setupSvcDB(t)
 	ctx := context.Background()
