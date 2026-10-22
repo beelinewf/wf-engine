@@ -10,6 +10,7 @@ import (
 	"github.com/beelinewf/wf-engine/internal/workflow/auth"
 	"github.com/beelinewf/wf-engine/internal/workflow/model"
 	"github.com/beelinewf/wf-engine/internal/workflow/repository"
+	"github.com/beelinewf/wf-engine/pkg/ids"
 )
 
 // AuthService resolves authenticated identities onto user rows, seeds the
@@ -30,6 +31,11 @@ type AuthService interface {
 	GetRole(ctx context.Context, name string) (model.Role, []string, error)
 	// Me returns the identity row behind a principal, for GET /v1/auth/me.
 	Me(ctx context.Context, p auth.Principal) (model.User, error)
+	// ListUsers returns one page of users, newest first, with the total
+	// row count, for GET /v1/users.
+	ListUsers(ctx context.Context, page, perPage int) ([]model.User, int64, error)
+	// GetUser returns one user by id, for GET /v1/users/{id}.
+	GetUser(ctx context.Context, id string) (model.User, error)
 }
 
 type authService struct {
@@ -193,6 +199,31 @@ func (s *authService) Me(ctx context.Context, p auth.Principal) (model.User, err
 	if err != nil {
 		if errors.Is(err, repository.ErrUserNotFound) {
 			return model.User{}, fmt.Errorf("%w: user %s", model.ErrNotFound, p.UserID)
+		}
+		return model.User{}, err
+	}
+	return user, nil
+}
+
+// ListUsers is a pass-through onto the users table: unlike roles, users are
+// rows rather than catalog entries, so there is no live configuration to
+// answer from.
+func (s *authService) ListUsers(ctx context.Context, page, perPage int) ([]model.User, int64, error) {
+	return s.users.List(ctx, page, perPage)
+}
+
+// GetUser returns one user by id. A malformed id is ErrInvalid rather than a
+// missing row: the repository answers ErrUserNotFound for both, so the shape
+// is checked here before the lookup. A well-formed id that matches no row is
+// ErrNotFound.
+func (s *authService) GetUser(ctx context.Context, id string) (model.User, error) {
+	if !ids.Valid(id) {
+		return model.User{}, fmt.Errorf("%w: user id %q is not a valid uuid", model.ErrInvalid, id)
+	}
+	user, err := s.users.GetByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, repository.ErrUserNotFound) {
+			return model.User{}, fmt.Errorf("%w: user %s", model.ErrNotFound, id)
 		}
 		return model.User{}, err
 	}

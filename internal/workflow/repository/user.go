@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/beelinewf/wf-engine/internal/workflow/model"
 	"github.com/beelinewf/wf-engine/pkg/ids"
@@ -44,6 +45,9 @@ type UserRepository interface {
 	UpsertBySubject(ctx context.Context, u model.User) (string, error)
 	// GetByID returns one user.
 	GetByID(ctx context.Context, id string) (model.User, error)
+	// List returns one page of users, newest first, with the total row
+	// count.
+	List(ctx context.Context, page, perPage int) ([]model.User, int64, error)
 }
 
 type userRepository struct {
@@ -123,4 +127,33 @@ func (r *userRepository) GetByID(ctx context.Context, id string) (model.User, er
 		return model.User{}, err
 	}
 	return UserFromModel(m), nil
+}
+
+// List returns one page of users, newest first, with the total row count.
+// The id tie-breaker keeps pages deterministic when rows share a timestamp.
+func (r *userRepository) List(ctx context.Context, page, perPage int) ([]model.User, int64, error) {
+	query := r.db.WithContext(ctx).Model(&UserModel{})
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, fmt.Errorf("user count: %w", err)
+	}
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 {
+		perPage = 50
+	}
+	var rows []UserModel
+	if err := query.
+		Order(`"created_at" DESC, "id" ASC`).
+		Offset((page - 1) * perPage).
+		Limit(perPage).
+		Find(&rows).Error; err != nil {
+		return nil, 0, fmt.Errorf("user list: %w", err)
+	}
+	users := make([]model.User, 0, len(rows))
+	for _, row := range rows {
+		users = append(users, UserFromModel(row))
+	}
+	return users, total, nil
 }

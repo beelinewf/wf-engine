@@ -237,6 +237,19 @@ type RoleListResponse struct {
 	Items []RoleResponse `json:"items"`
 }
 
+// UserResponse is one row of the users table as served by GET /v1/users and
+// GET /v1/users/{id}. Metadata is deliberately absent: it is a debug-only
+// identity cache, never authorization data, and the API must not leak it.
+type UserResponse struct {
+	ID        string    `json:"id"`
+	Subject   *string   `json:"subject"`
+	Issuer    *string   `json:"issuer"`
+	Name      string    `json:"name"`
+	Email     string    `json:"email"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 // -- instances ----------------------------------------------------------------
 
 // CreateInstanceRequest is the POST /v1/workflow/instance body.

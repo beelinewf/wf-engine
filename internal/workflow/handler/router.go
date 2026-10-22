@@ -135,6 +135,13 @@ func NewRouter(deps Deps) *gin.Engine {
 		gate(roleGroup, auth.ActionRolesRead, http.MethodGet, "/:name", roles.Get)
 	}
 
+	if deps.Auth != nil {
+		users := NewUserHandler(deps.Auth)
+		userGroup := v1.Group("/users")
+		gate(userGroup, auth.ActionUsersRead, http.MethodGet, "", users.List)
+		gate(userGroup, auth.ActionUsersRead, http.MethodGet, "/:id", users.Get)
+	}
+
 	if deps.NodeDefinitions != nil {
 		nodeDefs := NewNodeDefinitionHandler(deps.NodeDefinitions)
 		group := v1.Group("/node/definition")

@@ -375,6 +375,12 @@ func (stubAuthService) GetRole(context.Context, string) (model.Role, []string, e
 func (stubAuthService) Me(context.Context, auth.Principal) (model.User, error) {
 	return model.User{}, nil
 }
+func (stubAuthService) ListUsers(context.Context, int, int) ([]model.User, int64, error) {
+	return nil, 0, nil
+}
+func (stubAuthService) GetUser(context.Context, string) (model.User, error) {
+	return model.User{}, nil
+}
 
 // TestCompositionNilBrokerDependencies mirrors the app wiring with brokers
 // disabled: the executor set stays HTTP-only, and broker poller nodes fail

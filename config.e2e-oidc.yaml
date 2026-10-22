@@ -56,6 +56,7 @@ auth:
       - "roles:read"
       - "schedules:read"
       - "schedules:write"
+      - "users:read"
     finance:
       - "instances:create"
       - "instances:read"

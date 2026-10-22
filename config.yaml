@@ -201,7 +201,7 @@ auth:
   # secrets:write, forms:read, forms:write, instances:create,
   # instances:read, instances:update-context, input:deliver,
   # instances:control, instances:migrate, statistics:read, roles:read,
-  # schedules:read, schedules:write.
+  # schedules:read, schedules:write, users:read.
   role_permissions:
     admin:
       - "definitions:read"
@@ -220,6 +220,7 @@ auth:
       - "roles:read"
       - "schedules:read"
       - "schedules:write"
+      - "users:read"
     finance:
       - "instances:read"
       - "input:deliver"

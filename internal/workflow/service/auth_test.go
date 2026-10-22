@@ -316,3 +316,53 @@ func TestSeedRolesEmptyCatalogIsANoOp(t *testing.T) {
 		t.Fatalf("roles = %d, want 0", count)
 	}
 }
+
+// TestListUsersReturnsSeededUsers: unlike roles, users are rows rather than
+// catalog entries, so the list comes straight from the table.
+func TestListUsersReturnsSeededUsers(t *testing.T) {
+	svc, _ := authServiceFor(t, auth.NewCatalog(nil))
+	ctx := context.Background()
+	users, total, err := svc.ListUsers(ctx, 1, 50)
+	if err != nil {
+		t.Fatalf("ListUsers() error = %v", err)
+	}
+	// The fixture seeds the system user plus two actor users.
+	if total != 3 || len(users) != 3 {
+		t.Fatalf("ListUsers() = %d users (total %d), want 3", len(users), total)
+	}
+	seen := map[string]bool{}
+	for _, u := range users {
+		seen[u.ID] = true
+	}
+	for _, id := range []string{svcSysUserID, "44444444-4444-7444-8444-444444444444", "22222222-2222-7222-8222-222222222222"} {
+		if !seen[id] {
+			t.Errorf("ListUsers() is missing user %s", id)
+		}
+	}
+}
+
+// TestGetUserNotFoundVsInvalid pins the sentinel translation a malformed id
+// needs: it names no user for any caller, so it is ErrInvalid (HTTP 422),
+// while a well-formed id that matches no row is ErrNotFound (HTTP 404).
+func TestGetUserNotFoundVsInvalid(t *testing.T) {
+	svc, _ := authServiceFor(t, auth.NewCatalog(nil))
+	ctx := context.Background()
+
+	user, err := svc.GetUser(ctx, svcSysUserID)
+	if err != nil {
+		t.Fatalf("GetUser(system) error = %v", err)
+	}
+	if user.ID != svcSysUserID || user.Name != "system" {
+		t.Errorf("GetUser(system) = %+v, want the seeded system user", user)
+	}
+
+	if _, err := svc.GetUser(ctx, "99999999-9999-7999-8999-999999999999"); !errors.Is(err, model.ErrNotFound) {
+		t.Fatalf("GetUser(unknown) error = %v, want ErrNotFound", err)
+	}
+	if _, err := svc.GetUser(ctx, "not-a-uuid"); !errors.Is(err, model.ErrInvalid) {
+		t.Fatalf("GetUser(malformed) error = %v, want ErrInvalid", err)
+	}
+	if _, err := svc.GetUser(ctx, ""); !errors.Is(err, model.ErrInvalid) {
+		t.Fatalf("GetUser(empty) error = %v, want ErrInvalid", err)
+	}
+}
