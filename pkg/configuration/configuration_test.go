@@ -1023,3 +1023,198 @@ func TestLoadAuthDisabledForcesOIDCOff(t *testing.T) {
 		t.Error("auth.oidc.enabled = true, want false when auth.enabled is false")
 	}
 }
+
+// CORS allows any origin by default, which suits development: a local
+// frontend works with no configuration. Methods, headers, and max_age
+// carry matching ready-to-use defaults.
+func TestLoadCORSAllowsAllOriginsByDefault(t *testing.T) {
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+
+	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if want := []string{"*"}; !slices.Equal(cfg.Infra.HTTP.CORS.AllowedOrigins, want) {
+		t.Errorf("allowed_origins = %v, want %v", cfg.Infra.HTTP.CORS.AllowedOrigins, want)
+	}
+	if want := []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}; !slices.Equal(cfg.Infra.HTTP.CORS.AllowedMethods, want) {
+		t.Errorf("allowed_methods = %v, want %v", cfg.Infra.HTTP.CORS.AllowedMethods, want)
+	}
+	if want := []string{"Authorization", "Content-Type", "X-Api-Token"}; !slices.Equal(cfg.Infra.HTTP.CORS.AllowedHeaders, want) {
+		t.Errorf("allowed_headers = %v, want %v", cfg.Infra.HTTP.CORS.AllowedHeaders, want)
+	}
+	if len(cfg.Infra.HTTP.CORS.ExposedHeaders) != 0 {
+		t.Errorf("exposed_headers = %v, want empty", cfg.Infra.HTTP.CORS.ExposedHeaders)
+	}
+	if cfg.Infra.HTTP.CORS.AllowCredentials {
+		t.Error("allow_credentials = true, want false")
+	}
+	if cfg.Infra.HTTP.CORS.MaxAge != 12*time.Hour {
+		t.Errorf("max_age = %v, want 12h", cfg.Infra.HTTP.CORS.MaxAge)
+	}
+}
+
+// Every CORS key is env-addressable, and list values ride the same
+// comma-separated encoding as the engine allowlists.
+func TestLoadCORSFromEnv(t *testing.T) {
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+	setenv(t, "BEELINEWF_INFRA_HTTP_CORS_ALLOWED_ORIGINS", "https://app.example.com,http://localhost:5173")
+	setenv(t, "BEELINEWF_INFRA_HTTP_CORS_ALLOWED_METHODS", "GET,POST")
+	setenv(t, "BEELINEWF_INFRA_HTTP_CORS_ALLOWED_HEADERS", "Authorization")
+	setenv(t, "BEELINEWF_INFRA_HTTP_CORS_EXPOSED_HEADERS", "X-Total")
+	setenv(t, "BEELINEWF_INFRA_HTTP_CORS_ALLOW_CREDENTIALS", "true")
+	setenv(t, "BEELINEWF_INFRA_HTTP_CORS_MAX_AGE", "1h")
+
+	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	cors := cfg.Infra.HTTP.CORS
+	if want := []string{"https://app.example.com", "http://localhost:5173"}; !slices.Equal(cors.AllowedOrigins, want) {
+		t.Errorf("allowed_origins = %v, want %v", cors.AllowedOrigins, want)
+	}
+	if want := []string{"GET", "POST"}; !slices.Equal(cors.AllowedMethods, want) {
+		t.Errorf("allowed_methods = %v, want %v", cors.AllowedMethods, want)
+	}
+	if want := []string{"Authorization"}; !slices.Equal(cors.AllowedHeaders, want) {
+		t.Errorf("allowed_headers = %v, want %v", cors.AllowedHeaders, want)
+	}
+	if want := []string{"X-Total"}; !slices.Equal(cors.ExposedHeaders, want) {
+		t.Errorf("exposed_headers = %v, want %v", cors.ExposedHeaders, want)
+	}
+	if !cors.AllowCredentials {
+		t.Error("allow_credentials = false, want true")
+	}
+	if cors.MaxAge != time.Hour {
+		t.Errorf("max_age = %v, want 1h", cors.MaxAge)
+	}
+}
+
+// An explicit empty list disables CORS: the engine emits no
+// Access-Control-* headers. Only the file can express this; a set-but-empty
+// environment variable falls back to the default like any other key.
+func TestLoadCORSEmptyListDisables(t *testing.T) {
+	path := writeConfig(t, `
+infra:
+  postgresql:
+    dsn: "file-dsn"
+  http:
+    cors:
+      allowed_origins: []
+`)
+	cfg, err := configuration.Load(configuration.WithConfigFile(path))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(cfg.Infra.HTTP.CORS.AllowedOrigins) != 0 {
+		t.Errorf("allowed_origins = %v, want empty (disabled)", cfg.Infra.HTTP.CORS.AllowedOrigins)
+	}
+}
+
+func TestLoadCORSFromFile(t *testing.T) {
+	path := writeConfig(t, `
+infra:
+  postgresql:
+    dsn: "file-dsn"
+  http:
+    cors:
+      allowed_origins:
+        - "https://app.example.com"
+      allow_credentials: true
+      max_age: 30m
+`)
+	cfg, err := configuration.Load(configuration.WithConfigFile(path))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	cors := cfg.Infra.HTTP.CORS
+	if want := []string{"https://app.example.com"}; !slices.Equal(cors.AllowedOrigins, want) {
+		t.Errorf("allowed_origins = %v, want %v", cors.AllowedOrigins, want)
+	}
+	if !cors.AllowCredentials {
+		t.Error("allow_credentials = false, want true from config file")
+	}
+	if cors.MaxAge != 30*time.Minute {
+		t.Errorf("max_age = %v, want 30m", cors.MaxAge)
+	}
+}
+
+func TestLoadCORSEnvOverridesFile(t *testing.T) {
+	path := writeConfig(t, `
+infra:
+  postgresql:
+    dsn: "file-dsn"
+  http:
+    cors:
+      allowed_origins:
+        - "https://file.example.com"
+`)
+	setenv(t, "BEELINEWF_INFRA_HTTP_CORS_ALLOWED_ORIGINS", "https://env.example.com")
+
+	cfg, err := configuration.Load(configuration.WithConfigFile(path))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if want := []string{"https://env.example.com"}; !slices.Equal(cfg.Infra.HTTP.CORS.AllowedOrigins, want) {
+		t.Errorf("allowed_origins = %v, want %v (env must win over file)", cfg.Infra.HTTP.CORS.AllowedOrigins, want)
+	}
+}
+
+// A credentialed response must name the origin: "*" with credentials on
+// would promise browsers something the protocol forbids.
+func TestLoadRejectsCORSWildcardWithCredentials(t *testing.T) {
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+	setenv(t, "BEELINEWF_INFRA_HTTP_CORS_ALLOWED_ORIGINS", "*")
+	setenv(t, "BEELINEWF_INFRA_HTTP_CORS_ALLOW_CREDENTIALS", "true")
+
+	_, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	if err == nil {
+		t.Fatal("Load() error = nil, want rejection of \"*\" with credentials")
+	}
+	if !strings.Contains(err.Error(), "infra.http.cors") {
+		t.Errorf("error = %q, want it to name the infra.http.cors key", err)
+	}
+}
+
+func TestLoadRejectsMalformedCORSOrigin(t *testing.T) {
+	cases := []struct {
+		name   string
+		origin string
+	}{
+		{"missing scheme", "app.example.com"},
+		{"non-http scheme", "ftp://app.example.com"},
+		{"path", "https://app.example.com/api"},
+		{"query", "https://app.example.com?x=1"},
+		{"empty host", "https:///api"},
+		{"blank entry", "   "},
+		{"wildcard mixed with explicit", "*,https://app.example.com"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+			setenv(t, "BEELINEWF_INFRA_HTTP_CORS_ALLOWED_ORIGINS", tc.origin)
+
+			_, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+			if err == nil {
+				t.Fatalf("Load() error = nil, want rejection of origin %q", tc.origin)
+			}
+			if !strings.Contains(err.Error(), "infra.http.cors.allowed_origins") {
+				t.Errorf("error = %q, want it to name infra.http.cors.allowed_origins", err)
+			}
+		})
+	}
+}
+
+func TestLoadRejectsNegativeCORSMaxAge(t *testing.T) {
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+	setenv(t, "BEELINEWF_INFRA_HTTP_CORS_ALLOWED_ORIGINS", "https://app.example.com")
+	setenv(t, "BEELINEWF_INFRA_HTTP_CORS_MAX_AGE", "-1s")
+
+	_, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	if err == nil {
+		t.Fatal("Load() error = nil, want rejection of negative max_age")
+	}
+	if !strings.Contains(err.Error(), "infra.http.cors.max_age") {
+		t.Errorf("error = %q, want it to name infra.http.cors.max_age", err)
+	}
+}

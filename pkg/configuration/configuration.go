@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path"
 	"strings"
@@ -53,6 +54,30 @@ type Infra struct {
 type HTTP struct {
 	Host           string `mapstructure:"host"`
 	SwaggerEnabled bool   `mapstructure:"swagger_enabled"`
+	CORS           CORS   `mapstructure:"cors"`
+}
+
+// CORS holds the cross-origin resource sharing settings. An empty
+// AllowedOrigins disables CORS: the engine emits no Access-Control-*
+// headers and every other field is ignored. The default is ["*"], which
+// allows any origin for development; restrict it in production.
+type CORS struct {
+	// AllowedOrigins lists the origins a browser may read API responses
+	// from, as scheme://host[:port] entries. A lone "*" allows any
+	// origin, but only with AllowCredentials off.
+	AllowedOrigins []string `mapstructure:"allowed_origins"`
+	// AllowedMethods lists the request methods a preflight may approve.
+	AllowedMethods []string `mapstructure:"allowed_methods"`
+	// AllowedHeaders lists the request headers a preflight may approve.
+	AllowedHeaders []string `mapstructure:"allowed_headers"`
+	// ExposedHeaders lists the response headers a browser may read.
+	ExposedHeaders []string `mapstructure:"exposed_headers"`
+	// AllowCredentials permits credentialed requests. It requires
+	// explicit origins: a credentialed response must name the origin,
+	// never the "*" wildcard.
+	AllowCredentials bool `mapstructure:"allow_credentials"`
+	// MaxAge is how long a browser may cache a preflight response.
+	MaxAge time.Duration `mapstructure:"max_age"`
 }
 
 // PostgreSQL holds the DSN and the connection pool ceiling for the
@@ -277,6 +302,14 @@ func Load(opts ...Option) (*Config, error) {
 	// config.yaml.
 	_ = v.BindEnv("engine.http_max_in_flight", "BEELINEWF_ENGINE_HTTP_MAX_IN_FLIGHT")
 	_ = v.BindEnv("engine.http_max_in_flight_per_host", "BEELINEWF_ENGINE_HTTP_MAX_IN_FLIGHT_PER_HOST")
+	// CORS keys are operator toggles and must override the file, so a
+	// frontend origin can be allowed without rewriting config.yaml.
+	_ = v.BindEnv("infra.http.cors.allowed_origins", "BEELINEWF_INFRA_HTTP_CORS_ALLOWED_ORIGINS")
+	_ = v.BindEnv("infra.http.cors.allowed_methods", "BEELINEWF_INFRA_HTTP_CORS_ALLOWED_METHODS")
+	_ = v.BindEnv("infra.http.cors.allowed_headers", "BEELINEWF_INFRA_HTTP_CORS_ALLOWED_HEADERS")
+	_ = v.BindEnv("infra.http.cors.exposed_headers", "BEELINEWF_INFRA_HTTP_CORS_EXPOSED_HEADERS")
+	_ = v.BindEnv("infra.http.cors.allow_credentials", "BEELINEWF_INFRA_HTTP_CORS_ALLOW_CREDENTIALS")
+	_ = v.BindEnv("infra.http.cors.max_age", "BEELINEWF_INFRA_HTTP_CORS_MAX_AGE")
 
 	if _, err := os.Stat(path); err == nil {
 		v.SetConfigFile(path)
@@ -355,6 +388,16 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("infra.postgresql.conn_max_idle_time", "5m")
 	v.SetDefault("infra.http.host", "localhost:8080")
 	v.SetDefault("infra.http.swagger_enabled", true)
+	// CORS allows any origin by default, so a development frontend works
+	// with no configuration. The method default covers every verb the
+	// router registers; the header default covers the credentials the
+	// API reads.
+	v.SetDefault("infra.http.cors.allowed_origins", []string{"*"})
+	v.SetDefault("infra.http.cors.allowed_methods", []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"})
+	v.SetDefault("infra.http.cors.allowed_headers", []string{"Authorization", "Content-Type", "X-Api-Token"})
+	v.SetDefault("infra.http.cors.exposed_headers", []string{})
+	v.SetDefault("infra.http.cors.allow_credentials", false)
+	v.SetDefault("infra.http.cors.max_age", "12h")
 	// Optional brokers: empty DSN disables the transport. Queue names carry
 	// safe defaults so an enabled RabbitMQ always has valid destinations.
 	v.SetDefault("infra.redis.dsn", "")
@@ -415,6 +458,26 @@ func (c *Config) validate() error {
 	}
 	if c.Infra.PostgreSQL.ConnMaxIdleTime < 0 {
 		return errors.New("configuration: infra.postgresql.conn_max_idle_time must be >= 0")
+	}
+	cors := c.Infra.HTTP.CORS
+	wildcard := false
+	for _, origin := range cors.AllowedOrigins {
+		if strings.TrimSpace(origin) == "*" {
+			wildcard = true
+			continue
+		}
+		if !validCORSOrigin(origin) {
+			return fmt.Errorf("configuration: infra.http.cors.allowed_origins: %q must be scheme://host[:port]", origin)
+		}
+	}
+	if wildcard && len(cors.AllowedOrigins) > 1 {
+		return errors.New("configuration: infra.http.cors.allowed_origins: \"*\" must be the only entry")
+	}
+	if wildcard && cors.AllowCredentials {
+		return errors.New("configuration: infra.http.cors.allow_credentials requires explicit infra.http.cors.allowed_origins (\"*\" is forbidden)")
+	}
+	if cors.MaxAge < 0 {
+		return errors.New("configuration: infra.http.cors.max_age must be >= 0")
 	}
 	if c.Worker.Pool.Size <= 0 {
 		return errors.New("configuration: worker.pool.size must be > 0")
@@ -521,6 +584,27 @@ func (c *Config) validate() error {
 		return fmt.Errorf("configuration: system.user_id %q must be a canonical uuid", c.System.UserID)
 	}
 	return nil
+}
+
+// validCORSOrigin reports whether s is a bare origin: an http(s) URL with a
+// host and no path, query, fragment, or userinfo. A trailing slash is
+// tolerated because operators copy origins from a browser address bar.
+func validCORSOrigin(s string) bool {
+	trimmed := strings.TrimRight(strings.TrimSpace(s), "/")
+	if trimmed == "" {
+		return false
+	}
+	u, err := url.Parse(trimmed)
+	if err != nil {
+		return false
+	}
+	if !strings.EqualFold(u.Scheme, "http") && !strings.EqualFold(u.Scheme, "https") {
+		return false
+	}
+	if u.Host == "" || u.User != nil {
+		return false
+	}
+	return u.Path == "" && u.RawQuery == "" && u.Fragment == ""
 }
 
 // validateEnvPatterns rejects a malformed env deny/allow pattern. A pattern

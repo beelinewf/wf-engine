@@ -30,6 +30,10 @@ type Deps struct {
 	// API token nor OIDC is enabled, no route is wrapped, which is the
 	// pre-authentication behavior.
 	AuthSettings configuration.Auth
+	// CORS is the cross-origin configuration. With no allowed origins the
+	// middleware passes every request through, which is the
+	// pre-CORS behavior.
+	CORS configuration.CORS
 	// OIDC is the bearer token verifier, or nil when OIDC is disabled.
 	OIDC auth.Verifier
 	// Catalog turns caller roles into permissions for the route gates.
@@ -53,6 +57,9 @@ func (d Deps) authEnabled() bool {
 func NewRouter(deps Deps) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Recovery())
+	// CORS runs before every group so preflights are answered without
+	// authentication and refusals still carry the origin header.
+	r.Use(CORS(deps.CORS))
 
 	health := r.Group("/health")
 	health.GET("/live", deps.Health.Live)

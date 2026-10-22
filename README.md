@@ -134,7 +134,10 @@ state machines, and recovery semantics.
 ### Option A: Docker Compose (fastest)
 
 Starts PostgreSQL, Redis, RabbitMQ, migrations, and the app with all
-transports enabled.
+transports enabled. The stack is API-only: there is no bundled web UI, so
+deploy a frontend separately against `http://localhost:8080`. CORS allows
+any origin by default; set `BEELINEWF_INFRA_HTTP_CORS_ALLOWED_ORIGINS` to
+restrict it.
 
 ```bash
 docker compose up --build
@@ -257,6 +260,12 @@ system audit user. Key settings:
 | -------------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------- |
 | `infra.http.host`                                        | `localhost:9999`       | Compose overrides to `0.0.0.0:8080`                                                                             |
 | `infra.http.swagger_enabled`                             | `true`                 | Serves UI at `/swagger/index.html`                                                                              |
+| `infra.http.cors.allowed_origins`                        | `"*" (allow all)`      | Origin list to restrict; empty file value disables (`BEELINEWF_INFRA_HTTP_CORS_ALLOWED_ORIGINS`)                |
+| `infra.http.cors.allowed_methods`                        | `GET, POST, ...`       | PUT, DELETE, OPTIONS also allowed by default (`BEELINEWF_INFRA_HTTP_CORS_ALLOWED_METHODS`)                      |
+| `infra.http.cors.allowed_headers`                        | `Authorization, ...`   | Content-Type and X-Api-Token also allowed by default (`BEELINEWF_INFRA_HTTP_CORS_ALLOWED_HEADERS`)              |
+| `infra.http.cors.exposed_headers`                        | `[]`                   | Response headers browsers may read (`BEELINEWF_INFRA_HTTP_CORS_EXPOSED_HEADERS`)                                |
+| `infra.http.cors.allow_credentials`                      | `false`                | Credentialed requests; needs explicit origins (`BEELINEWF_INFRA_HTTP_CORS_ALLOW_CREDENTIALS`)                   |
+| `infra.http.cors.max_age`                                | `12h`                  | Preflight cache lifetime (`BEELINEWF_INFRA_HTTP_CORS_MAX_AGE`)                                                  |
 | `infra.postgresql.dsn`                                   | local `gorm` DSN       | pgx/postgres wire format                                                                                        |
 | `infra.postgresql.max_open_conns`                        | `25`                   | Per-replica pool ceiling; exhaustion queues (`BEELINEWF_INFRA_POSTGRESQL_MAX_OPEN_CONNS`)                          |
 | `infra.postgresql.max_idle_conns`                        | `25`                   | Warm idle cap per replica (`BEELINEWF_INFRA_POSTGRESQL_MAX_IDLE_CONNS`)                                            |
@@ -278,12 +287,21 @@ system audit user. Key settings:
 | `auth.role_permissions` / `BEELINEWF_AUTH_ROLE_PERMISSIONS` | file / `{}`            | Role-to-action catalog as YAML map or JSON object; env overrides file; invalid JSON fails startup               |
 
 List-valued keys accept comma-separated env values, e.g.
-`BEELINEWF_ENGINE_HTTP_ALLOWLIST="api.example.com,jsonplaceholder.typicode.com"`.
+`BEELINEWF_ENGINE_HTTP_ALLOWLIST="api.example.com,jsonplaceholder.typicode.com"`,
+`BEELINEWF_INFRA_HTTP_CORS_ALLOWED_ORIGINS="https://app.example.com,http://localhost:5173"`.
 `BEELINEWF_AUTH_ROLE_PERMISSIONS` takes a JSON object of role name to action
 list, e.g. `{"admin":["definitions:read","roles:read"]}`. A set value
 overrides the config file; blank falls back to it. Invalid JSON fails
 startup with a `configuration: BEELINEWF_AUTH_ROLE_PERMISSIONS: invalid JSON`
 error.
+
+A browser frontend on another origin needs CORS: the default `"*"`
+allows any origin, which suits development. For production, set
+`infra.http.cors.allowed_origins` to the frontend's origin
+(`scheme://host[:port]`), or to an empty list — in the config file only,
+since an empty env value falls back to the default — to emit no CORS
+headers. `"*"` cannot be combined with `allow_credentials: true`;
+credentialed responses must name the origin.
 
 ## Authentication and authorization
 
