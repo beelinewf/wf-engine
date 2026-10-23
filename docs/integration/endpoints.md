@@ -228,11 +228,14 @@ Response:
   updated_at}`. A branch parked on an input node shows `status: "waiting"`, `waiting_reason: "input"`: deliver to it
   with `PUT .../input?branch_id=<branch id>`. Full enum lists are in `fields.md`.
 - `pending_input`: present only when parked on an input node (`waiting_reason == "input"`): `{node_id, channel,
-  output_property, form_id, form, allowed_roles, record_actor, public, accept}`. `form_id` is absent when the node
-  references no form. `form` carries the frozen `{schema, ui}` bytes when the instance was created with
+  output_property, form_id, form, allowed_roles, allowed_users, record_actor, public, accept}`. `form_id` is absent
+  when the node references no form. `form` carries the frozen `{schema, ui}` bytes when the instance was created with
   `"snapshot_forms": true`; the frontend renders it when present, else fetches `GET /v1/forms/{form_id}`. Live
-  instances serve `form_id` only: the bytes never ride on status except on a snapshot run. `accept` lists the media
-  types the node delivers, so the frontend knows whether a multipart upload is welcome.
+  instances serve `form_id` only: the bytes never ride on status except on a snapshot run. `allowed_users` lists the
+  `{id}` entries admitted regardless of roles; when it is non-empty it is the only gate the backend consults, so a
+  frontend must not treat a listed `allowed_roles` entry as an admission there. Both gates report `[]` on a public
+  node, which ignores them. `accept` lists the media types the node delivers, so the frontend knows whether a
+  multipart upload is welcome.
 
 ### `GET /v1/workflow/instance/{id}/context` → `200`
 

@@ -283,7 +283,8 @@ Node statuses: `waiting -> running -> finished | failed | stopped`.
   different payload returns 409; a corrected payload needs a fresh key.
   Status exposes `pending_input` (`node_id`, `channel`, `output_property`,
   `form_id` (absent when unset), `form` (frozen bytes, snapshot runs only),
-  `allowed_roles`, `record_actor`, `public`; field omitted unless parked on
+  `allowed_roles`, `allowed_users`, `record_actor`, `public` (both gates
+  reported empty on a public node); field omitted unless parked on
   an input node); the frontend renders `form` when present, else fetches
   `GET /v1/forms/{form_id}` for the bytes, so one generic renderer serves
   every workflow version without per-version form code. Instances created
@@ -412,39 +413,42 @@ permission rows of those roles that the configuration no longer grants, and
 never deletes a role: dropping a role from config stops it granting anything,
 without destroying history.
 
-### The two input gates
+### The input gates
 
 `InstanceService.DeliverInput` is the single choke point both the HTTP
-endpoint and the broker consumers reach, so the node-level gate lives there
+endpoint and the broker consumers reach, so the node-level gates live there
 rather than in the handler:
 
 1. `input:deliver`, from the union of the caller's roles; the service
    principal short-circuits to allowed.
-2. The input node's `allowed_roles`, intersected with the caller's roles.
+2. The input node's `allowed_users`, checked against the caller's resolved
+   user id. A listed user passes the node however their roles read.
+3. The input node's `allowed_roles`, intersected with the caller's roles.
    Absent or empty is open. A role in the token that is absent from the
    catalog is not in the intersection, so unknown roles deny by default.
 
-Both are checked before the channel match, so a refusal is a clean 403 with
-no delivery row, and it records an `input_forbidden` audit event
-deliberately *without* the payload — the denial itself must not become a
-side channel that echoes a rejected secret.
+The user gate has strict priority over the role gate: when the node lists
+users, only a listed user passes, and the role list is not consulted. All
+are checked before the channel match, so a refusal is a clean 403 with no
+delivery row, and it records an `input_forbidden` audit event deliberately
+*without* the payload — the denial itself must not become a side channel
+that echoes a rejected secret.
 
-`allowed_roles` and `record_actor` are properties of the node *definition*.
-An occurrence referencing a reusable definition may not carry them: the
-occurrence's type is only known once the definition is materialized, so a
-gate written there would be dropped without a word. Every occurrence of one
-definition therefore shares one gate, and a different gate means a different
-definition.
+`allowed_roles`, `allowed_users`, and `record_actor` are properties of the
+node *definition*. An occurrence referencing a reusable definition may not
+carry them: the occurrence's type is only known once the definition is
+materialized, so a gate written there would be dropped without a word. Every
+occurrence of one definition therefore shares one gate, and a different gate
+means a different definition.
 
 ### Public input nodes and the optional-auth route
 
 `public: true` is the third gate and the only one that skips
 *authentication* rather than just authorization. The node is open and
-unattributed by construction, so the parser refuses the combination outright:
-`public: true` with a non-empty `allowed_roles` or `record_actor: true` is a
-parse error. The role list would never be consulted and the attribution
-envelope would have no `user_id` to write, so accepting the combination would
-be promising an authorization the engine cannot honor.
+unattributed by construction: delivery ignores `allowed_roles` and
+`allowed_users` while they stay stored on the definition, and only
+`record_actor: true` is refused outright, since the attribution envelope
+would have no `user_id` to write.
 
 Authentication is enforced by one `v1.Use(RequireAuth)` on the whole group,
 so admitting anonymous callers is a routing decision, not a per-handler

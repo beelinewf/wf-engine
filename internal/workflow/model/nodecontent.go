@@ -32,6 +32,9 @@ const (
 // maxAllowedRoles bounds an input node's role gate. See parseAllowedRoles.
 const maxAllowedRoles = 64
 
+// maxAllowedUsers bounds an input node's user gate. See parseAllowedUsers.
+const maxAllowedUsers = 64
+
 // Input channel names. An input node's channel fixes which transport may
 // deliver its payload; the engine parks the instance the same way for all
 // channels.
@@ -119,12 +122,20 @@ type NodeContent struct {
 	ContextPath string            // output: source context path
 	Validation  *ValidationScript // input
 	FormID      string            // input: forms-library reference, resolved only by the frontend
-	// AllowedRoles is the input node's second authorization gate. It is
+	// AllowedRoles is the input node's role authorization gate. It is
 	// checked against the caller's live token roles after the endpoint
 	// permission, so a role may hold input:deliver and still be refused by
 	// a node that does not list it. Absent or empty means open, which is
 	// what every definition written before this field existed resolves to.
+	// It is consulted only when AllowedUsers is empty, and a public node
+	// ignores it (see Public).
 	AllowedRoles []string `json:"allowed_roles,omitempty"`
+	// AllowedUsers is the input node's user gate, with strict priority over
+	// AllowedRoles: when non-empty, only a listed user id passes the node,
+	// however the caller's roles read, and the role list is not consulted.
+	// Absent or empty means no user restriction. A public node ignores it
+	// (see Public).
+	AllowedUsers []AllowedUser `json:"allowed_users,omitempty"`
 	// RecordActor wraps the accepted payload in the attribution envelope
 	// {user_id, input_data} instead of writing the bare payload under
 	// output_property. It is opt-in per node so a definition that predates
@@ -133,8 +144,9 @@ type NodeContent struct {
 	// Public lets an anonymous caller deliver to this input node over HTTP
 	// with no credential at all, even when auth is enabled. It is the
 	// strongest gate the engine has and the only one that skips
-	// authentication, so it is opt-in per node and forces the node open and
-	// unattributed: a public node cannot carry allowed_roles or
+	// authentication, so it is opt-in per node and forces the delivery
+	// open and unattributed: a public node ignores allowed_roles and
+	// allowed_users while keeping them stored as authored, cannot carry
 	// record_actor, and its anonymous deliveries are marked as such in the
 	// delivery history.
 	Public bool `json:"public,omitempty"`
@@ -215,6 +227,12 @@ type ValidationScript struct {
 	Script string
 }
 
+// AllowedUser is one entry of an input node's user gate: the users.id uuid
+// of a caller allowed to deliver to the node. See parseAllowedUsers.
+type AllowedUser struct {
+	ID string `json:"id"`
+}
+
 // InputStorageRef is an input node's multipart upload target. It names only
 // a bucket, an optional prefix, and optional file constraints; the endpoint
 // and credentials live in global config, never in a definition.
@@ -254,6 +272,19 @@ func (n *NodeContent) Accepts(mediaType string) bool {
 		}
 	}
 	return false
+}
+
+// AllowedUserIDs returns the user ids of the node's user gate in authored
+// order. It is the shape the authorization layer matches the caller against.
+func (n *NodeContent) AllowedUserIDs() []string {
+	if len(n.AllowedUsers) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(n.AllowedUsers))
+	for _, u := range n.AllowedUsers {
+		out = append(out, u.ID)
+	}
+	return out
 }
 
 // HookScript is an optional lifecycle context-transform script. A pre hook
@@ -350,6 +381,7 @@ type rawNode struct {
 	FormID            *string                  `json:"form_id"`
 	Form              json.RawMessage          `json:"form"` // legacy detector: errors explicitly, never parsed
 	AllowedRoles      []string                 `json:"allowed_roles"`
+	AllowedUsers      []AllowedUser            `json:"allowed_users"`
 	RecordActor       *bool                    `json:"record_actor"`
 	Public            *bool                    `json:"public"`
 	Accept            []string                 `json:"accept"`
@@ -539,13 +571,13 @@ func parseRawNode(r *rawNode, limits NodeLimits) (*NodeContent, error) {
 		if r.Script != nil || r.Conditions != nil || r.Channel != nil || r.FormID != nil || r.HTTPConfig != nil || r.ExecutionConfig != nil || r.Nodes != nil ||
 			r.PollerHTTP != nil || r.PollerRedis != nil || r.PollerRabbitMQ != nil || len(r.Config) > 0 ||
 			len(r.Branches) > 0 || r.ParallelEndNodeID != nil || r.CombiningScript != nil || len(r.Delay) > 0 ||
-			// allowed_roles, record_actor, and public are the input node's
-			// authorization surface, and accept/storage are its delivery
-			// contract. A reference resolves its type from the definition,
-			// so the occurrence cannot be judged here and materializing it
-			// would drop the fields silently; referenced nodes inherit both
-			// from their definition instead.
-			len(r.AllowedRoles) > 0 || r.RecordActor != nil || r.Public != nil ||
+			// allowed_roles, allowed_users, record_actor, and public are the
+			// input node's authorization surface, and accept/storage are its
+			// delivery contract. A reference resolves its type from the
+			// definition, so the occurrence cannot be judged here and
+			// materializing it would drop the fields silently; referenced
+			// nodes inherit both from their definition instead.
+			len(r.AllowedRoles) > 0 || len(r.AllowedUsers) > 0 || r.RecordActor != nil || r.Public != nil ||
 			len(r.Accept) > 0 || r.Storage != nil {
 			return nil, errors.New("node referencing a node_definition_id cannot carry inline executable fields")
 		}
@@ -664,14 +696,23 @@ func parseRawNode(r *rawNode, limits NodeLimits) (*NodeContent, error) {
 			return nil, err
 		}
 		nc.AllowedRoles = allowedRoles
+		allowedUsers, err := parseAllowedUsers(r.AllowedUsers)
+		if err != nil {
+			return nil, err
+		}
+		nc.AllowedUsers = allowedUsers
 		if r.RecordActor != nil {
 			nc.RecordActor = *r.RecordActor
 		}
 		if r.Public != nil {
 			nc.Public = *r.Public
 		}
-		if nc.Public && (len(nc.AllowedRoles) > 0 || nc.RecordActor) {
-			return nil, errors.New("public input node must have empty allowed_roles and record_actor=false")
+		// A public node ignores allowed_roles and allowed_users at delivery
+		// time, so carrying them is legal and they take effect again if a
+		// later definition version drops public. Only record_actor is
+		// refused: an anonymous delivery has no user_id to write.
+		if nc.Public && nc.RecordActor {
+			return nil, errors.New("public input node must have record_actor=false")
 		}
 		accept, err := parseAccept(r.Accept)
 		if err != nil {
@@ -1001,13 +1042,14 @@ func parseRawNode(r *rawNode, limits NodeLimits) (*NodeContent, error) {
 	if _, ok := LookupCustomType(string(nc.Type)); !ok && nc.Type != NodeTypeInput && r.FormID != nil {
 		return nil, fmt.Errorf("node type %q does not support form_id", nc.Type)
 	}
-	// allowed_roles, record_actor, and public are the input node's
-	// authorization surface, and accept/storage are its delivery contract,
-	// so no other builtin type may carry them. The guard sits after the
-	// type switch because a referenced node definition resolves its type
-	// from the definition, not from the occurrence.
-	if nc.Type != NodeTypeInput && (len(r.AllowedRoles) > 0 || r.RecordActor != nil || r.Public != nil) {
-		return nil, fmt.Errorf("node type %q does not support allowed_roles, record_actor, or public", nc.Type)
+	// allowed_roles, allowed_users, record_actor, and public are the
+	// input node's authorization surface, and accept/storage are its
+	// delivery contract, so no other builtin type may carry them. The
+	// guard sits after the type switch because a referenced node
+	// definition resolves its type from the definition, not from the
+	// occurrence.
+	if nc.Type != NodeTypeInput && (len(r.AllowedRoles) > 0 || len(r.AllowedUsers) > 0 || r.RecordActor != nil || r.Public != nil) {
+		return nil, fmt.Errorf("node type %q does not support allowed_roles, allowed_users, record_actor, or public", nc.Type)
 	}
 	if nc.Type != NodeTypeInput && (len(r.Accept) > 0 || r.Storage != nil) {
 		return nil, fmt.Errorf("node type %q does not support accept or storage", nc.Type)
@@ -1066,6 +1108,38 @@ func parseAllowedRoles(raw []string) ([]string, error) {
 		}
 		seen[role] = true
 		out = append(out, role)
+	}
+	return out, nil
+}
+
+// parseAllowedUsers normalizes the input node's user gate: each entry must
+// carry a canonical users.id uuid, which is trimmed and must pass ids.Valid
+// like form_id. A typo'd id fails at definition create rather than
+// silently never matching a caller. Duplicates are removed while keeping
+// the authored order. An absent or empty list means no user restriction.
+//
+// The list is bounded like allowed_roles for the same reason: the gate is
+// matched on every delivery attempt, so a pathological definition must not
+// turn one parked input node into unbounded work.
+func parseAllowedUsers(raw []AllowedUser) ([]AllowedUser, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	if len(raw) > maxAllowedUsers {
+		return nil, fmt.Errorf("allowed_users has %d entries, at most %d are allowed", len(raw), maxAllowedUsers)
+	}
+	seen := make(map[string]bool, len(raw))
+	out := make([]AllowedUser, 0, len(raw))
+	for i, u := range raw {
+		id := strings.TrimSpace(u.ID)
+		if !ids.Valid(id) {
+			return nil, fmt.Errorf("allowed_users[%d].id must be a valid uuid", i)
+		}
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, AllowedUser{ID: id})
 	}
 	return out, nil
 }
@@ -1189,7 +1263,7 @@ func parseCustomNode(nc *NodeContent, r *rawNode, limits NodeLimits) (*NodeConte
 		// A custom type is never an input node, so the input node's
 		// authorization surface and delivery contract are refused like any
 		// other builtin field.
-		len(r.AllowedRoles) > 0 || r.RecordActor != nil || r.Public != nil ||
+		len(r.AllowedRoles) > 0 || len(r.AllowedUsers) > 0 || r.RecordActor != nil || r.Public != nil ||
 		len(r.Accept) > 0 || r.Storage != nil {
 		return nil, fmt.Errorf("node type %q does not support that field; custom nodes carry only type and config", nc.Type)
 	}

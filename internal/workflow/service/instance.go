@@ -168,8 +168,14 @@ type PendingInput struct {
 	Form *SnapshotForm
 	// AllowedRoles is the node's role gate, so a frontend can hide or
 	// explain a delivery the caller's roles would be refused for. It is
-	// empty when the node is open.
+	// empty when the node is open; it is consulted only when AllowedUsers
+	// is empty, and a public node reports it empty: the node ignores both
+	// gates, so an authored list must never hide its form.
 	AllowedRoles []string
+	// AllowedUsers is the node's user gate in the same [{"id": ...}] shape
+	// the definition carries. Like AllowedRoles it is reported empty on a
+	// public node.
+	AllowedUsers []model.AllowedUser
 	// RecordActor reports whether an accepted delivery is written as the
 	// attribution envelope {user_id, input_data}, so the frontend builds
 	// the follow-up form against the right shape.
@@ -858,9 +864,16 @@ func pendingInput(wc *model.WorkflowContent, inst *model.WorkflowInstance, curre
 		OutputProperty: key,
 		FormID:         node.FormID,
 		AllowedRoles:   node.AllowedRoles,
+		AllowedUsers:   node.AllowedUsers,
 		RecordActor:    node.RecordActor,
 		Public:         node.Public,
 		Accept:         node.EffectiveAccept(),
+	}
+	// The contract reports the effective gate: a public node ignores both
+	// lists, so they are hidden rather than shown as a restriction.
+	if p.Public {
+		p.AllowedRoles = nil
+		p.AllowedUsers = nil
 	}
 	if p.FormID != "" && len(inst.FormSnapshot) > 0 {
 		if e, ok := parseFormSnapshot(inst.FormSnapshot)[p.FormID]; ok {
@@ -2263,9 +2276,10 @@ func (s *instanceService) DeliverInput(ctx context.Context, req DeliverInput) (*
 	frame, inputNode := tgt.frame, tgt.node
 	// Authorization is decided here, once the node the delivery targets is
 	// known, and before the channel match, so a source header cannot skip
-	// the gate. The two gates are independent: a caller may hold
-	// input:deliver and still be refused by a node that does not list one
-	// of its roles. An anonymous caller passes only on a public node and
+	// the gate. The endpoint permission and the node gate are independent:
+	// a caller may hold input:deliver and still be refused by a node that
+	// lists neither their user id nor, when no user list is present, one
+	// of their roles. An anonymous caller passes only on a public node and
 	// is marked anonymous in the audit trail; an invalid credential never
 	// degrades to anonymous, because the router authenticates first.
 	if err := s.authorizeDelivery(ctx, inst, inputNode, principal, anonymous); err != nil {
@@ -2510,12 +2524,27 @@ func (s *instanceService) deliveryActor(req DeliverInput, p auth.Principal) stri
 	return s.actor
 }
 
-// authorizeDelivery applies the two independent input gates. A service
-// principal passes both: it is a trusted internal caller with the wildcard
-// permission and no roles to intersect. An anonymous delivery passes only
-// on a public node, which is open and unattributed by construction. A
-// denial writes no delivery row and records an input_forbidden audit event
-// carrying the instance, the node, and the refused roles, never the
+// nodeGateReason names the node gate a refused delivery failed: the user
+// list when the node carries one, else the role list. A roles-only node
+// keeps the message it has always produced, and a node carrying both gates
+// names only the user list, since the role list is not consulted there.
+func nodeGateReason(inputNode *model.NodeContent) string {
+	if len(inputNode.AllowedUsers) > 0 {
+		return "users [" + strings.Join(inputNode.AllowedUserIDs(), " ") +
+			"] are required to deliver to this input node"
+	}
+	return "roles [" + strings.Join(inputNode.AllowedRoles, " ") +
+		"] are required to deliver to this input node"
+}
+
+// authorizeDelivery applies the input gates in order: the endpoint
+// permission, then the node's user or role gate. A service principal
+// passes all of them: it is a trusted internal caller with the wildcard
+// permission and no identity to intersect. An anonymous delivery passes
+// only on a public node, which is open and unattributed by construction,
+// and a public node ignores both node gates for credentialed callers too.
+// A denial writes no delivery row and records an input_forbidden audit
+// event carrying the instance, the node, and the refused caller, never the
 // payload.
 func (s *instanceService) authorizeDelivery(
 	ctx context.Context,
@@ -2541,19 +2570,36 @@ func (s *instanceService) authorizeDelivery(
 	if !p.HasPermission(auth.ActionInputDeliver, s.catalog) {
 		return s.denyInput(ctx, inst, inputNode, p, "the "+auth.ActionInputDeliver+" permission is required")
 	}
+	// A public node ignores both node gates: anyone may deliver to it,
+	// credentialed or not. The endpoint permission above still applies to
+	// a caller that presented a credential.
+	if inputNode.Public {
+		return nil
+	}
+	// The user gate has strict priority: when the node lists users, only
+	// a listed user passes, however their roles read, and a caller holding
+	// a listed role but no listed user id is refused without consulting
+	// the role list. The role gate applies only when no user list is
+	// present, and a node carrying neither gate stays open.
+	if len(inputNode.AllowedUsers) > 0 {
+		if p.MatchesUserID(inputNode.AllowedUserIDs()) {
+			return nil
+		}
+		return s.denyInput(ctx, inst, inputNode, p, nodeGateReason(inputNode))
+	}
 	if !p.CanSatisfyRoles(inputNode.AllowedRoles) {
-		return s.denyInput(ctx, inst, inputNode, p,
-			"roles ["+strings.Join(inputNode.AllowedRoles, " ")+"] are required to deliver to this input node")
+		return s.denyInput(ctx, inst, inputNode, p, nodeGateReason(inputNode))
 	}
 	return nil
 }
 
 // denyInput records the refusal and returns the 403-mapped error. The event
-// names the instance, the node, and the roles the caller actually held, so
-// an operator can tell a wrong role from a missing permission. An anonymous
-// refusal carries the anonymous marker alongside the empty caller identity,
-// so it reads as "nobody knocked" rather than as the system user. It never
-// carries the payload: a refused delivery is not data the engine stored.
+// names the instance, the node, and the identity the caller actually held
+// (roles plus resolved user id), so an operator can tell a wrong role from
+// a missing permission. An anonymous refusal carries the anonymous marker alongside
+// the empty caller identity, so it reads as "nobody knocked" rather than as
+// the system user. It never carries the payload: a refused delivery is not
+// data the engine stored.
 func (s *instanceService) denyInput(
 	ctx context.Context,
 	inst *model.WorkflowInstance,
@@ -2604,6 +2650,7 @@ func (s *instanceService) denyInputAs(
 		"reason":       reason,
 		"roles":        roles,
 		"subject":      p.Subject,
+		"user_id":      p.UserID,
 		"delivered_by": actorType,
 	})
 	if err != nil {
