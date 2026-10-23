@@ -16,6 +16,7 @@ func TestSnapshotFiltersPrefix(t *testing.T) {
 
 func TestSnapshotExcludesDenied(t *testing.T) {
 	t.Setenv("BEELINEWF_INFRA_POSTGRESQL_DSN", "postgres://x")
+	t.Setenv("BEELINEWF_INFRA_HTTP_HOST", "0.0.0.0:8080")
 	t.Setenv("BEELINEWF_API_TOKEN", "tok")
 	t.Setenv("BEELINEWF_AUTH_ENABLED", "true")
 	t.Setenv("BEELINEWF_SYSTEM_USER_ID", "u1")
@@ -23,6 +24,7 @@ func TestSnapshotExcludesDenied(t *testing.T) {
 	got := Snapshot(Prefix)
 	for _, k := range []string{
 		"BEELINEWF_INFRA_POSTGRESQL_DSN",
+		"BEELINEWF_INFRA_HTTP_HOST",
 		"BEELINEWF_API_TOKEN",
 		"BEELINEWF_AUTH_ENABLED",
 		"BEELINEWF_SYSTEM_USER_ID",

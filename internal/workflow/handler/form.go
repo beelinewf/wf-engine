@@ -41,7 +41,7 @@ func (h *FormHandler) Create(c *gin.Context) {
 		WriteProblem(c, http.StatusUnprocessableEntity, "name and schema are required")
 		return
 	}
-	form, err := h.svc.Create(c.Request.Context(), req.Name, req.Schema, req.UI)
+	form, err := h.svc.Create(c.Request.Context(), req.Name, req.ContentType, req.Schema, req.UI)
 	if err != nil {
 		WriteError(c, err)
 		return
@@ -139,7 +139,7 @@ func (h *FormHandler) Update(c *gin.Context) {
 		WriteProblem(c, http.StatusUnprocessableEntity, "name and schema are required")
 		return
 	}
-	form, err := h.svc.Update(c.Request.Context(), id, req.Name, req.Schema, req.UI)
+	form, err := h.svc.Update(c.Request.Context(), id, req.Name, req.ContentType, req.Schema, req.UI)
 	if err != nil {
 		WriteError(c, err)
 		return
@@ -256,11 +256,12 @@ func toFormUsageResponse(usage service.FormUsage) FormUsageResponse {
 
 func toFormResponse(form repository.Form) FormResponse {
 	return FormResponse{
-		ID:        form.ID,
-		Name:      form.Name,
-		Schema:    form.Schema,
-		UI:        form.UI,
-		CreatedAt: form.CreatedAt,
-		UpdatedAt: form.UpdatedAt,
+		ID:          form.ID,
+		Name:        form.Name,
+		ContentType: form.ContentType,
+		Schema:      form.Schema,
+		UI:          form.UI,
+		CreatedAt:   form.CreatedAt,
+		UpdatedAt:   form.UpdatedAt,
 	}
 }

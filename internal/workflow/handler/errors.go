@@ -37,12 +37,15 @@ func WriteProblem(c *gin.Context, status int, detail string) {
 
 // StatusForError maps domain errors to HTTP status codes:
 //
-//	ErrNotFound      -> 404
-//	ErrForbidden     -> 403
-//	ErrConflict      -> 409
-//	ErrInvalid       -> 422
-//	ErrTerminalState -> 409
-//	anything else    -> 500
+//	ErrNotFound        -> 404
+//	ErrForbidden       -> 403
+//	ErrConflict        -> 409
+//	ErrInvalid         -> 422
+//	ErrTerminalState   -> 409
+//	ErrBadRequest      -> 400
+//	ErrPayloadTooLarge -> 413
+//	ErrUnsupportedMedia -> 415
+//	anything else      -> 500
 func StatusForError(err error) int {
 	switch {
 	case errors.Is(err, model.ErrNotFound):
@@ -53,6 +56,12 @@ func StatusForError(err error) int {
 		return http.StatusConflict
 	case errors.Is(err, model.ErrInvalid):
 		return http.StatusUnprocessableEntity
+	case errors.Is(err, model.ErrBadRequest):
+		return http.StatusBadRequest
+	case errors.Is(err, model.ErrPayloadTooLarge):
+		return http.StatusRequestEntityTooLarge
+	case errors.Is(err, model.ErrUnsupportedMedia):
+		return http.StatusUnsupportedMediaType
 	default:
 		return http.StatusInternalServerError
 	}

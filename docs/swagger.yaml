@@ -152,6 +152,8 @@ definitions:
     type: object
   internal_workflow_handler.FormResponse:
     properties:
+      content_type:
+        type: string
       created_at:
         type: string
       id:
@@ -662,6 +664,13 @@ definitions:
     type: object
   internal_workflow_handler.PendingInputResponse:
     properties:
+      accept:
+        description: |-
+          Accept lists the request media types the node delivers. A frontend
+          reads it to decide between a JSON body and a multipart upload.
+        items:
+          type: string
+        type: array
       allowed_roles:
         description: |-
           AllowedRoles is the node's role gate. Empty means the node is open to
@@ -765,6 +774,8 @@ definitions:
     type: object
   internal_workflow_handler.SaveFormRequest:
     properties:
+      content_type:
+        type: string
       name:
         type: string
       schema:
@@ -2296,6 +2307,7 @@ paths:
     put:
       consumes:
       - application/json
+      - multipart/form-data
       description: 'This is the only endpoint that serves an anonymous caller, and
         only when the waiting input node sets public: true. No credential at all is
         admitted on a public node; a private node answers 403. A credential that is
@@ -2318,12 +2330,21 @@ paths:
         in: query
         name: branch_id
         type: string
-      - description: Input payload
+      - description: Input payload (application/json; leave empty when sending multipart/form-data)
         in: body
         name: request
-        required: true
         schema:
           type: object
+      - description: File parts for multipart/form-data (repeatable; field name becomes
+          the context key, a trailing [] merges with the bare name)
+        in: formData
+        name: files
+        type: file
+      - description: Text field for multipart/form-data (repeatable; field name becomes
+          the context key)
+        in: formData
+        name: field
+        type: string
       produces:
       - application/json
       responses:
@@ -2349,6 +2370,14 @@ paths:
             $ref: '#/definitions/internal_workflow_handler.Problem'
         "409":
           description: Conflict
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "413":
+          description: Request Entity Too Large
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "415":
+          description: Unsupported Media Type
           schema:
             $ref: '#/definitions/internal_workflow_handler.Problem'
         "422":

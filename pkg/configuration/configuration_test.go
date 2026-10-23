@@ -1218,3 +1218,145 @@ func TestLoadRejectsNegativeCORSMaxAge(t *testing.T) {
 		t.Errorf("error = %q, want it to name infra.http.cors.max_age", err)
 	}
 }
+
+// Object storage is disabled unless endpoint and both keys are set: a
+// deployment that never configures it boots with uploads off, and region /
+// use_ssl still carry safe defaults for the day it is enabled.
+func TestLoadStorageDefaultsToDisabled(t *testing.T) {
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+
+	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Infra.Storage.Enabled() {
+		t.Errorf("storage = %+v, want disabled by default", cfg.Infra.Storage)
+	}
+	if cfg.Infra.Storage.Region != "us-east-1" {
+		t.Errorf("region = %q, want us-east-1", cfg.Infra.Storage.Region)
+	}
+	if !cfg.Infra.Storage.UseSSL {
+		t.Error("use_ssl = false, want true by default")
+	}
+}
+
+// A partial storage connection fails the boot instead of failing the first
+// multipart delivery: endpoint without credentials, or credentials without
+// an endpoint, is a misconfiguration, not a disabled storage.
+func TestLoadRejectsPartialStorage(t *testing.T) {
+	cases := map[string]map[string]string{
+		"endpoint without keys": {
+			"BEELINEWF_INFRA_STORAGE_ENDPOINT": "rustfs:9000",
+		},
+		"endpoint without secret": {
+			"BEELINEWF_INFRA_STORAGE_ENDPOINT":   "rustfs:9000",
+			"BEELINEWF_INFRA_STORAGE_ACCESS_KEY": "ak",
+		},
+		"keys without endpoint": {
+			"BEELINEWF_INFRA_STORAGE_ACCESS_KEY": "ak",
+			"BEELINEWF_INFRA_STORAGE_SECRET_KEY": "sk",
+		},
+	}
+	for name, env := range cases {
+		t.Run(name, func(t *testing.T) {
+			setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+			for k, v := range env {
+				setenv(t, k, v)
+			}
+			_, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+			if err == nil {
+				t.Fatal("Load() error = nil, want the partial storage rejected")
+			}
+			if !strings.Contains(err.Error(), "infra.storage") {
+				t.Errorf("error = %q, want it to name infra.storage", err)
+			}
+		})
+	}
+}
+
+// Every storage key rides the BEELINEWF_INFRA_STORAGE_* environment
+// contract, so compose wires RustFS without rewriting config files.
+func TestLoadStorageFromEnv(t *testing.T) {
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+	setenv(t, "BEELINEWF_INFRA_STORAGE_ENDPOINT", "rustfs:9000")
+	setenv(t, "BEELINEWF_INFRA_STORAGE_REGION", "eu-west-1")
+	setenv(t, "BEELINEWF_INFRA_STORAGE_USE_SSL", "false")
+	setenv(t, "BEELINEWF_INFRA_STORAGE_ACCESS_KEY", "ak")
+	setenv(t, "BEELINEWF_INFRA_STORAGE_SECRET_KEY", "sk")
+
+	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	st := cfg.Infra.Storage
+	if !st.Enabled() {
+		t.Error("storage is disabled, want the env connection enabled")
+	}
+	if st.Endpoint != "rustfs:9000" || st.Region != "eu-west-1" || st.UseSSL ||
+		st.AccessKey != "ak" || st.SecretKey != "sk" {
+		t.Errorf("storage = %+v, want the env values", st)
+	}
+}
+
+// The multipart streaming limits default to bounded values and reject a
+// non-positive override: a zero cap would refuse every file, a negative one
+// is meaningless.
+func TestLoadMultipartLimitsDefaults(t *testing.T) {
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+
+	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	mp := cfg.Engine.Multipart
+	if mp.MaxFiles != 20 || mp.MaxTotalBytes != 134217728 ||
+		mp.MaxFileBytes != 33554432 || mp.MaxTextBytes != 1048576 {
+		t.Errorf("multipart = %+v, want 20 files / 128MiB total / 32MiB per file / 1MiB per text part", mp)
+	}
+}
+
+func TestLoadRejectsNonPositiveMultipartLimits(t *testing.T) {
+	for _, key := range []string{
+		"BEELINEWF_ENGINE_MULTIPART_MAX_FILES",
+		"BEELINEWF_ENGINE_MULTIPART_MAX_TOTAL_BYTES",
+		"BEELINEWF_ENGINE_MULTIPART_MAX_FILE_BYTES",
+		"BEELINEWF_ENGINE_MULTIPART_MAX_TEXT_BYTES",
+	} {
+		t.Run(key, func(t *testing.T) {
+			setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+			setenv(t, key, "0")
+			_, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+			if err == nil {
+				t.Fatalf("Load() error = nil, want rejection of %s=0", key)
+			}
+			if !strings.Contains(err.Error(), "engine.multipart") {
+				t.Errorf("error = %q, want it to name engine.multipart", err)
+			}
+		})
+	}
+}
+
+// The shipped configs document the storage section disabled plus the
+// multipart limits, so a fresh checkout boots and the keys stay greppable.
+func TestShippedConfigsCarryStorageAndMultipart(t *testing.T) {
+	setenv(t, "BEELINEWF_API_TOKEN", "e2e-service-token")
+	for _, name := range []string{"config.yaml", "config.e2e.yaml"} {
+		path := filepath.Join("..", "..", name)
+		if _, err := os.Stat(path); err != nil {
+			t.Skipf("%s not available: %v", name, err)
+		}
+		cfg, err := configuration.Load(configuration.WithConfigFile(path))
+		if err != nil {
+			t.Errorf("Load(%s) error = %v", name, err)
+			continue
+		}
+		if cfg.Infra.Storage.Enabled() {
+			t.Errorf("%s: storage is enabled, want the shipped config disabled", name)
+		}
+		mp := cfg.Engine.Multipart
+		if mp.MaxFiles != 20 || mp.MaxTotalBytes != 134217728 ||
+			mp.MaxFileBytes != 33554432 || mp.MaxTextBytes != 1048576 {
+			t.Errorf("%s: multipart = %+v, want the documented defaults", name, mp)
+		}
+	}
+}

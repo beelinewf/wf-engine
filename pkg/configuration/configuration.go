@@ -48,6 +48,7 @@ type Infra struct {
 	PostgreSQL PostgreSQL `mapstructure:"postgresql"`
 	Redis      Redis      `mapstructure:"redis"`
 	RabbitMQ   RabbitMQ   `mapstructure:"rabbitmq"`
+	Storage    Storage    `mapstructure:"storage"`
 }
 
 // HTTP holds HTTP server settings.
@@ -107,6 +108,30 @@ type RabbitMQ struct {
 	StatusQueue string `mapstructure:"status_queue"`
 }
 
+// Storage holds the S3-compatible object storage connection serving
+// multipart input uploads. Input nodes name only a bucket, an optional
+// prefix, and optional file constraints; the endpoint and credentials live
+// here so node definitions never carry them. Fully empty means storage is
+// disabled: definitions still parse, but a multipart delivery fails at
+// delivery time. A partial configuration fails startup.
+type Storage struct {
+	// Endpoint is the bare host:port of the S3 API (an http(s):// prefix
+	// is tolerated).
+	Endpoint string `mapstructure:"endpoint"`
+	Region   string `mapstructure:"region"`
+	UseSSL   bool   `mapstructure:"use_ssl"`
+	// AccessKey and SecretKey are the static credentials.
+	AccessKey string `mapstructure:"access_key"`
+	SecretKey string `mapstructure:"secret_key"`
+}
+
+// Enabled reports whether object storage is configured. Partial
+// configurations are rejected at load, so any single set field implies a
+// complete one.
+func (s Storage) Enabled() bool {
+	return s.Endpoint != "" || s.AccessKey != "" || s.SecretKey != ""
+}
+
 // Worker holds the ants worker pool configuration.
 type Worker struct {
 	// Pool sizes the engine dispatcher; StatusPool sizes the
@@ -164,6 +189,8 @@ type Engine struct {
 	Parallel Parallel `mapstructure:"parallel"`
 	// ConsumerRetry bounds broker input consumer supervision.
 	ConsumerRetry ConsumerRetry `mapstructure:"consumer_retry"`
+	// Multipart bounds streaming multipart input uploads.
+	Multipart Multipart `mapstructure:"multipart"`
 }
 
 // Parallel holds the parallel execution safety limits.
@@ -187,6 +214,21 @@ type ConsumerRetry struct {
 	InitialBackoff time.Duration `mapstructure:"initial_backoff"`
 	MaxBackoff     time.Duration `mapstructure:"max_backoff"`
 	MinHealthyRun  time.Duration `mapstructure:"min_healthy_run"`
+}
+
+// Multipart holds the streaming multipart input upload limits. Every
+// breach fails the delivery and deletes the objects the request already
+// uploaded, so a failed delivery leaves nothing behind.
+type Multipart struct {
+	// MaxFiles caps the file-part count of one delivery.
+	MaxFiles int `mapstructure:"max_files"`
+	// MaxTotalBytes caps the combined file and text bytes of one delivery.
+	MaxTotalBytes int64 `mapstructure:"max_total_bytes"`
+	// MaxFileBytes caps one file when the input node sets no
+	// max_file_bytes of its own.
+	MaxFileBytes int64 `mapstructure:"max_file_bytes"`
+	// MaxTextBytes caps one text part.
+	MaxTextBytes int64 `mapstructure:"max_text_bytes"`
 }
 
 // System holds the configured audit actor (no auth yet).
@@ -405,6 +447,14 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("infra.rabbitmq.input_queue", "beelinewf.input")
 	v.SetDefault("infra.rabbitmq.output_queue", "beelinewf.output")
 	v.SetDefault("infra.rabbitmq.status_queue", "beelinewf.status")
+	// Optional object storage for multipart input uploads: empty endpoint
+	// and credentials disable it. Region and use_ssl carry safe defaults
+	// so an enabled storage always has a valid connection shape.
+	v.SetDefault("infra.storage.endpoint", "")
+	v.SetDefault("infra.storage.region", "us-east-1")
+	v.SetDefault("infra.storage.use_ssl", true)
+	v.SetDefault("infra.storage.access_key", "")
+	v.SetDefault("infra.storage.secret_key", "")
 	v.SetDefault("worker.pool.size", 1000)
 	v.SetDefault("worker.status_pool.size", 20)
 	v.SetDefault("scheduler.enabled", true)
@@ -438,6 +488,10 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("engine.consumer_retry.initial_backoff", "1s")
 	v.SetDefault("engine.consumer_retry.max_backoff", "30s")
 	v.SetDefault("engine.consumer_retry.min_healthy_run", "30s")
+	v.SetDefault("engine.multipart.max_files", 20)
+	v.SetDefault("engine.multipart.max_total_bytes", 134217728)
+	v.SetDefault("engine.multipart.max_file_bytes", 33554432)
+	v.SetDefault("engine.multipart.max_text_bytes", 1048576)
 	v.SetDefault("system.user_id", "00000000-0000-7000-8000-000000000001")
 	v.SetDefault("system.name", "system")
 	v.SetDefault("system.email", "system@localhost")
@@ -552,6 +606,30 @@ func (c *Config) validate() error {
 		if strings.TrimSpace(c.Infra.RabbitMQ.StatusQueue) == "" {
 			return errors.New("configuration: infra.rabbitmq.status_queue is required when infra.rabbitmq.dsn is set")
 		}
+	}
+	// Object storage is all or nothing: a partial connection (endpoint
+	// without credentials, or credentials without an endpoint) fails the
+	// boot instead of failing the first multipart delivery. Fully empty
+	// disables multipart uploads; definitions still parse.
+	if c.Infra.Storage.Enabled() {
+		if strings.TrimSpace(c.Infra.Storage.Endpoint) == "" {
+			return errors.New("configuration: infra.storage.endpoint is required when infra.storage credentials are set")
+		}
+		if strings.TrimSpace(c.Infra.Storage.AccessKey) == "" || strings.TrimSpace(c.Infra.Storage.SecretKey) == "" {
+			return errors.New("configuration: infra.storage.access_key and infra.storage.secret_key are required when infra.storage.endpoint is set")
+		}
+	}
+	if c.Engine.Multipart.MaxFiles <= 0 {
+		return errors.New("configuration: engine.multipart.max_files must be > 0")
+	}
+	if c.Engine.Multipart.MaxTotalBytes <= 0 {
+		return errors.New("configuration: engine.multipart.max_total_bytes must be > 0")
+	}
+	if c.Engine.Multipart.MaxFileBytes <= 0 {
+		return errors.New("configuration: engine.multipart.max_file_bytes must be > 0")
+	}
+	if c.Engine.Multipart.MaxTextBytes <= 0 {
+		return errors.New("configuration: engine.multipart.max_text_bytes must be > 0")
 	}
 	if c.Auth.Enabled && strings.TrimSpace(c.Auth.APIToken) == "" {
 		return errors.New("configuration: auth.api_token is required when auth.enabled is true")

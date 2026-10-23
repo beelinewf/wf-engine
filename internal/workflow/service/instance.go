@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"reflect"
 	"strings"
 	"time"
@@ -16,6 +17,8 @@ import (
 	"github.com/beelinewf/wf-engine/internal/workflow/executor"
 	"github.com/beelinewf/wf-engine/internal/workflow/kernel"
 	"github.com/beelinewf/wf-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/multipart"
+	"github.com/beelinewf/wf-engine/internal/workflow/objectstore"
 	"github.com/beelinewf/wf-engine/internal/workflow/repository"
 	"github.com/beelinewf/wf-engine/pkg/contextdiff"
 	"github.com/beelinewf/wf-engine/pkg/envsnapshot"
@@ -65,6 +68,15 @@ type DeliverInput struct {
 	IdempotencyKey string
 	Payload        []byte
 	Source         string
+	// ContentType is the request media type ("application/json" or
+	// "multipart/form-data"). Empty means JSON, which is what every
+	// caller that predates accept sends.
+	ContentType string
+	// MultipartSource opens the streaming multipart reader. Required when
+	// ContentType is multipart/form-data; ignored otherwise. The stream
+	// is pulled only after the delivery is authorized, so a refused
+	// caller uploads nothing.
+	MultipartSource multipart.ReaderFactory
 	// Principal is the caller. The API-token and broker paths pass the
 	// service principal, which skips both authorization gates but is still
 	// recorded as the deliverer. A nil Principal means the request carried
@@ -167,6 +179,10 @@ type PendingInput struct {
 	// behind authentication, so an anonymous caller learns the shape
 	// out-of-band rather than from this contract.
 	Public bool
+	// Accept lists the request media types the node delivers, so a
+	// frontend knows whether multipart is welcome. It is never empty:
+	// nodes that predate accept report JSON only.
+	Accept []string
 }
 
 // formSnapshotEntry is one frozen forms-library entry: the schema/ui bytes
@@ -425,6 +441,17 @@ type instanceService struct {
 	// catalog is the read-only role catalog used to turn a caller's roles
 	// into the permissions the input endpoint gate checks.
 	catalog auth.Catalog
+	// multipart carries the object store and streaming limits multipart
+	// input deliveries upload through.
+	multipart MultipartDeps
+}
+
+// MultipartDeps carries the object store and streaming limits multipart
+// input deliveries upload through. A nil Store means storage is disabled:
+// definitions still parse, but a multipart delivery fails at delivery time.
+type MultipartDeps struct {
+	Store  objectstore.Store
+	Limits multipart.Limits
 }
 
 // NewInstanceService builds the instance service. cancels may be nil; when
@@ -446,7 +473,7 @@ func NewInstanceService(
 ) InstanceService {
 	return newInstanceService(
 		instances, parallel, wfDefs, secrets, forms, materializer, validator, hooks,
-		actor, limits, cancels, leanOptions, auth.Catalog{},
+		actor, limits, cancels, leanOptions, auth.Catalog{}, MultipartDeps{},
 	)
 }
 
@@ -471,7 +498,32 @@ func NewInstanceServiceWithCatalog(
 ) InstanceService {
 	return newInstanceService(
 		instances, parallel, wfDefs, secrets, forms, materializer, validator, hooks,
-		actor, limits, cancels, leanOptions, catalog,
+		actor, limits, cancels, leanOptions, catalog, MultipartDeps{},
+	)
+}
+
+// NewInstanceServiceWithMultipart is NewInstanceServiceWithCatalog plus the
+// object store and streaming limits multipart input deliveries upload
+// through. Production passes the configured store; tests substitute a fake.
+func NewInstanceServiceWithMultipart(
+	instances repository.InstanceRepository,
+	parallel repository.ParallelRepository,
+	wfDefs repository.WorkflowDefinitionRepository,
+	secrets SecretSnapshotter,
+	forms repository.FormRepository,
+	materializer WorkflowMaterializer,
+	validator *executor.InputExecutor,
+	hooks *executor.HookRunner,
+	actor string,
+	limits model.NodeLimits,
+	cancels Canceller,
+	leanOptions model.LeanOptions,
+	catalog auth.Catalog,
+	mp MultipartDeps,
+) InstanceService {
+	return newInstanceService(
+		instances, parallel, wfDefs, secrets, forms, materializer, validator, hooks,
+		actor, limits, cancels, leanOptions, catalog, mp,
 	)
 }
 
@@ -489,6 +541,7 @@ func newInstanceService(
 	cancels Canceller,
 	leanOptions model.LeanOptions,
 	catalog auth.Catalog,
+	mp MultipartDeps,
 ) InstanceService {
 	return &instanceService{
 		instances:    instances,
@@ -504,6 +557,7 @@ func newInstanceService(
 		cancels:      cancels,
 		leanOptions:  leanOptions,
 		catalog:      catalog,
+		multipart:    mp,
 	}
 }
 
@@ -806,6 +860,7 @@ func pendingInput(wc *model.WorkflowContent, inst *model.WorkflowInstance, curre
 		AllowedRoles:   node.AllowedRoles,
 		RecordActor:    node.RecordActor,
 		Public:         node.Public,
+		Accept:         node.EffectiveAccept(),
 	}
 	if p.FormID != "" && len(inst.FormSnapshot) > 0 {
 		if e, ok := parseFormSnapshot(inst.FormSnapshot)[p.FormID]; ok {
@@ -2002,7 +2057,11 @@ func (s *instanceService) replayDelivery(
 	req DeliverInput,
 	p auth.Principal,
 ) (*model.InputDelivery, error) {
-	if !jsonEqual(existing.Payload, req.Payload) {
+	// A multipart replay skips the payload-equality check: byte equality
+	// is impossible without uploading first, which is exactly what replay
+	// must avoid. The stored delivery returns without re-uploading, still
+	// re-authorized against its target node below.
+	if !isMultipartRequest(req) && !jsonEqual(existing.Payload, req.Payload) {
 		return nil, fmt.Errorf("%w: Idempotency-Key %q was already used with a different payload", model.ErrConflict, req.IdempotencyKey)
 	}
 	// The row records the occurrence it targeted, so the gate reads the
@@ -2138,9 +2197,23 @@ func (s *instanceService) DeliverInput(ctx context.Context, req DeliverInput) (*
 	if strings.TrimSpace(req.IdempotencyKey) == "" {
 		return nil, fmt.Errorf("%w: Idempotency-Key header is required", model.ErrInvalid)
 	}
-	if len(req.Payload) == 0 {
+	isMultipart := isMultipartRequest(req)
+	if !isMultipart && len(req.Payload) == 0 {
 		return nil, fmt.Errorf("%w: input body is required", model.ErrInvalid)
 	}
+	// Multipart uploads commit objects before the delivery succeeds, so
+	// every failure past the build deletes them and a failed delivery
+	// leaves nothing behind. The flag flips only on the persisted-success
+	// returns below: a persisted rejection still cleans up. The JSON path
+	// never uploads, so the guard is a no-op there.
+	var uploadBucket string
+	var uploaded []string
+	delivered := false
+	defer func() {
+		if !delivered && len(uploaded) > 0 {
+			s.deleteUploads(context.WithoutCancel(ctx), uploadBucket, uploaded)
+		}
+	}()
 	inst, err := s.instances.GetByID(ctx, req.InstanceID)
 	if err != nil {
 		return nil, err
@@ -2211,6 +2284,42 @@ func (s *instanceService) DeliverInput(ctx context.Context, req DeliverInput) (*
 	}
 	tgt.attempt = attempt
 	tgt.startCtx = ctxMap
+	// The accept check runs after authorization and the parked check, so a
+	// refused or misparked caller learns nothing about the node's media
+	// types. A JSON delivery to a JSON-accepting node — every delivery
+	// that predates accept — passes through unchanged.
+	mediaType := req.ContentType
+	if mediaType == "" {
+		mediaType = model.MediaTypeJSON
+	}
+	if !inputNode.Accepts(mediaType) {
+		return nil, fmt.Errorf("%w: input node does not accept %s", model.ErrUnsupportedMedia, mediaType)
+	}
+	if isMultipart {
+		if s.multipart.Store == nil {
+			return nil, errors.New("multipart input needs infra.storage, which is not configured on this deployment")
+		}
+		if req.MultipartSource == nil {
+			return nil, fmt.Errorf("%w: multipart delivery needs a body source", model.ErrBadRequest)
+		}
+		mr, err := req.MultipartSource()
+		if err != nil {
+			return nil, fmt.Errorf("%w: cannot read multipart body: %v", model.ErrBadRequest, err)
+		}
+		if mr == nil {
+			return nil, fmt.Errorf("%w: multipart delivery needs a body source", model.ErrBadRequest)
+		}
+		// The build streams file parts into the object store and
+		// synthesizes the JSON payload the tail below validates, merges,
+		// and persists exactly like a JSON delivery. Its keys feed the
+		// cleanup guard above on every failure past this point.
+		result, err := multipart.Build(ctx, mr, inputNode, s.multipart.Store, s.multipart.Limits)
+		uploadBucket, uploaded = result.Bucket, result.Keys
+		if err != nil {
+			return nil, err
+		}
+		req.Payload = result.Payload
+	}
 	// The validation script is the only backend gate on the payload. A
 	// referenced form is never consulted: forms are a frontend concern, and
 	// a payload violating the form's schema but passing the script is
@@ -2293,7 +2402,12 @@ func (s *instanceService) DeliverInput(ctx context.Context, req DeliverInput) (*
 			// dropping it.
 			return s.failAcceptedInput(ctx, inst, tgt, req, model.NodeFinished, newCtx, errors.New("branch terminated without reaching its parallel_end"))
 		}
-		return s.instances.DeliverInput(ctx, c)
+		delivery, err := s.instances.DeliverInput(ctx, c)
+		if err != nil {
+			return nil, err
+		}
+		delivered = true
+		return delivery, nil
 	}
 	status := model.WorkflowWaiting
 	var finished *time.Time
@@ -2310,7 +2424,32 @@ func (s *instanceService) DeliverInput(ctx context.Context, req DeliverInput) (*
 	c.Status = status
 	c.FinishedAt = finished
 	c.History = s.leanInputHistory(inst, ctxMap, newCtx, attempt)
-	return s.instances.DeliverInput(ctx, c)
+	delivery, err := s.instances.DeliverInput(ctx, c)
+	if err != nil {
+		return nil, err
+	}
+	delivered = true
+	return delivery, nil
+}
+
+// isMultipartRequest reports whether the delivery carries a streaming
+// multipart body rather than a JSON payload.
+func isMultipartRequest(req DeliverInput) bool {
+	return req.ContentType == model.MediaTypeMultipart
+}
+
+// deleteUploads best-effort deletes the objects a failed multipart delivery
+// committed. A delete that itself fails is logged and skipped: cleanup must
+// never mask the delivery error.
+func (s *instanceService) deleteUploads(ctx context.Context, bucket string, keys []string) {
+	if s.multipart.Store == nil {
+		return
+	}
+	for _, key := range keys {
+		if err := s.multipart.Store.Delete(ctx, bucket, key); err != nil {
+			slog.Warn("multipart cleanup delete failed", "bucket", bucket, "key", key, "error", err)
+		}
+	}
 }
 
 // inputContextValue is what an accepted delivery writes under the node's

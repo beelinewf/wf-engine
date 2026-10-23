@@ -2236,7 +2236,8 @@ const docTemplate = `{
             "put": {
                 "description": "This is the only endpoint that serves an anonymous caller, and only when the waiting input node sets public: true. No credential at all is admitted on a public node; a private node answers 403. A credential that is present but invalid is still 401, including on a public node, and never degrades to an accepted anonymous delivery. Status and form reads stay authenticated, so share the payload contract with an anonymous caller out-of-band.",
                 "consumes": [
-                    "application/json"
+                    "application/json",
+                    "multipart/form-data"
                 ],
                 "produces": [
                     "application/json"
@@ -2267,13 +2268,24 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
-                        "description": "Input payload",
+                        "description": "Input payload (application/json; leave empty when sending multipart/form-data)",
                         "name": "request",
                         "in": "body",
-                        "required": true,
                         "schema": {
                             "type": "object"
                         }
+                    },
+                    {
+                        "type": "file",
+                        "description": "File parts for multipart/form-data (repeatable; field name becomes the context key, a trailing [] merges with the bare name)",
+                        "name": "files",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Text field for multipart/form-data (repeatable; field name becomes the context key)",
+                        "name": "field",
+                        "in": "formData"
                     }
                 ],
                 "responses": {
@@ -2309,6 +2321,18 @@ const docTemplate = `{
                     },
                     "409": {
                         "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/internal_workflow_handler.Problem"
+                        }
+                    },
+                    "413": {
+                        "description": "Request Entity Too Large",
+                        "schema": {
+                            "$ref": "#/definitions/internal_workflow_handler.Problem"
+                        }
+                    },
+                    "415": {
+                        "description": "Unsupported Media Type",
                         "schema": {
                             "$ref": "#/definitions/internal_workflow_handler.Problem"
                         }
@@ -3518,6 +3542,9 @@ const docTemplate = `{
         "internal_workflow_handler.FormResponse": {
             "type": "object",
             "properties": {
+                "content_type": {
+                    "type": "string"
+                },
                 "created_at": {
                     "type": "string"
                 },
@@ -4282,6 +4309,13 @@ const docTemplate = `{
         "internal_workflow_handler.PendingInputResponse": {
             "type": "object",
             "properties": {
+                "accept": {
+                    "description": "Accept lists the request media types the node delivers. A frontend\nreads it to decide between a JSON body and a multipart upload.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "allowed_roles": {
                     "description": "AllowedRoles is the node's role gate. Empty means the node is open to\nany caller that holds input:deliver.",
                     "type": "array",
@@ -4426,6 +4460,9 @@ const docTemplate = `{
         "internal_workflow_handler.SaveFormRequest": {
             "type": "object",
             "properties": {
+                "content_type": {
+                    "type": "string"
+                },
                 "name": {
                     "type": "string"
                 },

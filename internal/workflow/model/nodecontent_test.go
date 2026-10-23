@@ -1293,3 +1293,200 @@ func TestArrivalWait(t *testing.T) {
 		t.Errorf("plain arrival wait = %v, want 0", plain.ArrivalWait())
 	}
 }
+
+// An absent accept means JSON only, which is what every definition written
+// before the field existed resolves to.
+func TestParseInputNodeAcceptDefaultsToJSON(t *testing.T) {
+	for name, raw := range map[string]string{
+		"absent": `{"type":"input","channel":"http","output_property":"user"}`,
+		"empty":  `{"type":"input","channel":"http","output_property":"user","accept":[]}`,
+		"null":   `{"type":"input","channel":"http","output_property":"user","accept":null}`,
+	} {
+		nc := mustParseContent(t, raw)
+		if len(nc.Accept) != 0 {
+			t.Errorf("%s: Accept = %v, want empty (JSON by default)", name, nc.Accept)
+		}
+		if got := nc.EffectiveAccept(); len(got) != 1 || got[0] != model.MediaTypeJSON {
+			t.Errorf("%s: EffectiveAccept() = %v, want [application/json]", name, got)
+		}
+		if !nc.Accepts("") || !nc.Accepts(model.MediaTypeJSON) {
+			t.Errorf("%s: Accepts JSON = false, want true", name)
+		}
+		if nc.Accepts(model.MediaTypeMultipart) {
+			t.Errorf("%s: Accepts multipart = true, want false", name)
+		}
+	}
+}
+
+// Entries deduplicate while keeping the authored order; anything but the
+// two media types is a definition error.
+func TestParseInputNodeAcceptValues(t *testing.T) {
+	nc := mustParseContent(t, `{"type":"input","channel":"http","output_property":"user",`+
+		`"accept":["multipart/form-data","application/json","multipart/form-data"],`+
+		`"storage":{"bucket":"uploads"}}`)
+	want := []string{model.MediaTypeMultipart, model.MediaTypeJSON}
+	if len(nc.Accept) != len(want) {
+		t.Fatalf("Accept = %v, want %v", nc.Accept, want)
+	}
+	for i := range want {
+		if nc.Accept[i] != want[i] {
+			t.Fatalf("Accept = %v, want %v", nc.Accept, want)
+		}
+	}
+	if !nc.Accepts(model.MediaTypeMultipart) || !nc.Accepts(model.MediaTypeJSON) {
+		t.Errorf("Accepts = %v, want both media types accepted", nc.Accept)
+	}
+
+	bad := map[string]string{
+		"unknown type": `{"type":"input","channel":"http","accept":["text/plain"],"storage":{"bucket":"uploads"}}`,
+		"blank entry":  `{"type":"input","channel":"http","accept":[""],"storage":{"bucket":"uploads"}}`,
+		"not a list":   `{"type":"input","channel":"http","accept":"multipart/form-data","storage":{"bucket":"uploads"}}`,
+	}
+	for name, raw := range bad {
+		if _, err := model.ParseNodeContent([]byte(raw), testLimits); err == nil {
+			t.Errorf("%s: error = nil, want rejection", name)
+		}
+	}
+}
+
+// Multipart needs an http channel and a bucket; storage without multipart
+// in accept is rejected, so a JSON-only node never carries an upload target.
+func TestParseInputNodeMultipartRequiresChannelAndBucket(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"no storage", `{"type":"input","channel":"http","accept":["multipart/form-data"]}`, "storage.bucket"},
+		{"redis channel", `{"type":"input","channel":"redis","accept":["multipart/form-data"],"storage":{"bucket":"uploads"}}`, "channel"},
+		{"rabbitmq channel", `{"type":"input","channel":"rabbitmq","accept":["multipart/form-data"],"storage":{"bucket":"uploads"}}`, "channel"},
+		{"storage without multipart", `{"type":"input","channel":"http","storage":{"bucket":"uploads"}}`, "multipart/form-data in accept"},
+		{"storage with json-only accept", `{"type":"input","channel":"http","accept":["application/json"],"storage":{"bucket":"uploads"}}`, "multipart/form-data in accept"},
+		{"blank bucket", `{"type":"input","channel":"http","accept":["multipart/form-data"],"storage":{"bucket":"  "}}`, "storage.bucket"},
+		{"bucket with slash", `{"type":"input","channel":"http","accept":["multipart/form-data"],"storage":{"bucket":"a/b"}}`, "storage.bucket"},
+		{"bucket with space", `{"type":"input","channel":"http","accept":["multipart/form-data"],"storage":{"bucket":"my bucket"}}`, "storage.bucket"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := model.ParseNodeContent([]byte(tc.raw), testLimits)
+			if err == nil {
+				t.Fatalf("error = nil, want %q rejection", tc.want)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error = %q, want substring %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// The prefix normalizes to no leading slash plus a trailing slash, and a
+// ".." segment is rejected even though object keys are flat.
+func TestParseInputNodeStoragePrefix(t *testing.T) {
+	cases := map[string]string{
+		`{"type":"input","channel":"http","accept":["multipart/form-data"],"storage":{"bucket":"u","prefix":"submissions"}}`:  "submissions/",
+		`{"type":"input","channel":"http","accept":["multipart/form-data"],"storage":{"bucket":"u","prefix":"/submissions"}}`: "submissions/",
+		`{"type":"input","channel":"http","accept":["multipart/form-data"],"storage":{"bucket":"u","prefix":"submissions/"}}`: "submissions/",
+		`{"type":"input","channel":"http","accept":["multipart/form-data"],"storage":{"bucket":"u"}}`:                         "",
+		`{"type":"input","channel":"http","accept":["multipart/form-data"],"storage":{"bucket":"u","prefix":""}}`:             "",
+	}
+	for raw, want := range cases {
+		nc := mustParseContent(t, raw)
+		if nc.Storage.Prefix != want {
+			t.Errorf("prefix = %q, want %q (%s)", nc.Storage.Prefix, want, raw)
+		}
+	}
+	for _, raw := range []string{
+		`{"type":"input","channel":"http","accept":["multipart/form-data"],"storage":{"bucket":"u","prefix":"a/../b"}}`,
+		`{"type":"input","channel":"http","accept":["multipart/form-data"],"storage":{"bucket":"u","prefix":".."}}`,
+		`{"type":"input","channel":"http","accept":["multipart/form-data"],"storage":{"bucket":"u","prefix":"/../b"}}`,
+	} {
+		if _, err := model.ParseNodeContent([]byte(raw), testLimits); err == nil {
+			t.Errorf("error = nil, want .. rejection (%s)", raw)
+		}
+	}
+}
+
+// MIME entries read as type/subtype or type/*, lowercased; max_file_bytes
+// must be positive when present and stays zero when absent.
+func TestParseInputNodeStorageConstraints(t *testing.T) {
+	nc := mustParseContent(t, `{"type":"input","channel":"http","accept":["multipart/form-data"],`+
+		`"storage":{"bucket":"uploads","allowed_mime_types":["Image/*","image/png"],"max_file_bytes":5242880}}`)
+	if len(nc.Storage.AllowedMIMETypes) != 2 ||
+		nc.Storage.AllowedMIMETypes[0] != "image/*" || nc.Storage.AllowedMIMETypes[1] != "image/png" {
+		t.Errorf("AllowedMIMETypes = %v, want [image/* image/png]", nc.Storage.AllowedMIMETypes)
+	}
+	if nc.Storage.MaxFileBytes != 5242880 {
+		t.Errorf("MaxFileBytes = %d, want 5242880", nc.Storage.MaxFileBytes)
+	}
+
+	plain := mustParseContent(t, `{"type":"input","channel":"http","accept":["multipart/form-data"],`+
+		`"storage":{"bucket":"uploads"}}`)
+	if len(plain.Storage.AllowedMIMETypes) != 0 {
+		t.Errorf("AllowedMIMETypes = %v, want empty (unconstrained)", plain.Storage.AllowedMIMETypes)
+	}
+	if plain.Storage.MaxFileBytes != 0 {
+		t.Errorf("MaxFileBytes = %d, want 0 (engine cap applies)", plain.Storage.MaxFileBytes)
+	}
+
+	cases := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"no slash", `{"type":"input","channel":"http","accept":["multipart/form-data"],"storage":{"bucket":"u","allowed_mime_types":["image"]}}`, "allowed_mime_types"},
+		{"empty subtype", `{"type":"input","channel":"http","accept":["multipart/form-data"],"storage":{"bucket":"u","allowed_mime_types":["image/"]}}`, "allowed_mime_types"},
+		{"empty type", `{"type":"input","channel":"http","accept":["multipart/form-data"],"storage":{"bucket":"u","allowed_mime_types":["/png"]}}`, "allowed_mime_types"},
+		{"double wildcard", `{"type":"input","channel":"http","accept":["multipart/form-data"],"storage":{"bucket":"u","allowed_mime_types":["*/*"]}}`, "allowed_mime_types"},
+		{"mid wildcard", `{"type":"input","channel":"http","accept":["multipart/form-data"],"storage":{"bucket":"u","allowed_mime_types":["ima*e/png"]}}`, "allowed_mime_types"},
+		{"zero max bytes", `{"type":"input","channel":"http","accept":["multipart/form-data"],"storage":{"bucket":"u","max_file_bytes":0}}`, "max_file_bytes"},
+		{"negative max bytes", `{"type":"input","channel":"http","accept":["multipart/form-data"],"storage":{"bucket":"u","max_file_bytes":-1}}`, "max_file_bytes"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := model.ParseNodeContent([]byte(tc.raw), testLimits)
+			if err == nil {
+				t.Fatalf("error = nil, want %q rejection", tc.want)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error = %q, want substring %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// accept/storage are the input node's delivery contract: no other builtin
+// type, no custom node, and no node_definition_id occurrence may carry them.
+// Referenced nodes inherit both from their definition via materialization.
+func TestParseAcceptStorageRejectsNonInputTypes(t *testing.T) {
+	cases := map[string]string{
+		"script accept":  `{"type":"script","script":"return 1;","accept":["application/json"]}`,
+		"script storage": `{"type":"script","script":"return 1;","storage":{"bucket":"u"}}`,
+		"output accept":  `{"type":"output","channel":"redis","context_path":"a","accept":["application/json"]}`,
+	}
+	for name, raw := range cases {
+		_, err := model.ParseNodeContent([]byte(raw), testLimits)
+		if err == nil {
+			t.Errorf("%s: error = nil, want rejection", name)
+			continue
+		}
+		if !strings.Contains(err.Error(), "accept") && !strings.Contains(err.Error(), "storage") {
+			t.Errorf("%s: error = %q, want it to name accept or storage", name, err)
+		}
+	}
+}
+
+func TestParseAcceptStorageRejectsNodeDefinitionRefs(t *testing.T) {
+	for name, raw := range map[string]string{
+		"accept":  `{"node_definition_id":"11111111-1111-7111-8111-111111111111","accept":["multipart/form-data"]}`,
+		"storage": `{"node_definition_id":"11111111-1111-7111-8111-111111111111","storage":{"bucket":"u"}}`,
+	} {
+		_, err := model.ParseNodeContent([]byte(raw), testLimits)
+		if err == nil {
+			t.Errorf("%s: error = nil, want inline-executable-fields rejection", name)
+			continue
+		}
+		if !strings.Contains(err.Error(), "inline executable fields") {
+			t.Errorf("%s: error = %q, want inline-executable-fields rejection", name, err)
+		}
+	}
+}

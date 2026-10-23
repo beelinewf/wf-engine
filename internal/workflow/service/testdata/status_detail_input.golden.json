@@ -52,7 +52,10 @@
     "Form": null,
     "AllowedRoles": null,
     "RecordActor": false,
-    "Public": false
+    "Public": false,
+    "Accept": [
+      "application/json"
+    ]
   },
   "Parallel": [
     {

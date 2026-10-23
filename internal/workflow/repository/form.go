@@ -15,12 +15,13 @@ import (
 // FormRepository persists the forms library and the definition references
 // that guard form deletion.
 type FormRepository interface {
-	Create(ctx context.Context, name string, schema, ui []byte) (Form, error)
+	Create(ctx context.Context, name, contentType string, schema, ui []byte) (Form, error)
 	GetByID(ctx context.Context, id string) (Form, error)
 	List(ctx context.Context, page, perPage int) ([]Form, int64, error)
-	// Update fully overwrites name/schema/ui; a nil ui clears it. Update
-	// has no reference guard: a referenced form stays updatable.
-	Update(ctx context.Context, id, name string, schema, ui []byte) (Form, error)
+	// Update fully overwrites name/content_type/schema/ui; a nil ui
+	// clears it. Update has no reference guard: a referenced form stays
+	// updatable.
+	Update(ctx context.Context, id, name, contentType string, schema, ui []byte) (Form, error)
 	// Delete removes an unreferenced form. A form named by any workflow
 	// or node definition reference yields model.ErrConflict.
 	Delete(ctx context.Context, id string) error
@@ -75,12 +76,13 @@ type FormUsageInstance struct {
 
 // Form is one forms-library entry.
 type Form struct {
-	ID        string
-	Name      string
-	Schema    json.RawMessage
-	UI        json.RawMessage
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID          string
+	Name        string
+	ContentType string
+	Schema      json.RawMessage
+	UI          json.RawMessage
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 type gormFormRepository struct {
@@ -92,15 +94,16 @@ func NewFormRepository(db *gorm.DB) FormRepository {
 	return &gormFormRepository{db: db}
 }
 
-func (r *gormFormRepository) Create(ctx context.Context, name string, schema, ui []byte) (Form, error) {
+func (r *gormFormRepository) Create(ctx context.Context, name, contentType string, schema, ui []byte) (Form, error) {
 	now := time.Now().UTC()
 	row := FormModel{
-		ID:        newRepoID(),
-		Name:      name,
-		Schema:    datatypes.JSON(schema),
-		UI:        nullableJSON(ui),
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:          newRepoID(),
+		Name:        name,
+		ContentType: contentType,
+		Schema:      datatypes.JSON(schema),
+		UI:          nullableJSON(ui),
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
 	if err := r.db.WithContext(ctx).Create(&row).Error; err != nil {
 		return Form{}, fmt.Errorf("form create: %w", err)
@@ -146,12 +149,13 @@ func (r *gormFormRepository) List(ctx context.Context, page, perPage int) ([]For
 	return items, total, nil
 }
 
-func (r *gormFormRepository) Update(ctx context.Context, id, name string, schema, ui []byte) (Form, error) {
+func (r *gormFormRepository) Update(ctx context.Context, id, name, contentType string, schema, ui []byte) (Form, error) {
 	res := r.db.WithContext(ctx).Model(&FormModel{}).Where("id = ?", id).Updates(map[string]any{
-		"name":       name,
-		"schema":     datatypes.JSON(schema),
-		"ui":         nullableJSON(ui),
-		"updated_at": time.Now().UTC(),
+		"name":         name,
+		"content_type": contentType,
+		"schema":       datatypes.JSON(schema),
+		"ui":           nullableJSON(ui),
+		"updated_at":   time.Now().UTC(),
 	})
 	if res.Error != nil {
 		return Form{}, fmt.Errorf("form update: %w", res.Error)
@@ -383,11 +387,12 @@ func nullableJSON(raw []byte) datatypes.JSON {
 
 func formFromModel(row FormModel) Form {
 	return Form{
-		ID:        row.ID,
-		Name:      row.Name,
-		Schema:    json.RawMessage(row.Schema),
-		UI:        json.RawMessage(row.UI),
-		CreatedAt: row.CreatedAt,
-		UpdatedAt: row.UpdatedAt,
+		ID:          row.ID,
+		Name:        row.Name,
+		ContentType: row.ContentType,
+		Schema:      json.RawMessage(row.Schema),
+		UI:          json.RawMessage(row.UI),
+		CreatedAt:   row.CreatedAt,
+		UpdatedAt:   row.UpdatedAt,
 	}
 }

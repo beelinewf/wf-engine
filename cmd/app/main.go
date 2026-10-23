@@ -39,6 +39,8 @@ import (
 	"github.com/beelinewf/wf-engine/internal/workflow/handler"
 	"github.com/beelinewf/wf-engine/internal/workflow/inputtransport"
 	"github.com/beelinewf/wf-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/multipart"
+	"github.com/beelinewf/wf-engine/internal/workflow/objectstore"
 	"github.com/beelinewf/wf-engine/internal/workflow/repository"
 	"github.com/beelinewf/wf-engine/internal/workflow/scheduler"
 	"github.com/beelinewf/wf-engine/internal/workflow/service"
@@ -345,6 +347,25 @@ func run(ctx context.Context, cfg *configuration.Config, logger *logrus.Logger) 
 		logger.Info("rabbitmq connected")
 	}
 
+	// Optional object storage for multipart input uploads. The client is
+	// built once here; a nil store means storage is disabled and multipart
+	// deliveries fail at delivery time.
+	var objStore objectstore.Store
+	if cfg.Infra.Storage.Enabled() {
+		st, err := objectstore.NewMinioStore(
+			cfg.Infra.Storage.Endpoint,
+			cfg.Infra.Storage.Region,
+			cfg.Infra.Storage.AccessKey,
+			cfg.Infra.Storage.SecretKey,
+			cfg.Infra.Storage.UseSSL,
+		)
+		if err != nil {
+			return fmt.Errorf("storage: %w", err)
+		}
+		objStore = st
+		logger.Info("object storage configured")
+	}
+
 	hookRunner := executor.NewHookRunner(nil)
 	executors := executor.NewExecutors(execLimits, nil, executor.Dependencies{
 		Output:       executor.NewBrokerOutputPublisher(redisPub, rabbitPub, cfg.Infra.RabbitMQ.OutputQueue),
@@ -359,7 +380,7 @@ func run(ctx context.Context, cfg *configuration.Config, logger *logrus.Logger) 
 		return wfSvc.Resolve(ctx, inst.WorkflowDefinitionID)
 	}
 	eng := engine.NewEngine(instances, repository.NewParallelRepository(db), executors, hookRunner, limits, loader, actor, leanOpts)
-	instSvc := service.NewInstanceServiceWithCatalog(
+	instSvc := service.NewInstanceServiceWithMultipart(
 		instances,
 		repository.NewParallelRepository(db),
 		wfDefs,
@@ -373,6 +394,15 @@ func run(ctx context.Context, cfg *configuration.Config, logger *logrus.Logger) 
 		eng,
 		leanOpts,
 		catalog,
+		service.MultipartDeps{
+			Store: objStore,
+			Limits: multipart.Limits{
+				MaxFiles:      cfg.Engine.Multipart.MaxFiles,
+				MaxTotalBytes: cfg.Engine.Multipart.MaxTotalBytes,
+				MaxFileBytes:  cfg.Engine.Multipart.MaxFileBytes,
+				MaxTextBytes:  cfg.Engine.Multipart.MaxTextBytes,
+			},
+		},
 	)
 	statsSvc := service.NewStatisticsService(instances)
 	hostname, _ := os.Hostname()

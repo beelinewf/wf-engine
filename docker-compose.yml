@@ -18,7 +18,7 @@
 
 services:
   db:
-    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    image: postgres:18-alpine@sha256:898c60cb390d1085bc97bdd6a1ae968757421df394b071848b52b1c09c89d6a5
     environment:
       POSTGRES_USER: gorm
       POSTGRES_PASSWORD: gorm
@@ -31,7 +31,11 @@ services:
       timeout: 2s
       retries: 30
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      # Postgres 18+ stores data in a major-version-specific subdirectory
+      # and requires the mount at the parent path. Upgrading from the old
+      # postgres:16 stack needs a fresh volume (docker compose down -v);
+      # pg_upgrade across the major version is out of scope for local dev.
+      - pgdata:/var/lib/postgresql
 
   redis:
     image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
@@ -203,7 +207,7 @@ services:
       BEELINEWF_WORKER_POOL_SIZE: "50"
       # BEELINEWF_* is snapshotted per instance under {{ env.* }}, except the
       # denied credentials: BEELINEWF_API_TOKEN, BEELINEWF_AUTH_*, BEELINEWF_SYSTEM_*,
-      # and any BEELINEWF_*_DSN (the DSNs set just above). A denied name resolves
+      # BEELINEWF_INFRA_*, and any BEELINEWF_*_DSN (the DSNs set just above). A denied name resolves
       # as "path not found". Extend or narrow with the patterns below, e.g.
       # BEELINEWF_ENGINE_ENV_DENY_EXTRA: "BEELINEWF_OPENROUTER_KEY".
       BEELINEWF_ENGINE_DEFAULT_NODE_TIMEOUT: 30s
@@ -228,6 +232,14 @@ services:
       BEELINEWF_S3_ENDPOINT: rustfs:9000
       BEELINEWF_S3_ACCESS_KEY: rustfsadmin
       BEELINEWF_S3_SECRET_KEY: rustfsadmin
+      # S3 connection for multipart input uploads (infra.storage). Input
+      # nodes name only bucket/prefix/constraints; the endpoint and
+      # credentials live here. Shares the local RustFS with s3fetch above.
+      BEELINEWF_INFRA_STORAGE_ENDPOINT: rustfs:9000
+      BEELINEWF_INFRA_STORAGE_REGION: us-east-1
+      BEELINEWF_INFRA_STORAGE_USE_SSL: "false"
+      BEELINEWF_INFRA_STORAGE_ACCESS_KEY: rustfsadmin
+      BEELINEWF_INFRA_STORAGE_SECRET_KEY: rustfsadmin
     ports:
       - "8080:8080"
     depends_on:

@@ -111,21 +111,24 @@ type SecretResponse struct {
 // -- forms --------------------------------------------------------------------
 
 // SaveFormRequest is the POST /v1/forms and PUT /v1/forms/{id} body. PUT
-// fully overwrites the entry: an omitted ui clears it.
+// fully overwrites the entry: an omitted ui clears it. An omitted
+// content_type defaults to application/json.
 type SaveFormRequest struct {
-	Name   string          `json:"name"`
-	Schema json.RawMessage `json:"schema" swaggertype:"object"`
-	UI     json.RawMessage `json:"ui,omitempty" swaggertype:"object"`
+	Name        string          `json:"name"`
+	ContentType string          `json:"content_type,omitempty"`
+	Schema      json.RawMessage `json:"schema" swaggertype:"object"`
+	UI          json.RawMessage `json:"ui,omitempty" swaggertype:"object"`
 }
 
 // FormResponse is one forms-library entry.
 type FormResponse struct {
-	ID        string          `json:"id"`
-	Name      string          `json:"name"`
-	Schema    json.RawMessage `json:"schema" swaggertype:"object"`
-	UI        json.RawMessage `json:"ui,omitempty" swaggertype:"object"`
-	CreatedAt time.Time       `json:"created_at"`
-	UpdatedAt time.Time       `json:"updated_at"`
+	ID          string          `json:"id"`
+	Name        string          `json:"name"`
+	ContentType string          `json:"content_type"`
+	Schema      json.RawMessage `json:"schema" swaggertype:"object"`
+	UI          json.RawMessage `json:"ui,omitempty" swaggertype:"object"`
+	CreatedAt   time.Time       `json:"created_at"`
+	UpdatedAt   time.Time       `json:"updated_at"`
 }
 
 // FormUsageResponse is the GET /v1/forms/{id}/usage body: every
@@ -350,6 +353,9 @@ type PendingInputResponse struct {
 	// with no credential, even when auth is on. Status and form reads stay
 	// authenticated, so an anonymous caller learns the shape out-of-band.
 	Public bool `json:"public"`
+	// Accept lists the request media types the node delivers. A frontend
+	// reads it to decide between a JSON body and a multipart upload.
+	Accept []string `json:"accept"`
 }
 
 // NodeOccurrenceResponse maps a workflow graph node id to its executed

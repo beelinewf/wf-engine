@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Create the sample form, then sample node definitions, then the sample
-# workflows with the returned IDs: "main" (private input node) and
-# "main-public" (same graph, public input node).
+# Create the sample forms, then sample node definitions, then the sample
+# workflows with the returned IDs: "main" (private input node),
+# "main-public" (same graph, public input node), and "main-upload"
+# (same graph, multipart file-upload input node backed by infra.storage).
 #
 # Usage: scripts/seed.sh [BASE_URL]
 
@@ -28,8 +29,10 @@ api_curl() {
   fi
 }
 
-# Both input definitions below render the same post form, so one library
-# entry serves them: the definition create calls reference its returned id.
+# The private and public post inputs render the same post form, while the
+# file-upload input renders its own upload form matching its files+fields
+# validation contract and PDF storage constraints. The definition create
+# calls below reference the returned ids.
 form_payload=$(cat <<'JSON'
 {
   "name": "post-form",
@@ -62,6 +65,50 @@ form_id=$(jq -er '.id' <<<"$form_response") \
   || fail "parse post form id"
 
 echo "seed: created form post-form ($form_id)" >&2
+
+upload_form_payload=$(cat <<'JSON'
+{
+  "name": "upload-form",
+  "content_type": "multipart/form-data",
+  "schema": {
+    "type": "object",
+    "required": ["files", "fields"],
+    "properties": {
+      "files": {
+        "type": "array",
+        "minItems": 1,
+        "items": {"type": "string", "format": "binary"},
+        "allowed_mime_types": ["application/pdf"],
+        "max_file_bytes": 1048576
+      },
+      "fields": {
+        "type": "array",
+        "minItems": 1,
+        "items": {"type": "string", "minLength": 1}
+      }
+    }
+  },
+  "ui": {
+    "order": ["files", "fields"],
+    "fields": {
+      "files": {"label": "Files", "widget": "file", "accept": "application/pdf"},
+      "fields": {"label": "Fields", "placeholder": "Field value"}
+    }
+  }
+}
+JSON
+)
+
+upload_form_response=$(api_curl -fsS -X POST \
+  -H 'Content-Type: application/json' \
+  --data-binary "$upload_form_payload" \
+  "$BASE_URL/v1/forms") \
+  || fail "create upload form"
+
+upload_form_id=$(jq -er '.id' <<<"$upload_form_response") \
+  || fail "parse upload form id"
+
+echo "seed: created form upload-form ($upload_form_id)" >&2
 
 node_definitions=$(cat <<'JSON'
 {
@@ -125,6 +172,25 @@ node_definitions=$(cat <<'JSON'
         "script": "return input != null && Object.prototype.toString.call(input) === '[object Object]';"
       },
       "public": true
+    }
+  },
+  "input_upload": {
+    "name": "upload-post",
+    "type": "input",
+    "content": {
+      "type": "input",
+      "channel": "http",
+      "output_property": "upload_post",
+      "accept": ["application/json", "multipart/form-data"],
+      "storage": {
+        "bucket": "uploads",
+        "prefix": "posts/",
+        "allowed_mime_types": ["application/pdf"],
+        "max_file_bytes": 1048576
+      },
+      "validation": {
+        "script": "input = JSON.parse(input); if (!Array.isArray(input.files) || input.files.length < 1) { return 'files must contain at least 1 item'; } if (!Array.isArray(input.fields) || input.fields.length < 1) { return 'fields must contain at least 1 item'; }"
+      }
     }
   },
   "external_call": {
@@ -241,10 +307,62 @@ workflow_public_template=$(cat <<'JSON'
 JSON
 )
 
-# Point both input definitions at the shared form created above.
-node_definitions=$(jq -c --arg form_id "$form_id" '
+# The same graph as main, except the "many" branch parks on the
+# multipart file-upload input node: deliveries may be JSON or
+# multipart/form-data, and file parts stream into the "uploads" bucket
+# via infra.storage. Node ids are distinct from main and main-public so
+# all three definitions coexist.
+workflow_upload_template=$(cat <<'JSON'
+{
+  "content": {
+    "start_node_id": "01a1fcdb-cbfd-7f95-b6a5-e836c523cd58",
+    "status_update": {
+      "redis": {}
+    },
+    "keys": {
+      "many": "01a1fcdb-cbfd-756b-820b-b0b6e5d6c853",
+      "less": null
+    },
+    "nodes": [
+      {
+        "id": "01a1fcdb-cbfd-7f95-b6a5-e836c523cd58",
+        "name": "get-posts",
+        "output_property": "posts",
+        "retry_on_recovery": true,
+        "next_node": "01a1fcdb-cbfd-79b1-ad03-108fc6663e1d"
+      },
+      {
+        "id": "01a1fcdb-cbfd-79b1-ad03-108fc6663e1d",
+        "name": "route-by-total"
+      },
+      {
+        "id": "01a1fcdb-cbfd-756b-820b-b0b6e5d6c853",
+        "name": "upload-post",
+        "next_node": "01a1fcdb-cbfd-7060-9acc-b5617f757925"
+      },
+      {
+        "id": "01a1fcdb-cbfd-7060-9acc-b5617f757925",
+        "name": "calculate-total",
+        "output_property": "total",
+        "next_node": "01a1fcdb-cbfd-7d5d-a8f1-c32d66004f8f"
+      },
+      {
+        "id": "01a1fcdb-cbfd-7d5d-a8f1-c32d66004f8f",
+        "name": "add-lucky-number"
+      }
+    ]
+  },
+  "name": "main-upload"
+}
+JSON
+)
+
+# Point the post inputs at the post form and the upload input at the
+# upload form created above.
+node_definitions=$(jq -c --arg form_id "$form_id" --arg upload_form_id "$upload_form_id" '
   .input.content.form_id = $form_id
   | .input_public.content.form_id = $form_id
+  | .input_upload.content.form_id = $upload_form_id
 ' <<<"$node_definitions") || fail "attach form_id to input definitions"
 
 node_definition_ids='{}'
@@ -276,7 +394,7 @@ done < <(jq -er 'keys[]' <<<"$node_definitions")
 
 # create_workflow resolves node definitions, posts the definition, and prints
 # the created id on stdout. Every node definition is created above, so the
-# same id map serves both workflow templates.
+# same id map serves all workflow templates.
 create_workflow() {
   local template=$1
   local label=$2
@@ -309,15 +427,21 @@ main_workflow_definition_id=$(create_workflow "$workflow_template" main) \
   || fail "create main workflow definition"
 public_workflow_definition_id=$(create_workflow "$workflow_public_template" main-public) \
   || fail "create public-input workflow definition"
+upload_workflow_definition_id=$(create_workflow "$workflow_upload_template" main-upload) \
+  || fail "create upload-input workflow definition"
 
 jq -n \
   --arg form_id "$form_id" \
+  --arg upload_form_id "$upload_form_id" \
   --arg workflow_definition_id "$main_workflow_definition_id" \
   --arg public_workflow_definition_id "$public_workflow_definition_id" \
+  --arg upload_workflow_definition_id "$upload_workflow_definition_id" \
   --argjson node_definition_ids "$node_definition_ids" \
   '{
     form_id: $form_id,
+    upload_form_id: $upload_form_id,
     node_definition_ids: $node_definition_ids,
     workflow_definition_id: $workflow_definition_id,
-    public_workflow_definition_id: $public_workflow_definition_id
+    public_workflow_definition_id: $public_workflow_definition_id,
+    upload_workflow_definition_id: $upload_workflow_definition_id
   }'

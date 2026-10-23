@@ -879,14 +879,29 @@ paths:
       security: []
       summary: Deliver input to a waiting input node
       description: |
-        Raw JSON body; requires Idempotency-Key header. Accepted payload is
-        written to the waiting input node's output_property (bare key,
-        defaults to node id). The validation script is the only backend
-        gate: a payload violating the node's referenced form but passing the
-        script is accepted, and a script failure returns 422 with the
-        rejection message. Reusing an Idempotency-Key with a different
-        payload returns 409; retries must reuse the same key with the
-        identical payload, and a corrected payload needs a fresh key.
+        Raw JSON body, or multipart/form-data when the waiting input node
+        lists it in accept (see pending_input.accept on the status view);
+        requires Idempotency-Key header. Accepted payload is written to the
+        waiting input node's output_property (bare key, defaults to node
+        id). The validation script is the only backend gate: a payload
+        violating the node's referenced form but passing the script is
+        accepted, and a script failure returns 422 with the rejection
+        message. Reusing an Idempotency-Key with a different payload returns
+        409; retries must reuse the same key with the identical payload, and
+        a corrected payload needs a fresh key. A multipart replay returns
+        the stored delivery without re-uploading and without the
+        payload-equality check.
+
+        A multipart delivery streams file parts into object storage and the
+        context receives only references. Every field lands as an array: a
+        text field becomes an array of strings, a file field an array of
+        {original_file_name, file_name, size, mime_type} objects, both in
+        part order. A trailing [] on a field name is stripped and merges
+        with the bare name. A part with a filename is a file, a part without
+        one a string; mixing both under one field, or any other bracket
+        form, returns 400. Files breaching the node's size or MIME
+        constraints fail with 413 or 422, and every failure deletes the
+        objects the request already uploaded.
 
         This is the only endpoint that serves an anonymous caller, and only
         when the waiting input node sets public: true. A request with no
@@ -920,6 +935,22 @@ paths:
         content:
           application/json:
             schema: {}
+          multipart/form-data:
+            schema:
+              type: object
+              description: |
+                File upload for nodes listing multipart/form-data in accept.
+                A part with a filename is a file and streams into object
+                storage; a part without one is a string. Every field lands in
+                context as an array under the same output_property a JSON
+                body would use.
+              properties:
+                files:
+                  type: array
+                  items: { type: string, format: binary }
+                fields:
+                  type: array
+                  items: { type: string }
       responses:
         "403": { $ref: "#/components/responses/Forbidden" }
         "202":
@@ -931,6 +962,8 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
         "422": { $ref: "#/components/responses/Unprocessable" }
   /v1/workflow/instance/{id}/pause:
     post:
@@ -1397,6 +1430,16 @@ components:
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
+    PayloadTooLarge:
+      description: Multipart delivery breaching a size limit; nothing is uploaded
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    UnsupportedMediaType:
+      description: Delivery media type the waiting input node does not accept
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
   schemas:
     Problem:
       type: object
@@ -1815,10 +1858,17 @@ components:
           description: Advisory rollback target hint; the rollback endpoint stays the source of truth
     PendingInput:
       type: object
-      required: [node_id, channel, output_property, allowed_roles, record_actor, public]
+      required: [node_id, channel, output_property, allowed_roles, record_actor, public, accept]
       properties:
         node_id: { type: string, format: uuid }
         channel: { type: string }
+        accept:
+          type: array
+          items: { type: string }
+          description: |
+            Request media types the node delivers. application/json is always
+            a JSON body; multipart/form-data additionally admits a file
+            upload. Nodes that predate the field report application/json only.
         output_property:
           type: string
           description: Bare top-level key the accepted payload is written to; empty when the node sets none, in which case the node id is used
@@ -1908,22 +1958,41 @@ components:
       required: [name, schema]
       properties:
         name: { type: string }
+        content_type:
+          type: string
+          enum: [application/json, multipart/form-data]
+          description: Submission encoding the frontend must send; omitted means application/json
         schema:
           type: object
-          description: Non-empty JSON Schema (draft 2020-12) the frontend renders
+          description: |
+            Non-empty JSON Schema (draft 2020-12) the frontend renders.
+            A file-upload field is an array whose items are
+            {type: string, format: binary}; it may carry
+            allowed_mime_types (list of type/subtype or type/*) and
+            max_file_bytes (positive integer) on the field itself, which
+            the frontend validates File.type and File.size against. A
+            text field is a string, or an array of strings when
+            repeatable.
         ui:
           type: object
           nullable: true
           description: Opaque frontend render hints (label, order, widget)
     Form:
       type: object
-      required: [id, name, schema, created_at, updated_at]
+      required: [id, name, content_type, schema, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
+        content_type:
+          type: string
+          enum: [application/json, multipart/form-data]
+          description: Submission encoding the frontend must send
         schema:
           type: object
-          description: JSON Schema (draft 2020-12) render contract
+          description: |
+            JSON Schema (draft 2020-12) render contract. File-upload
+            fields declare allowed_mime_types and max_file_bytes on
+            the field for frontend validation; see SaveFormRequest.
         ui:
           type: object
           nullable: true

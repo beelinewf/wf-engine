@@ -58,6 +58,21 @@ infra:
     input_queue: "beelinewf.input"
     output_queue: "beelinewf.output"
     status_queue: "beelinewf.status"
+  # Optional S3-compatible object storage backing multipart input uploads.
+  # Input nodes name only a bucket, an optional prefix, and optional file
+  # constraints; the connection lives here so definitions never carry
+  # endpoints or credentials. Leave endpoint and both keys empty to disable
+  # (definitions still parse; a multipart delivery then fails at delivery
+  # time). A partial configuration fails startup.
+  # Operator overrides: BEELINEWF_INFRA_STORAGE_ENDPOINT,
+  # BEELINEWF_INFRA_STORAGE_REGION, BEELINEWF_INFRA_STORAGE_USE_SSL,
+  # BEELINEWF_INFRA_STORAGE_ACCESS_KEY, BEELINEWF_INFRA_STORAGE_SECRET_KEY.
+  storage:
+    endpoint: ""
+    region: "us-east-1"
+    use_ssl: true
+    access_key: ""
+    secret_key: ""
 
 # github.com/panjf2000/ants/v2 worker pools: pool drives engine node
 # transitions, status_pool drives status-update delivery. ants internals
@@ -130,6 +145,19 @@ engine:
     initial_backoff: 1s
     max_backoff: 30s
     min_healthy_run: 30s
+  # Streaming multipart input upload limits. Every breach fails the delivery
+  # and deletes the objects the request already uploaded. max_file_bytes is
+  # the per-file cap only when the input node sets no max_file_bytes of its
+  # own; the node value wins when present.
+  # Operator overrides: BEELINEWF_ENGINE_MULTIPART_MAX_FILES,
+  # BEELINEWF_ENGINE_MULTIPART_MAX_TOTAL_BYTES,
+  # BEELINEWF_ENGINE_MULTIPART_MAX_FILE_BYTES,
+  # BEELINEWF_ENGINE_MULTIPART_MAX_TEXT_BYTES.
+  multipart:
+    max_files: 20
+    max_total_bytes: 134217728
+    max_file_bytes: 33554432
+    max_text_bytes: 1048576
   http_allowlist:
     - "127.0.0.1:8080"
     - "api.example.com"
@@ -146,9 +174,9 @@ engine:
   # Env snapshot deny list. At instance creation, BEELINEWF_* process env is
   # snapshotted into the instance context under the reserved env root, and
   # these patterns are the credentials that never enter a workflow template:
-  # BEELINEWF_API_TOKEN, BEELINEWF_AUTH_*, BEELINEWF_SYSTEM_*, and any BEELINEWF_*_DSN
-  # (PostgreSQL, Redis, RabbitMQ). A denied name is dropped from the snapshot
-  # and {{ env.<denied> }} resolves as "path not found".
+  # BEELINEWF_API_TOKEN, BEELINEWF_AUTH_*, BEELINEWF_SYSTEM_*, BEELINEWF_INFRA_*,
+  # and any BEELINEWF_*_DSN (PostgreSQL, Redis, RabbitMQ). A denied name is
+  # dropped from the snapshot and {{ env.<denied> }} resolves as "path not found".
   #
   # Operator overrides: BEELINEWF_ENGINE_ENV_DENY_EXTRA,
   # BEELINEWF_ENGINE_ENV_ALLOW_EXCEPTIONS (comma-separated globs). These only

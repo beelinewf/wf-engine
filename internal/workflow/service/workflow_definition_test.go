@@ -321,11 +321,11 @@ func TestCreateWorkflowDefinitionUnknownFormIDRejected(t *testing.T) {
 func TestCreateWorkflowDefinitionRecordsFormRefs(t *testing.T) {
 	ctx := context.Background()
 	forms := newFakeFormRepo()
-	created, err := forms.Create(ctx, "contact", formTestSchema, formTestUI)
+	created, err := forms.Create(ctx, "contact", model.MediaTypeJSON, formTestSchema, formTestUI)
 	if err != nil {
 		t.Fatal(err)
 	}
-	groupForm, err := forms.Create(ctx, "grouped", formTestSchema, nil)
+	groupForm, err := forms.Create(ctx, "grouped", model.MediaTypeJSON, formTestSchema, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -354,7 +354,7 @@ func TestCreateWorkflowDefinitionRecordsFormRefs(t *testing.T) {
 
 	// Once recorded, the referenced form stays updatable but not deletable.
 	formSvc := service.NewFormService(forms, newFakeResolver())
-	if _, err := formSvc.Update(ctx, created.ID, "renamed", formTestSchema, nil); err != nil {
+	if _, err := formSvc.Update(ctx, created.ID, "renamed", "", formTestSchema, nil); err != nil {
 		t.Errorf("Update() of referenced form error = %v, want nil", err)
 	}
 	if err := formSvc.Delete(ctx, created.ID); !errors.Is(err, model.ErrConflict) {

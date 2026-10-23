@@ -24,6 +24,7 @@ var defaultDenied = []string{
 	"BEELINEWF_API_TOKEN",
 	"BEELINEWF_AUTH_*",
 	"BEELINEWF_SYSTEM_*",
+	"BEELINEWF_INFRA_*",
 	"BEELINEWF_*_DSN",
 }
 
