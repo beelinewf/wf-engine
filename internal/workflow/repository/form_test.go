@@ -23,7 +23,7 @@ func TestFormCreateGetRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	repo := repository.NewFormRepository(db)
 
-	created, err := repo.Create(ctx, "contact", testFormSchema, testFormUI)
+	created, err := repo.Create(ctx, "contact", model.MediaTypeJSON, testFormSchema, testFormUI)
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
@@ -51,7 +51,7 @@ func TestFormCreateGetRoundTrip(t *testing.T) {
 	}
 
 	// A form without ui round-trips with an empty UI.
-	plain, err := repo.Create(ctx, "plain", testFormSchema, nil)
+	plain, err := repo.Create(ctx, "plain", model.MediaTypeJSON, testFormSchema, nil)
 	if err != nil {
 		t.Fatalf("Create() without ui error = %v", err)
 	}
@@ -61,6 +61,50 @@ func TestFormCreateGetRoundTrip(t *testing.T) {
 	}
 	if len(got.UI) != 0 {
 		t.Errorf("GetByID() ui = %s, want empty", got.UI)
+	}
+}
+
+func TestFormContentTypeRoundTrip(t *testing.T) {
+	db := setupTestDB(t)
+	ctx := context.Background()
+	repo := repository.NewFormRepository(db)
+
+	multi, err := repo.Create(ctx, "upload", model.MediaTypeMultipart, testFormSchema, nil)
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if multi.ContentType != model.MediaTypeMultipart {
+		t.Errorf("Create() content_type = %q, want %q", multi.ContentType, model.MediaTypeMultipart)
+	}
+	got, err := repo.GetByID(ctx, multi.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ContentType != model.MediaTypeMultipart {
+		t.Errorf("GetByID() content_type = %q, want %q", got.ContentType, model.MediaTypeMultipart)
+	}
+
+	jsonForm, err := repo.Create(ctx, "plain", model.MediaTypeJSON, testFormSchema, nil)
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if jsonForm.ContentType != model.MediaTypeJSON {
+		t.Errorf("Create() content_type = %q, want %q", jsonForm.ContentType, model.MediaTypeJSON)
+	}
+
+	updated, err := repo.Update(ctx, jsonForm.ID, "plain", model.MediaTypeMultipart, testFormSchema, nil)
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if updated.ContentType != model.MediaTypeMultipart {
+		t.Errorf("Update() content_type = %q, want %q", updated.ContentType, model.MediaTypeMultipart)
+	}
+	got, err = repo.GetByID(ctx, jsonForm.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ContentType != model.MediaTypeMultipart {
+		t.Errorf("GetByID() after update content_type = %q, want %q", got.ContentType, model.MediaTypeMultipart)
 	}
 }
 
@@ -81,7 +125,7 @@ func TestFormListPaginationAndOrder(t *testing.T) {
 
 	var createdIDs []string
 	for _, name := range []string{"first", "second", "third"} {
-		created, err := repo.Create(ctx, name, testFormSchema, nil)
+		created, err := repo.Create(ctx, name, model.MediaTypeJSON, testFormSchema, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -110,12 +154,12 @@ func TestFormUpdateOverwrites(t *testing.T) {
 	ctx := context.Background()
 	repo := repository.NewFormRepository(db)
 
-	created, err := repo.Create(ctx, "contact", testFormSchema, testFormUI)
+	created, err := repo.Create(ctx, "contact", model.MediaTypeJSON, testFormSchema, testFormUI)
 	if err != nil {
 		t.Fatal(err)
 	}
 	newSchema := []byte(`{"type":"object","properties":{"name":{"type":"string"}}}`)
-	updated, err := repo.Update(ctx, created.ID, "renamed", newSchema, nil)
+	updated, err := repo.Update(ctx, created.ID, "renamed", model.MediaTypeJSON, newSchema, nil)
 	if err != nil {
 		t.Fatalf("Update() error = %v", err)
 	}
@@ -142,7 +186,7 @@ func TestFormUpdateUnknownNotFound(t *testing.T) {
 	ctx := context.Background()
 	repo := repository.NewFormRepository(db)
 
-	if _, err := repo.Update(ctx, "11111111-1111-7111-8111-111111111111", "x", testFormSchema, nil); !errors.Is(err, model.ErrNotFound) {
+	if _, err := repo.Update(ctx, "11111111-1111-7111-8111-111111111111", "x", model.MediaTypeJSON, testFormSchema, nil); !errors.Is(err, model.ErrNotFound) {
 		t.Fatalf("Update() error = %v, want ErrNotFound", err)
 	}
 }
@@ -152,7 +196,7 @@ func TestFormUpdateReferencedSucceeds(t *testing.T) {
 	ctx := context.Background()
 	repo := repository.NewFormRepository(db)
 
-	created, err := repo.Create(ctx, "contact", testFormSchema, testFormUI)
+	created, err := repo.Create(ctx, "contact", model.MediaTypeJSON, testFormSchema, testFormUI)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +204,7 @@ func TestFormUpdateReferencedSucceeds(t *testing.T) {
 	if err := repo.SaveWorkflowFormRefs(ctx, wfID, []string{created.ID}); err != nil {
 		t.Fatal(err)
 	}
-	updated, err := repo.Update(ctx, created.ID, "renamed", testFormSchema, nil)
+	updated, err := repo.Update(ctx, created.ID, "renamed", model.MediaTypeJSON, testFormSchema, nil)
 	if err != nil {
 		t.Fatalf("Update() of referenced form error = %v, want nil", err)
 	}
@@ -174,11 +218,11 @@ func TestFormWorkflowRefsRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	repo := repository.NewFormRepository(db)
 
-	formA, err := repo.Create(ctx, "a", testFormSchema, nil)
+	formA, err := repo.Create(ctx, "a", model.MediaTypeJSON, testFormSchema, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	formB, err := repo.Create(ctx, "b", testFormSchema, nil)
+	formB, err := repo.Create(ctx, "b", model.MediaTypeJSON, testFormSchema, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +257,7 @@ func TestFormNodeRefsRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	repo := repository.NewFormRepository(db)
 
-	created, err := repo.Create(ctx, "a", testFormSchema, nil)
+	created, err := repo.Create(ctx, "a", model.MediaTypeJSON, testFormSchema, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,7 +295,7 @@ func TestFormDeleteReferencedConflict(t *testing.T) {
 	ctx := context.Background()
 	repo := repository.NewFormRepository(db)
 
-	wfForm, err := repo.Create(ctx, "wf-form", testFormSchema, nil)
+	wfForm, err := repo.Create(ctx, "wf-form", model.MediaTypeJSON, testFormSchema, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,7 +307,7 @@ func TestFormDeleteReferencedConflict(t *testing.T) {
 		t.Errorf("Delete() of workflow-referenced form error = %v, want ErrConflict", err)
 	}
 
-	nodeForm, err := repo.Create(ctx, "node-form", testFormSchema, nil)
+	nodeForm, err := repo.Create(ctx, "node-form", model.MediaTypeJSON, testFormSchema, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -284,7 +328,7 @@ func TestFormDeleteOK(t *testing.T) {
 	ctx := context.Background()
 	repo := repository.NewFormRepository(db)
 
-	created, err := repo.Create(ctx, "contact", testFormSchema, testFormUI)
+	created, err := repo.Create(ctx, "contact", model.MediaTypeJSON, testFormSchema, testFormUI)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,7 +348,7 @@ func TestFormUsage(t *testing.T) {
 	ctx := context.Background()
 	repo := repository.NewFormRepository(db)
 
-	form, err := repo.Create(ctx, "contact", testFormSchema, nil)
+	form, err := repo.Create(ctx, "contact", model.MediaTypeJSON, testFormSchema, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -394,7 +438,7 @@ func TestFormUsage(t *testing.T) {
 	}
 
 	// An unused form reports empty non-nil sets.
-	unused, err := repo.Create(ctx, "unused", testFormSchema, nil)
+	unused, err := repo.Create(ctx, "unused", model.MediaTypeJSON, testFormSchema, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

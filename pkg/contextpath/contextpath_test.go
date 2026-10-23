@@ -163,9 +163,10 @@ func TestRenderTemplateMissingPath(t *testing.T) {
 
 func TestRenderTemplateDeniedEnvAsMissing(t *testing.T) {
 	ctx := map[string]any{"env": map[string]any{
-		"BEELINEWF_API_TOKEN":    "tok",
-		"BEELINEWF_AUTH_ENABLED": "true",
-		"BEELINEWF_S3_ENDPOINT":  "play.min.io:9000",
+		"BEELINEWF_API_TOKEN":       "tok",
+		"BEELINEWF_AUTH_ENABLED":    "true",
+		"BEELINEWF_INFRA_HTTP_HOST": "0.0.0.0:8080",
+		"BEELINEWF_S3_ENDPOINT":     "play.min.io:9000",
 	}}
 	if _, err := contextpath.RenderTemplate("{{ env.BEELINEWF_API_TOKEN }}", ctx); !errors.Is(err, contextpath.ErrPathNotFound) {
 		t.Fatalf("want ErrPathNotFound, got %v", err)
@@ -175,6 +176,9 @@ func TestRenderTemplateDeniedEnvAsMissing(t *testing.T) {
 	}
 	if _, err := contextpath.Get(ctx, "env.BEELINEWF_SYSTEM_NAME"); !errors.Is(err, contextpath.ErrPathNotFound) {
 		t.Fatalf("Get: want ErrPathNotFound, got %v", err)
+	}
+	if _, err := contextpath.Get(ctx, "env.BEELINEWF_INFRA_HTTP_HOST"); !errors.Is(err, contextpath.ErrPathNotFound) {
+		t.Fatalf("Get infra: want ErrPathNotFound, got %v", err)
 	}
 	if _, err := contextpath.RenderJSON([]byte(`{"a":"{{ env.BEELINEWF_INFRA_POSTGRESQL_DSN }}"}`), ctx); !errors.Is(err, contextpath.ErrPathNotFound) {
 		t.Fatalf("RenderJSON: want ErrPathNotFound, got %v", err)

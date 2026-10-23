@@ -292,7 +292,7 @@ func TestGetStatusDetailGoldenWaitingInput(t *testing.T) {
 	ctx := context.Background()
 	svc := svcInstanceService(db)
 
-	created, err := repository.NewFormRepository(db).Create(ctx, "contact",
+	created, err := repository.NewFormRepository(db).Create(ctx, "contact", model.MediaTypeJSON,
 		[]byte(`{"type":"object","required":["email"],"properties":{"email":{"type":"string"}}}`),
 		[]byte(`{"order":["email"]}`))
 	if err != nil {

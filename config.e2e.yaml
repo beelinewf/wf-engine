@@ -38,6 +38,14 @@ infra:
     input_queue: "beelinewf.input"
     output_queue: "beelinewf.output"
     status_queue: "beelinewf.status"
+  # Optional S3-compatible object storage backing multipart input uploads.
+  # See config.yaml for the full contract.
+  storage:
+    endpoint: ""
+    region: "us-east-1"
+    use_ssl: true
+    access_key: ""
+    secret_key: ""
 
 # github.com/panjf2000/ants/v2 worker pools: pool drives engine node
 # transitions, status_pool drives status-update delivery. ants internals
@@ -110,6 +118,12 @@ engine:
     initial_backoff: 1s
     max_backoff: 30s
     min_healthy_run: 30s
+  # Streaming multipart input upload limits. See config.yaml.
+  multipart:
+    max_files: 20
+    max_total_bytes: 134217728
+    max_file_bytes: 33554432
+    max_text_bytes: 1048576
   http_allowlist:
     - "127.0.0.1:8080"
     - "api.example.com"
@@ -126,9 +140,9 @@ engine:
   # Env snapshot deny list. At instance creation, BEELINEWF_* process env is
   # snapshotted into the instance context under the reserved env root, and
   # these patterns are the credentials that never enter a workflow template:
-  # BEELINEWF_API_TOKEN, BEELINEWF_AUTH_*, BEELINEWF_SYSTEM_*, and any BEELINEWF_*_DSN
-  # (PostgreSQL, Redis, RabbitMQ). A denied name is dropped from the snapshot
-  # and {{ env.<denied> }} resolves as "path not found".
+  # BEELINEWF_API_TOKEN, BEELINEWF_AUTH_*, BEELINEWF_SYSTEM_*, BEELINEWF_INFRA_*,
+  # and any BEELINEWF_*_DSN (PostgreSQL, Redis, RabbitMQ). A denied name is
+  # dropped from the snapshot and {{ env.<denied> }} resolves as "path not found".
   #
   # Operator overrides: BEELINEWF_ENGINE_ENV_DENY_EXTRA,
   # BEELINEWF_ENGINE_ENV_ALLOW_EXCEPTIONS (comma-separated globs). These only

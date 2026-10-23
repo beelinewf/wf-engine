@@ -139,13 +139,14 @@ script.
 
 ### `POST /v1/forms` → `201`
 
-| Body field | Required | Rule                                                                                                        |
-| ---------- | -------- | ----------------------------------------------------------------------------------------------------------- |
-| `name`     | yes      | Non-blank string. Blank → `422`.                                                                              |
-| `schema`   | yes      | Non-empty JSON object compiling as a draft 2020-12 JSON Schema. Missing/non-object/empty/uncompilable → `422`. |
-| `ui`       | no       | JSON object of opaque render hints. Omitted → absent. Present but not an object → `422`.                       |
+| Body field     | Required | Rule                                                                                                                                                                                                               |
+| -------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `name`         | yes      | Non-blank string. Blank → `422`.                                                                                                                                                                                     |
+| `content_type` | no       | `application/json` or `multipart/form-data`. Omitted → `application/json`. Anything else → `422`.                                                                                                                     |
+| `schema`       | yes      | Non-empty JSON object compiling as a draft 2020-12 JSON Schema. Missing/non-object/empty/uncompilable → `422`. A file-upload field is `array` of `{type: string, format: binary}` items and may carry `allowed_mime_types` / `max_file_bytes` on the field itself for frontend validation (malformed values → `422`); a text field is a `string` (or array of strings when repeatable). |
+| `ui`           | no       | JSON object of opaque render hints. Omitted → absent. Present but not an object → `422`.                                                                                                                             |
 
-Malformed JSON → `400`. Response is the created form (`id`, `name`, `schema`, `ui`, `created_at`, `updated_at`).
+Malformed JSON → `400`. Response is the created form (`id`, `name`, `content_type`, `schema`, `ui`, `created_at`, `updated_at`).
 
 ### `GET /v1/forms` → `200`
 
@@ -158,7 +159,7 @@ Malformed UUID → `400`. Unknown → `404`. Returns one form.
 
 ### `PUT /v1/forms/{id}` → `200`
 
-Fully overwrites `name`/`schema`/`ui` with the same rules as create; an omitted `ui` clears it. Malformed
+Fully overwrites `name`/`content_type`/`schema`/`ui` with the same rules as create; an omitted `ui` clears it. Malformed
 UUID → `400`. Malformed JSON → `400`. Unknown → `404`. A form stays updatable while referenced.
 
 ### `DELETE /v1/forms/{id}` → `204`
@@ -227,10 +228,11 @@ Response:
   updated_at}`. A branch parked on an input node shows `status: "waiting"`, `waiting_reason: "input"`: deliver to it
   with `PUT .../input?branch_id=<branch id>`. Full enum lists are in `fields.md`.
 - `pending_input`: present only when parked on an input node (`waiting_reason == "input"`): `{node_id, channel,
-  output_property, form_id, form, allowed_roles, record_actor, public}`. `form_id` is absent when the node references
-  no form. `form` carries the frozen `{schema, ui}` bytes when the instance was created with `"snapshot_forms": true`;
-  the frontend renders it when present, else fetches `GET /v1/forms/{form_id}`. Live instances serve `form_id` only:
-  the bytes never ride on status except on a snapshot run.
+  output_property, form_id, form, allowed_roles, record_actor, public, accept}`. `form_id` is absent when the node
+  references no form. `form` carries the frozen `{schema, ui}` bytes when the instance was created with
+  `"snapshot_forms": true`; the frontend renders it when present, else fetches `GET /v1/forms/{form_id}`. Live
+  instances serve `form_id` only: the bytes never ride on status except on a snapshot run. `accept` lists the media
+  types the node delivers, so the frontend knows whether a multipart upload is welcome.
 
 ### `GET /v1/workflow/instance/{id}/context` → `200`
 
@@ -280,11 +282,16 @@ Delivers a payload to the parked input node. Only works when the instance is `wa
 and the node channel is `http` (this endpoint always delivers as source `http`; `redis`/`rabbitmq` channels are fed by
 brokers, never by FE).
 
-| Item                   | Rule                                                                                                                                                     |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Idempotency-Key` header | Required, non-blank → else `422`. Replays return the originally recorded delivery regardless of current state. Use a fresh key per genuinely new delivery. |
-| Body                   | Required. Any valid JSON (object, array, scalar). Empty body → `422`. Invalid JSON → `422`.                                                                  |
-| `branch_id` query        | Optional branch id (from the status `parallel` tree). Targets a branch-parked input node instead of the parent park; omit for the parent park. Unknown branch → `404`; branch of another instance → `409`. |
+| Item                     | Rule                                                                                                                                                                                                                                                                   |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Idempotency-Key` header | Required, non-blank → else `422`. Replays return the originally recorded delivery regardless of current state. Use a fresh key per genuinely new delivery. A multipart replay returns the stored delivery without re-uploading and without the payload-equality check. |
+| Body                     | Required. Any valid JSON (object, array, scalar), or `multipart/form-data` when the parked node lists it in `accept`. Empty body → `422`. Invalid JSON → `422`. A media type the node does not list → `415`; any other Content-Type → `415`.                           |
+| `branch_id` query        | Optional branch id (from the status `parallel` tree). Targets a branch-parked input node instead of the parent park; omit for the parent park. Unknown branch → `404`; branch of another instance → `409`.                                                             |
+
+A multipart delivery streams file parts into the node's `storage` bucket and writes only references under
+`output_property`: every field lands as an array (text → strings, files → `{original_file_name, file_name, size,
+mime_type}`), in part order. Size breaches → `413`, MIME rejections → `422`, mixed text/file fields and bad bracket
+forms → `400`; every failure deletes the objects the request already uploaded.
 
 Validation-script rejection → `422` with the rejection message in the problem detail (delivery recorded as
 `accepted: false`). Wrong state (terminal, not parked, parked on non-input node, channel mismatch, no live attempt) →

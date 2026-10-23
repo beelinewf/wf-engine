@@ -36,12 +36,16 @@ type fakeFormSvc struct {
 	lastUsagePP   int
 }
 
-func (f *fakeFormSvc) Create(_ context.Context, name string, schema, ui []byte) (repository.Form, error) {
+func (f *fakeFormSvc) Create(_ context.Context, name, contentType string, schema, ui []byte) (repository.Form, error) {
 	if f.createErr != nil {
 		return repository.Form{}, f.createErr
 	}
+	// Mirror the service contract: an omitted content type reads as JSON.
+	if contentType == "" {
+		contentType = model.MediaTypeJSON
+	}
 	f.created = repository.Form{
-		ID: testFormID, Name: name, Schema: schema, UI: ui,
+		ID: testFormID, Name: name, ContentType: contentType, Schema: schema, UI: ui,
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}
 	return f.created, nil
@@ -56,12 +60,15 @@ func (f *fakeFormSvc) List(_ context.Context, _, _ int) ([]repository.Form, int6
 	return f.items, f.total, f.listErr
 }
 
-func (f *fakeFormSvc) Update(_ context.Context, id, name string, schema, ui []byte) (repository.Form, error) {
+func (f *fakeFormSvc) Update(_ context.Context, id, name, contentType string, schema, ui []byte) (repository.Form, error) {
 	if f.updateErr != nil {
 		return repository.Form{}, f.updateErr
 	}
+	if contentType == "" {
+		contentType = model.MediaTypeJSON
+	}
 	f.updated = repository.Form{
-		ID: id, Name: name, Schema: schema, UI: ui,
+		ID: id, Name: name, ContentType: contentType, Schema: schema, UI: ui,
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}
 	return f.updated, nil
@@ -105,6 +112,71 @@ func TestFormCreateEchoesSchemaAndUI(t *testing.T) {
 	}
 	if string(resp.UI) != `{"order":["email"]}` {
 		t.Errorf("ui = %s, want the created object", resp.UI)
+	}
+}
+
+func TestFormCreateContentTypeEcho(t *testing.T) {
+	f := &fakeFormSvc{}
+	w := performJSON(formRouter(f), http.MethodPost, "/v1/forms",
+		`{"name":"upload","content_type":"multipart/form-data","schema":{"type":"object"}}`, nil)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body %s", w.Code, w.Body.String())
+	}
+	var resp FormResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.ContentType != model.MediaTypeMultipart {
+		t.Errorf("response content_type = %q, want multipart", resp.ContentType)
+	}
+	if f.created.ContentType != model.MediaTypeMultipart {
+		t.Errorf("service saw content_type = %q, want multipart", f.created.ContentType)
+	}
+}
+
+func TestFormCreateOmittedContentTypeDefaultsJSON(t *testing.T) {
+	f := &fakeFormSvc{}
+	w := performJSON(formRouter(f), http.MethodPost, "/v1/forms",
+		`{"name":"contact","schema":{"type":"object"}}`, nil)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body %s", w.Code, w.Body.String())
+	}
+	var resp FormResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.ContentType != model.MediaTypeJSON {
+		t.Errorf("response content_type = %q, want %q", resp.ContentType, model.MediaTypeJSON)
+	}
+}
+
+func TestFormCreateBogusContentType(t *testing.T) {
+	f := &fakeFormSvc{createErr: model.ErrInvalid}
+	w := performJSON(formRouter(f), http.MethodPost, "/v1/forms",
+		`{"name":"contact","content_type":"text/plain","schema":{"type":"object"}}`, nil)
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422", w.Code)
+	}
+}
+
+func TestFormUpdateContentTypeFlips(t *testing.T) {
+	f := &fakeFormSvc{}
+	for _, ct := range []string{model.MediaTypeMultipart, model.MediaTypeJSON} {
+		w := performJSON(formRouter(f), http.MethodPut, "/v1/forms/"+testFormID,
+			`{"name":"contact","content_type":"`+ct+`","schema":{"type":"object"}}`, nil)
+		if w.Code != http.StatusOK {
+			t.Fatalf("PUT %s status = %d, want 200; body %s", ct, w.Code, w.Body.String())
+		}
+		var resp FormResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatal(err)
+		}
+		if resp.ContentType != ct {
+			t.Errorf("response content_type = %q, want %q", resp.ContentType, ct)
+		}
+		if f.updated.ContentType != ct {
+			t.Errorf("service saw content_type = %q, want %q", f.updated.ContentType, ct)
+		}
 	}
 }
 

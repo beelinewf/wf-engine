@@ -896,7 +896,7 @@ func TestDeliverInputIgnoresFormSchema(t *testing.T) {
 	ctx := context.Background()
 	svc := svcInstanceService(db)
 
-	strict, err := repository.NewFormRepository(db).Create(ctx, "strict",
+	strict, err := repository.NewFormRepository(db).Create(ctx, "strict", model.MediaTypeJSON,
 		[]byte(`{"type":"object","required":["email"],"properties":{"email":{"type":"string"}}}`), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -944,7 +944,7 @@ func TestDeliverInputScriptRejectsWithFormReferenced(t *testing.T) {
 	ctx := context.Background()
 	svc := svcInstanceService(db)
 
-	form, err := repository.NewFormRepository(db).Create(ctx, "contact",
+	form, err := repository.NewFormRepository(db).Create(ctx, "contact", model.MediaTypeJSON,
 		[]byte(`{"type":"object"}`), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -3046,7 +3046,7 @@ func TestStatusDetailPendingInputWithFormID(t *testing.T) {
 	ctx := context.Background()
 	svc := svcInstanceService(db)
 
-	created, err := repository.NewFormRepository(db).Create(ctx, "contact",
+	created, err := repository.NewFormRepository(db).Create(ctx, "contact", model.MediaTypeJSON,
 		[]byte(`{"type":"object","required":["email"],"properties":{"email":{"type":"string"}}}`),
 		[]byte(`{"order":["email"]}`))
 	if err != nil {
@@ -3878,7 +3878,7 @@ func TestDeliverBranchInputIgnoresFormSchema(t *testing.T) {
 	ctx := context.Background()
 	svc := svcInstanceService(db)
 
-	strict, err := repository.NewFormRepository(db).Create(ctx, "strict",
+	strict, err := repository.NewFormRepository(db).Create(ctx, "strict", model.MediaTypeJSON,
 		[]byte(`{"type":"object","required":["email"],"properties":{"email":{"type":"string"}}}`), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -4930,7 +4930,7 @@ func TestCreateSnapshotFormsFreezesInlineForms(t *testing.T) {
 
 	schema := `{"type":"object","required":["email"],"properties":{"email":{"type":"string"}}}`
 	ui := `{"order":["email"]}`
-	created, err := repository.NewFormRepository(db).Create(ctx, "contact", []byte(schema), []byte(ui))
+	created, err := repository.NewFormRepository(db).Create(ctx, "contact", model.MediaTypeJSON, []byte(schema), []byte(ui))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4959,7 +4959,7 @@ func TestCreateSnapshotFormsIncludesInherited(t *testing.T) {
 	svc := svcInstanceService(db)
 
 	schema := `{"type":"object"}`
-	created, err := repository.NewFormRepository(db).Create(ctx, "ask", []byte(schema), nil)
+	created, err := repository.NewFormRepository(db).Create(ctx, "ask", model.MediaTypeJSON, []byte(schema), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4993,7 +4993,7 @@ func TestCreateSnapshotFormsOffStoresNothing(t *testing.T) {
 	ctx := context.Background()
 	svc := svcInstanceService(db)
 
-	created, err := repository.NewFormRepository(db).Create(ctx, "contact",
+	created, err := repository.NewFormRepository(db).Create(ctx, "contact", model.MediaTypeJSON,
 		[]byte(`{"type":"object"}`), []byte(`{"order":["email"]}`))
 	if err != nil {
 		t.Fatal(err)
@@ -5048,7 +5048,7 @@ func TestStatusSnapshotFormFrozenAfterEdit(t *testing.T) {
 
 	originalSchema := `{"type":"object","required":["email"],"properties":{"email":{"type":"string"}}}`
 	originalUI := `{"order":["email"]}`
-	created, err := repository.NewFormRepository(db).Create(ctx, "contact", []byte(originalSchema), []byte(originalUI))
+	created, err := repository.NewFormRepository(db).Create(ctx, "contact", model.MediaTypeJSON, []byte(originalSchema), []byte(originalUI))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5082,7 +5082,7 @@ func TestStatusSnapshotFormFrozenAfterEdit(t *testing.T) {
 
 	// A post-start library edit must not move the frozen bytes.
 	editedSchema := `{"type":"object","required":["phone"],"properties":{"phone":{"type":"string"}}}`
-	if _, err := repository.NewFormRepository(db).Update(ctx, created.ID, "contact", []byte(editedSchema), []byte(`{"order":["phone"]}`)); err != nil {
+	if _, err := repository.NewFormRepository(db).Update(ctx, created.ID, "contact", model.MediaTypeJSON, []byte(editedSchema), []byte(`{"order":["phone"]}`)); err != nil {
 		t.Fatal(err)
 	}
 	d, err = svc.GetStatusDetail(ctx, inst.ID, auth.Principal{})

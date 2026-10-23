@@ -200,7 +200,7 @@ func TestWorkflowDefinitionDeleteClearsFormRefs(t *testing.T) {
 	if err := repo.Create(ctx, def); err != nil {
 		t.Fatal(err)
 	}
-	created, err := forms.Create(ctx, "contact", []byte(`{"type":"object"}`), nil)
+	created, err := forms.Create(ctx, "contact", model.MediaTypeJSON, []byte(`{"type":"object"}`), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

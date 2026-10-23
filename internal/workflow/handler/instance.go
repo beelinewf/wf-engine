@@ -3,9 +3,13 @@ package handler
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
+	"mime"
+	stdmultipart "mime/multipart"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/beelinewf/wf-engine/internal/workflow/model"
@@ -456,20 +460,22 @@ func (h *InstanceHandler) DebugContext(c *gin.Context) {
 //
 // @Summary Deliver input to workflow instance
 // @Tags workflow-instances
-// @Accept json
+// @Accept json,multipart/form-data
 // @Produce json
 // @Param id path string true "Instance ID"
 // @Param Idempotency-Key header string true "Idempotency key"
 // @Param branch_id query string false "Parallel branch ID holding the parked input node (omit for the instance cursor)"
-// @Param request body object true "Input payload"
+// @Param request body object false "Input payload (application/json; leave empty when sending multipart/form-data)"
+// @Param files formData file false "File parts for multipart/form-data (repeatable; field name becomes the context key, a trailing [] merges with the bare name)"
+// @Param field formData string false "Text field for multipart/form-data (repeatable; field name becomes the context key)"
 // @Success 202 {object} InputDeliveryResponse
-// @Failure 401,403,400,404,409,422,500 {object} Problem
+// @Failure 401,403,400,404,409,413,415,422,500 {object} Problem
 // @Description This is the only endpoint that serves an anonymous caller, and only when the waiting input node sets public: true. No credential at all is admitted on a public node; a private node answers 403. A credential that is present but invalid is still 401, including on a public node, and never degrades to an accepted anonymous delivery. Status and form reads stay authenticated, so share the payload contract with an anonymous caller out-of-band.
 // @Router /v1/workflow/instance/{id}/input [put]
 func (h *InstanceHandler) Input(c *gin.Context) {
-	body, err := io.ReadAll(c.Request.Body)
+	mediaType, err := inputMediaType(c.GetHeader("Content-Type"))
 	if err != nil {
-		WriteProblem(c, http.StatusBadRequest, "cannot read request body")
+		WriteProblem(c, http.StatusUnsupportedMediaType, err.Error())
 		return
 	}
 	// The principal is passed through so the service can apply the input
@@ -490,8 +496,22 @@ func (h *InstanceHandler) Input(c *gin.Context) {
 		InstanceID:     c.Param("id"),
 		BranchID:       c.Query("branch_id"),
 		IdempotencyKey: c.GetHeader("Idempotency-Key"),
-		Payload:        body,
 		Source:         model.InputChannelHTTP,
+		ContentType:    mediaType,
+	}
+	if mediaType == model.MediaTypeMultipart {
+		// The body streams through the service without being read here:
+		// parts upload only after the delivery is authorized.
+		req.MultipartSource = func() (*stdmultipart.Reader, error) {
+			return c.Request.MultipartReader()
+		}
+	} else {
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			WriteProblem(c, http.StatusBadRequest, "cannot read request body")
+			return
+		}
+		req.Payload = body
 	}
 	if authenticated {
 		req.Principal = &principal
@@ -509,6 +529,28 @@ func (h *InstanceHandler) Input(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusAccepted, InputDeliveryResponse{Accepted: true})
+}
+
+// inputMediaType parses the delivery Content-Type into the media type the
+// service matches against the node's accept list. An absent header means
+// JSON, which is what every client that predates accept sends; anything but
+// JSON or multipart is a 415.
+func inputMediaType(header string) (string, error) {
+	if strings.TrimSpace(header) == "" {
+		return model.MediaTypeJSON, nil
+	}
+	mediaType, _, err := mime.ParseMediaType(header)
+	if err != nil {
+		return "", fmt.Errorf("unsupported content type %q: expected application/json or multipart/form-data", header)
+	}
+	switch strings.ToLower(mediaType) {
+	case model.MediaTypeJSON:
+		return model.MediaTypeJSON, nil
+	case model.MediaTypeMultipart:
+		return model.MediaTypeMultipart, nil
+	default:
+		return "", fmt.Errorf("unsupported content type %q: expected application/json or multipart/form-data", mediaType)
+	}
 }
 
 // Pause handles POST /v1/workflow/instance/{id}/pause.
@@ -711,6 +753,10 @@ func toPendingInputResponse(p *service.PendingInput) *PendingInputResponse {
 	if allowed == nil {
 		allowed = []string{}
 	}
+	accept := p.Accept
+	if accept == nil {
+		accept = []string{}
+	}
 	var form *SnapshotFormResponse
 	if p.Form != nil {
 		form = &SnapshotFormResponse{Schema: p.Form.Schema, UI: p.Form.UI}
@@ -724,6 +770,7 @@ func toPendingInputResponse(p *service.PendingInput) *PendingInputResponse {
 		AllowedRoles:   allowed,
 		RecordActor:    p.RecordActor,
 		Public:         p.Public,
+		Accept:         accept,
 	}
 }
 

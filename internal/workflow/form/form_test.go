@@ -14,6 +14,50 @@ func TestCheckSchemaAcceptsValid(t *testing.T) {
 	}
 }
 
+func TestCheckFileFields(t *testing.T) {
+	upload := func(files string) string {
+		return `{"type":"object","required":["files"],"properties":{"files":` + files + `}}`
+	}
+	valid := upload(`{"type":"array","minItems":1,"items":{"type":"string","format":"binary"},` +
+		`"allowed_mime_types":["application/pdf","image/*"],"max_file_bytes":1048576}`)
+	cases := []struct {
+		name    string
+		raw     string
+		wantErr string
+	}{
+		{"valid upload field", valid, ""},
+		{"binary without constraints", upload(`{"type":"array","items":{"type":"string","format":"binary"}}`), ""},
+		{"single binary field", `{"type":"object","properties":{"file":{"type":"string","format":"binary","max_file_bytes":10}}}`, ""},
+		{"no properties", `{"type":"object"}`, ""},
+		{"constraints on text ignored", `{"type":"object","properties":{"note":{"type":"string","max_file_bytes":-1}}}`, ""},
+		{"bad mime shape", upload(`{"type":"array","items":{"type":"string","format":"binary"},"allowed_mime_types":["image"]}`), "allowed_mime_types"},
+		{"double wildcard mime", upload(`{"type":"array","items":{"type":"string","format":"binary"},"allowed_mime_types":["*/*"]}`), "allowed_mime_types"},
+		{"non-string mime", upload(`{"type":"array","items":{"type":"string","format":"binary"},"allowed_mime_types":[42]}`), "allowed_mime_types"},
+		{"non-array mime", upload(`{"type":"array","items":{"type":"string","format":"binary"},"allowed_mime_types":"application/pdf"}`), "allowed_mime_types"},
+		{"zero max bytes", upload(`{"type":"array","items":{"type":"string","format":"binary"},"max_file_bytes":0}`), "max_file_bytes"},
+		{"negative max bytes", upload(`{"type":"array","items":{"type":"string","format":"binary"},"max_file_bytes":-1}`), "max_file_bytes"},
+		{"string max bytes", upload(`{"type":"array","items":{"type":"string","format":"binary"},"max_file_bytes":"1MB"}`), "max_file_bytes"},
+		{"fractional max bytes", upload(`{"type":"array","items":{"type":"string","format":"binary"},"max_file_bytes":1.5}`), "max_file_bytes"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := form.CheckFileFields([]byte(c.raw))
+			if c.wantErr == "" {
+				if err != nil {
+					t.Fatalf("CheckFileFields() error = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("CheckFileFields() error = nil, want mention of %q", c.wantErr)
+			}
+			if !strings.Contains(err.Error(), c.wantErr) {
+				t.Fatalf("CheckFileFields() error = %q, want mention of %q", err, c.wantErr)
+			}
+		})
+	}
+}
+
 func TestCheckSchemaRejectsInvalid(t *testing.T) {
 	cases := []struct {
 		name string

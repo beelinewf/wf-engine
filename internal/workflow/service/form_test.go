@@ -61,15 +61,16 @@ func (f *fakeResolver) Resolve(_ context.Context, defID string) (*model.Workflow
 	return tree, nil
 }
 
-func (f *fakeFormRepo) Create(_ context.Context, name string, schema, ui []byte) (repository.Form, error) {
+func (f *fakeFormRepo) Create(_ context.Context, name, contentType string, schema, ui []byte) (repository.Form, error) {
 	f.seq++
 	form := repository.Form{
-		ID:        fmt.Sprintf("aaaaaaaa-aaaa-7aaa-8aaa-%012d", f.seq),
-		Name:      name,
-		Schema:    schema,
-		UI:        ui,
-		CreatedAt: time.Now().UTC(),
-		UpdatedAt: time.Now().UTC(),
+		ID:          fmt.Sprintf("aaaaaaaa-aaaa-7aaa-8aaa-%012d", f.seq),
+		Name:        name,
+		ContentType: contentType,
+		Schema:      schema,
+		UI:          ui,
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
 	}
 	f.forms[form.ID] = form
 	return form, nil
@@ -91,12 +92,13 @@ func (f *fakeFormRepo) List(_ context.Context, _, _ int) ([]repository.Form, int
 	return items, int64(len(items)), nil
 }
 
-func (f *fakeFormRepo) Update(_ context.Context, id, name string, schema, ui []byte) (repository.Form, error) {
+func (f *fakeFormRepo) Update(_ context.Context, id, name, contentType string, schema, ui []byte) (repository.Form, error) {
 	form, ok := f.forms[id]
 	if !ok {
 		return repository.Form{}, model.ErrNotFound
 	}
 	form.Name = name
+	form.ContentType = contentType
 	form.Schema = schema
 	form.UI = ui
 	form.UpdatedAt = time.Now().UTC()
@@ -171,7 +173,7 @@ func newFormServiceWithUsage() (service.FormService, *fakeFormRepo, *fakeResolve
 
 func TestFormServiceCreateRoundTrip(t *testing.T) {
 	svc, _ := newFormService()
-	created, err := svc.Create(context.Background(), "contact", formTestSchema, formTestUI)
+	created, err := svc.Create(context.Background(), "contact", "", formTestSchema, formTestUI)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,13 +196,61 @@ func TestFormServiceCreateRoundTrip(t *testing.T) {
 	}
 }
 
+func TestFormServiceContentTypeDefaultAndValidate(t *testing.T) {
+	svc, repo := newFormService()
+
+	omitted, err := svc.Create(context.Background(), "contact", "", formTestSchema, nil)
+	if err != nil {
+		t.Fatalf("Create() with omitted content type error = %v", err)
+	}
+	if omitted.ContentType != model.MediaTypeJSON {
+		t.Errorf("Create() content_type = %q, want %q", omitted.ContentType, model.MediaTypeJSON)
+	}
+
+	multi, err := svc.Create(context.Background(), "upload", model.MediaTypeMultipart, formTestSchema, nil)
+	if err != nil {
+		t.Fatalf("Create() multipart error = %v", err)
+	}
+	if multi.ContentType != model.MediaTypeMultipart {
+		t.Errorf("Create() content_type = %q, want %q", multi.ContentType, model.MediaTypeMultipart)
+	}
+
+	if _, err := svc.Create(context.Background(), "bogus", "text/plain", formTestSchema, nil); !errors.Is(err, model.ErrInvalid) {
+		t.Errorf("Create(text/plain) error = %v, want ErrInvalid", err)
+	}
+	if len(repo.forms) != 2 {
+		t.Errorf("stored forms = %d, want 2 (bogus create stored nothing)", len(repo.forms))
+	}
+
+	flipped, err := svc.Update(context.Background(), omitted.ID, "contact", model.MediaTypeMultipart, formTestSchema, nil)
+	if err != nil {
+		t.Fatalf("Update() to multipart error = %v", err)
+	}
+	if flipped.ContentType != model.MediaTypeMultipart {
+		t.Errorf("Update() content_type = %q, want %q", flipped.ContentType, model.MediaTypeMultipart)
+	}
+	back, err := svc.Update(context.Background(), omitted.ID, "contact", "", formTestSchema, nil)
+	if err != nil {
+		t.Fatalf("Update() with omitted content type error = %v", err)
+	}
+	if back.ContentType != model.MediaTypeJSON {
+		t.Errorf("Update() content_type = %q, want %q", back.ContentType, model.MediaTypeJSON)
+	}
+	if _, err := svc.Update(context.Background(), omitted.ID, "contact", "text/plain", formTestSchema, nil); !errors.Is(err, model.ErrInvalid) {
+		t.Errorf("Update(text/plain) error = %v, want ErrInvalid", err)
+	}
+	if stored := repo.forms[omitted.ID]; stored.ContentType != model.MediaTypeJSON {
+		t.Errorf("stored content_type after bogus update = %q, want %q", stored.ContentType, model.MediaTypeJSON)
+	}
+}
+
 func TestFormServiceRejectsBlankName(t *testing.T) {
 	svc, _ := newFormService()
 	for _, name := range []string{"", "   "} {
-		if _, err := svc.Create(context.Background(), name, formTestSchema, nil); !errors.Is(err, model.ErrInvalid) {
+		if _, err := svc.Create(context.Background(), name, "", formTestSchema, nil); !errors.Is(err, model.ErrInvalid) {
 			t.Errorf("Create(%q) error = %v, want ErrInvalid", name, err)
 		}
-		if _, err := svc.Update(context.Background(), "id", name, formTestSchema, nil); !errors.Is(err, model.ErrInvalid) {
+		if _, err := svc.Update(context.Background(), "id", name, "", formTestSchema, nil); !errors.Is(err, model.ErrInvalid) {
 			t.Errorf("Update(%q) error = %v, want ErrInvalid", name, err)
 		}
 	}
@@ -217,10 +267,10 @@ func TestFormServiceRejectsInvalidSchema(t *testing.T) {
 		"uncompilable": []byte(`{"type":"object","properties":{"name":{"type":"string","pattern":"(["}}}`),
 	}
 	for name, schema := range cases {
-		if _, err := svc.Create(context.Background(), "contact", schema, nil); !errors.Is(err, model.ErrInvalid) {
+		if _, err := svc.Create(context.Background(), "contact", "", schema, nil); !errors.Is(err, model.ErrInvalid) {
 			t.Errorf("Create(%s) error = %v, want ErrInvalid", name, err)
 		}
-		if _, err := svc.Update(context.Background(), "id", "contact", schema, nil); !errors.Is(err, model.ErrInvalid) {
+		if _, err := svc.Update(context.Background(), "id", "contact", "", schema, nil); !errors.Is(err, model.ErrInvalid) {
 			t.Errorf("Update(%s) error = %v, want ErrInvalid", name, err)
 		}
 	}
@@ -229,22 +279,22 @@ func TestFormServiceRejectsInvalidSchema(t *testing.T) {
 func TestFormServiceRejectsNonObjectUI(t *testing.T) {
 	svc, _ := newFormService()
 	for _, ui := range []string{`null`, `[1,2]`, `"x"`, `42`} {
-		if _, err := svc.Create(context.Background(), "contact", formTestSchema, []byte(ui)); !errors.Is(err, model.ErrInvalid) {
+		if _, err := svc.Create(context.Background(), "contact", "", formTestSchema, []byte(ui)); !errors.Is(err, model.ErrInvalid) {
 			t.Errorf("Create(ui=%s) error = %v, want ErrInvalid", ui, err)
 		}
-		if _, err := svc.Update(context.Background(), "id", "contact", formTestSchema, []byte(ui)); !errors.Is(err, model.ErrInvalid) {
+		if _, err := svc.Update(context.Background(), "id", "contact", "", formTestSchema, []byte(ui)); !errors.Is(err, model.ErrInvalid) {
 			t.Errorf("Update(ui=%s) error = %v, want ErrInvalid", ui, err)
 		}
 	}
 	// An absent ui is fine on create and clears on update.
-	created, err := svc.Create(context.Background(), "contact", formTestSchema, nil)
+	created, err := svc.Create(context.Background(), "contact", "", formTestSchema, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(created.UI) != 0 {
 		t.Fatalf("created UI = %s, want empty", created.UI)
 	}
-	updated, err := svc.Update(context.Background(), created.ID, "contact", formTestSchema, nil)
+	updated, err := svc.Update(context.Background(), created.ID, "contact", "", formTestSchema, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +305,7 @@ func TestFormServiceRejectsNonObjectUI(t *testing.T) {
 
 func TestFormServiceUpdateUnknownNotFound(t *testing.T) {
 	svc, _ := newFormService()
-	if _, err := svc.Update(context.Background(), "missing", "contact", formTestSchema, nil); !errors.Is(err, model.ErrNotFound) {
+	if _, err := svc.Update(context.Background(), "missing", "contact", "", formTestSchema, nil); !errors.Is(err, model.ErrNotFound) {
 		t.Fatalf("Update() error = %v, want ErrNotFound", err)
 	}
 	if _, err := svc.Get(context.Background(), "missing"); !errors.Is(err, model.ErrNotFound) {
@@ -265,14 +315,14 @@ func TestFormServiceUpdateUnknownNotFound(t *testing.T) {
 
 func TestFormServiceUpdateReferencedSucceeds(t *testing.T) {
 	svc, repo := newFormService()
-	created, err := svc.Create(context.Background(), "contact", formTestSchema, formTestUI)
+	created, err := svc.Create(context.Background(), "contact", "", formTestSchema, formTestUI)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.SaveWorkflowFormRefs(context.Background(), "wf", []string{created.ID}); err != nil {
 		t.Fatal(err)
 	}
-	updated, err := svc.Update(context.Background(), created.ID, "renamed", formTestSchema, nil)
+	updated, err := svc.Update(context.Background(), created.ID, "renamed", "", formTestSchema, nil)
 	if err != nil {
 		t.Fatalf("Update() of referenced form error = %v, want nil", err)
 	}
@@ -283,7 +333,7 @@ func TestFormServiceUpdateReferencedSucceeds(t *testing.T) {
 
 func TestFormServiceDeleteReferencedConflict(t *testing.T) {
 	svc, repo := newFormService()
-	created, err := svc.Create(context.Background(), "contact", formTestSchema, nil)
+	created, err := svc.Create(context.Background(), "contact", "", formTestSchema, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,7 +355,7 @@ func TestFormUsageUnknownNotFound(t *testing.T) {
 func TestFormUsagePinpointsDirectAndIndirect(t *testing.T) {
 	svc, repo, resolver := newFormServiceWithUsage()
 	ctx := context.Background()
-	form, err := svc.Create(ctx, "contact", formTestSchema, nil)
+	form, err := svc.Create(ctx, "contact", "", formTestSchema, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -367,7 +417,7 @@ func TestFormUsagePinpointsDirectAndIndirect(t *testing.T) {
 func TestFormUsageWaitingFlag(t *testing.T) {
 	svc, repo, resolver := newFormServiceWithUsage()
 	ctx := context.Background()
-	form, err := svc.Create(ctx, "contact", formTestSchema, nil)
+	form, err := svc.Create(ctx, "contact", "", formTestSchema, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

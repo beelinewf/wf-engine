@@ -69,16 +69,18 @@ type SecretModel struct {
 func (SecretModel) TableName() string { return "secrets" }
 
 // FormModel persists one forms-library entry. Schema is a JSON Schema the
-// frontend renders; UI carries opaque render hints. The engine never reads
-// either: definitions reference the row by id, and status carries only the
-// id for the frontend to fetch.
+// frontend renders; UI carries opaque render hints. ContentType is the
+// submission encoding the frontend must send. The engine never reads
+// schema or ui: definitions reference the row by id, and status carries
+// only the id for the frontend to fetch.
 type FormModel struct {
-	ID        string         `gorm:"column:id;type:uuid;primaryKey"`
-	Name      string         `gorm:"column:name;type:text;not null"`
-	Schema    datatypes.JSON `gorm:"column:schema;type:jsonb;not null"`
-	UI        datatypes.JSON `gorm:"column:ui;type:jsonb"`
-	CreatedAt time.Time      `gorm:"column:created_at;not null"`
-	UpdatedAt time.Time      `gorm:"column:updated_at;not null"`
+	ID          string         `gorm:"column:id;type:uuid;primaryKey"`
+	Name        string         `gorm:"column:name;type:text;not null"`
+	ContentType string         `gorm:"column:content_type;type:text;not null;default:application/json"`
+	Schema      datatypes.JSON `gorm:"column:schema;type:jsonb;not null"`
+	UI          datatypes.JSON `gorm:"column:ui;type:jsonb"`
+	CreatedAt   time.Time      `gorm:"column:created_at;not null"`
+	UpdatedAt   time.Time      `gorm:"column:updated_at;not null"`
 }
 
 // TableName is the forms table.

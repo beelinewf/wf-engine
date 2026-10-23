@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/beelinewf/wf-engine/pkg/contextpath"
 	"github.com/beelinewf/wf-engine/pkg/ids"
@@ -38,6 +39,13 @@ const (
 	InputChannelHTTP     = "http"
 	InputChannelRedis    = "redis"
 	InputChannelRabbitMQ = "rabbitmq"
+)
+
+// Media types an input node may accept. Absent accept means JSON only, so
+// every definition written before accept existed keeps its behavior.
+const (
+	MediaTypeJSON      = "application/json"
+	MediaTypeMultipart = "multipart/form-data"
 )
 
 // ValidNodeType reports whether t is an accepted node type, including
@@ -129,7 +137,11 @@ type NodeContent struct {
 	// unattributed: a public node cannot carry allowed_roles or
 	// record_actor, and its anonymous deliveries are marked as such in the
 	// delivery history.
-	Public         bool             `json:"public,omitempty"`
+	Public bool `json:"public,omitempty"`
+	// Accept lists the request media types the input node delivers. Empty
+	// means JSON only (see EffectiveAccept).
+	Accept         []string         // input
+	Storage        *InputStorageRef // input: multipart uploads, required exactly then
 	HTTP           *HTTPConfig      // external_call
 	Execution      *ExecutionConfig // external_call
 	OutputProperty string
@@ -201,6 +213,47 @@ type Condition struct {
 // ValidationScript validates an input payload.
 type ValidationScript struct {
 	Script string
+}
+
+// InputStorageRef is an input node's multipart upload target. It names only
+// a bucket, an optional prefix, and optional file constraints; the endpoint
+// and credentials live in global config, never in a definition.
+type InputStorageRef struct {
+	// Bucket holds the uploaded objects. No slashes or whitespace.
+	Bucket string
+	// Prefix is prepended to every object key. Stored normalized: no
+	// leading slash, trailing slash when non-empty.
+	Prefix string
+	// AllowedMIMETypes constrains file parts, each "type/subtype" or
+	// "type/*", lowercased. Empty means unconstrained beyond engine limits.
+	AllowedMIMETypes []string
+	// MaxFileBytes caps one file. Zero means unconstrained beyond the
+	// engine per-file cap.
+	MaxFileBytes int64
+}
+
+// EffectiveAccept returns the media types the node accepts: the authored
+// list, or JSON only when accept is absent.
+func (n *NodeContent) EffectiveAccept() []string {
+	if len(n.Accept) == 0 {
+		return []string{MediaTypeJSON}
+	}
+	return n.Accept
+}
+
+// Accepts reports whether the node accepts a delivery with the given media
+// type. An empty media type means JSON, which is what callers that predate
+// accept (brokers, internal callers) send.
+func (n *NodeContent) Accepts(mediaType string) bool {
+	if mediaType == "" {
+		mediaType = MediaTypeJSON
+	}
+	for _, a := range n.EffectiveAccept() {
+		if a == mediaType {
+			return true
+		}
+	}
+	return false
 }
 
 // HookScript is an optional lifecycle context-transform script. A pre hook
@@ -299,6 +352,8 @@ type rawNode struct {
 	AllowedRoles      []string                 `json:"allowed_roles"`
 	RecordActor       *bool                    `json:"record_actor"`
 	Public            *bool                    `json:"public"`
+	Accept            []string                 `json:"accept"`
+	Storage           *rawInputStorage         `json:"storage"`
 	HTTPConfig        *rawHTTPConfig           `json:"http_config"`
 	ExecutionConfig   *rawExecutionConfig      `json:"execution_config"`
 	PollerHTTP        *rawPollerHTTPConfig     `json:"http"`
@@ -328,6 +383,13 @@ type rawCondition struct {
 
 type rawValidation struct {
 	Script string `json:"script"`
+}
+
+type rawInputStorage struct {
+	Bucket           string   `json:"bucket"`
+	Prefix           string   `json:"prefix"`
+	AllowedMIMETypes []string `json:"allowed_mime_types"`
+	MaxFileBytes     *int64   `json:"max_file_bytes"`
 }
 
 type rawHTTPConfig struct {
@@ -478,10 +540,13 @@ func parseRawNode(r *rawNode, limits NodeLimits) (*NodeContent, error) {
 			r.PollerHTTP != nil || r.PollerRedis != nil || r.PollerRabbitMQ != nil || len(r.Config) > 0 ||
 			len(r.Branches) > 0 || r.ParallelEndNodeID != nil || r.CombiningScript != nil || len(r.Delay) > 0 ||
 			// allowed_roles, record_actor, and public are the input node's
-			// authorization surface. A reference resolves its type from the
-			// definition, so the occurrence cannot be judged here and
-			// materializing it would drop the fields silently.
-			len(r.AllowedRoles) > 0 || r.RecordActor != nil || r.Public != nil {
+			// authorization surface, and accept/storage are its delivery
+			// contract. A reference resolves its type from the definition,
+			// so the occurrence cannot be judged here and materializing it
+			// would drop the fields silently; referenced nodes inherit both
+			// from their definition instead.
+			len(r.AllowedRoles) > 0 || r.RecordActor != nil || r.Public != nil ||
+			len(r.Accept) > 0 || r.Storage != nil {
 			return nil, errors.New("node referencing a node_definition_id cannot carry inline executable fields")
 		}
 		nc.NodeDefinitionID = *r.NodeDefinitionID
@@ -607,6 +672,26 @@ func parseRawNode(r *rawNode, limits NodeLimits) (*NodeContent, error) {
 		}
 		if nc.Public && (len(nc.AllowedRoles) > 0 || nc.RecordActor) {
 			return nil, errors.New("public input node must have empty allowed_roles and record_actor=false")
+		}
+		accept, err := parseAccept(r.Accept)
+		if err != nil {
+			return nil, err
+		}
+		nc.Accept = accept
+		storage, err := parseInputStorage(r.Storage)
+		if err != nil {
+			return nil, err
+		}
+		nc.Storage = storage
+		if nc.Accepts(MediaTypeMultipart) {
+			if nc.Channel != InputChannelHTTP {
+				return nil, errors.New("multipart/form-data accept requires channel \"http\"")
+			}
+			if storage == nil {
+				return nil, errors.New("multipart/form-data accept requires storage.bucket")
+			}
+		} else if storage != nil {
+			return nil, errors.New("storage requires multipart/form-data in accept")
 		}
 		nc.Timeout = limits.ConditionTimeout
 
@@ -917,11 +1002,15 @@ func parseRawNode(r *rawNode, limits NodeLimits) (*NodeContent, error) {
 		return nil, fmt.Errorf("node type %q does not support form_id", nc.Type)
 	}
 	// allowed_roles, record_actor, and public are the input node's
-	// authorization surface, so no other builtin type may carry them. The
-	// guard sits after the type switch because a referenced node definition
-	// resolves its type from the definition, not from the occurrence.
+	// authorization surface, and accept/storage are its delivery contract,
+	// so no other builtin type may carry them. The guard sits after the
+	// type switch because a referenced node definition resolves its type
+	// from the definition, not from the occurrence.
 	if nc.Type != NodeTypeInput && (len(r.AllowedRoles) > 0 || r.RecordActor != nil || r.Public != nil) {
 		return nil, fmt.Errorf("node type %q does not support allowed_roles, record_actor, or public", nc.Type)
+	}
+	if nc.Type != NodeTypeInput && (len(r.Accept) > 0 || r.Storage != nil) {
+		return nil, fmt.Errorf("node type %q does not support accept or storage", nc.Type)
 	}
 	if _, ok := LookupCustomType(string(nc.Type)); !ok && len(r.Config) > 0 {
 		return nil, fmt.Errorf("node type %q does not support config", nc.Type)
@@ -981,6 +1070,110 @@ func parseAllowedRoles(raw []string) ([]string, error) {
 	return out, nil
 }
 
+// parseAccept normalizes the input node's delivery contract: entries are
+// trimmed and deduplicated while keeping the authored order. An absent or
+// empty list means JSON only, which is what every definition written before
+// the field existed resolves to.
+func parseAccept(raw []string) ([]string, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	seen := make(map[string]bool, len(raw))
+	out := make([]string, 0, len(raw))
+	for i, entry := range raw {
+		entry = strings.TrimSpace(entry)
+		if entry != MediaTypeJSON && entry != MediaTypeMultipart {
+			return nil, fmt.Errorf("accept[%d] %q is not supported (allowed: %s, %s)", i, raw[i], MediaTypeJSON, MediaTypeMultipart)
+		}
+		if seen[entry] {
+			continue
+		}
+		seen[entry] = true
+		out = append(out, entry)
+	}
+	return out, nil
+}
+
+// parseInputStorage normalizes the input node's multipart upload target. A
+// nil raw means the node carries no storage, which is valid exactly when it
+// does not accept multipart.
+func parseInputStorage(raw *rawInputStorage) (*InputStorageRef, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	if strings.TrimSpace(raw.Bucket) == "" {
+		return nil, errors.New("storage.bucket is required")
+	}
+	if strings.Contains(raw.Bucket, "/") || strings.IndexFunc(raw.Bucket, unicode.IsSpace) >= 0 {
+		return nil, fmt.Errorf("storage.bucket %q must not contain slashes or whitespace", raw.Bucket)
+	}
+	prefix, err := normalizeStoragePrefix(raw.Prefix)
+	if err != nil {
+		return nil, err
+	}
+	mimeTypes, err := parseAllowedMIMETypes(raw.AllowedMIMETypes)
+	if err != nil {
+		return nil, err
+	}
+	var maxBytes int64
+	if raw.MaxFileBytes != nil {
+		if *raw.MaxFileBytes <= 0 {
+			return nil, errors.New("storage.max_file_bytes must be positive")
+		}
+		maxBytes = *raw.MaxFileBytes
+	}
+	return &InputStorageRef{
+		Bucket:           raw.Bucket,
+		Prefix:           prefix,
+		AllowedMIMETypes: mimeTypes,
+		MaxFileBytes:     maxBytes,
+	}, nil
+}
+
+// normalizeStoragePrefix stores the object-key prefix canonically: leading
+// slashes stripped, trailing slash ensured when non-empty. A ".." segment
+// is rejected: it reads as directory escape even though object keys are
+// flat, and no legitimate prefix needs it.
+func normalizeStoragePrefix(raw string) (string, error) {
+	prefix := strings.TrimLeft(raw, "/")
+	for _, segment := range strings.Split(prefix, "/") {
+		if segment == ".." {
+			return "", fmt.Errorf("storage.prefix %q must not contain \"..\" segments", raw)
+		}
+	}
+	if prefix != "" && !strings.HasSuffix(prefix, "/") {
+		prefix += "/"
+	}
+	return prefix, nil
+}
+
+// parseAllowedMIMETypes normalizes the node's file-type allowlist: entries
+// are trimmed, lowercased (MIME matching is case-insensitive), and
+// deduplicated while keeping the authored order. Each entry must read as
+// "type/subtype" or "type/*".
+func parseAllowedMIMETypes(raw []string) ([]string, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	seen := make(map[string]bool, len(raw))
+	out := make([]string, 0, len(raw))
+	for i, entry := range raw {
+		entry = strings.ToLower(strings.TrimSpace(entry))
+		mediaType, subtype, ok := strings.Cut(entry, "/")
+		if !ok || mediaType == "" || subtype == "" || strings.Contains(subtype, "/") ||
+			strings.Contains(mediaType, "*") || subtype != "*" && strings.Contains(subtype, "*") ||
+			strings.IndexFunc(entry, unicode.IsSpace) >= 0 {
+			return nil, fmt.Errorf("storage.allowed_mime_types[%d] %q must be \"type/subtype\" or \"type/*\"", i, raw[i])
+		}
+		if seen[entry] {
+			continue
+		}
+		seen[entry] = true
+		out = append(out, entry)
+	}
+	return out, nil
+}
+
 // parseCustomNode resolves a custom node: it rejects every builtin
 // executable field, requires the config object, parses the timeout with
 // the standard cap, and delegates schema/validation to the node-owned
@@ -994,8 +1187,10 @@ func parseCustomNode(nc *NodeContent, r *rawNode, limits NodeLimits) (*NodeConte
 		len(r.Branches) > 0 || r.ParallelEndNodeID != nil || r.CombiningScript != nil ||
 		r.Nodes != nil || r.StartNodeID != nil || r.ContextPath != nil || len(r.Delay) > 0 ||
 		// A custom type is never an input node, so the input node's
-		// authorization surface is refused like any other builtin field.
-		len(r.AllowedRoles) > 0 || r.RecordActor != nil || r.Public != nil {
+		// authorization surface and delivery contract are refused like any
+		// other builtin field.
+		len(r.AllowedRoles) > 0 || r.RecordActor != nil || r.Public != nil ||
+		len(r.Accept) > 0 || r.Storage != nil {
 		return nil, fmt.Errorf("node type %q does not support that field; custom nodes carry only type and config", nc.Type)
 	}
 	if len(r.Config) == 0 || strings.TrimSpace(string(r.Config)) == "null" {

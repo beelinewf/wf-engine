@@ -99,6 +99,27 @@ const inputNodeSchemaJSON = `{
       "type": "boolean",
       "description": "Anonymous callers may deliver to this node over HTTP with no credential, even when auth is enabled. Forces empty allowed_roles and record_actor=false; anonymous deliveries are marked in history."
     },
+    "accept": {
+      "type": "array",
+      "description": "Request media types the node delivers. Absent means application/json only. multipart/form-data streams file parts into object storage and needs channel http plus storage.",
+      "items": { "type": "string", "enum": ["application/json", "multipart/form-data"] }
+    },
+    "storage": {
+      "type": "object",
+      "description": "Multipart upload target: bucket, optional key prefix, and optional file constraints. Required exactly when accept lists multipart/form-data. The endpoint and credentials live in server config, never here.",
+      "properties": {
+        "bucket": { "type": "string", "minLength": 1, "description": "Destination bucket; no slashes or whitespace." },
+        "prefix": { "type": "string", "description": "Prepended to every object key; a .. segment is rejected." },
+        "allowed_mime_types": {
+          "type": "array",
+          "description": "File allowlist, each type/subtype or type/*. Empty means unconstrained beyond engine limits.",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "max_file_bytes": { "type": "integer", "minimum": 1, "description": "Per-file byte cap; absent means the engine cap." }
+      },
+      "required": ["bucket"],
+      "additionalProperties": false
+    },
     "next_node": { "$ref": "#/$defs/nodeId" },
     "retry_on_recovery": { "type": "boolean" },
     "metadata": { "type": "object", "description": "Opaque metadata; never read by the engine." },

@@ -13,10 +13,10 @@ import (
 
 // FormService is the use-case boundary for the forms library.
 type FormService interface {
-	Create(ctx context.Context, name string, schema, ui []byte) (repository.Form, error)
+	Create(ctx context.Context, name, contentType string, schema, ui []byte) (repository.Form, error)
 	Get(ctx context.Context, id string) (repository.Form, error)
 	List(ctx context.Context, page, perPage int) ([]repository.Form, int64, error)
-	Update(ctx context.Context, id, name string, schema, ui []byte) (repository.Form, error)
+	Update(ctx context.Context, id, name, contentType string, schema, ui []byte) (repository.Form, error)
 	Delete(ctx context.Context, id string) error
 	Usage(ctx context.Context, id string, page, perPage int) (FormUsage, error)
 }
@@ -90,11 +90,15 @@ func NewFormService(repo repository.FormRepository, resolver WorkflowDefinitionR
 	return &formService{repo: repo, resolver: resolver}
 }
 
-func (s *formService) Create(ctx context.Context, name string, schema, ui []byte) (repository.Form, error) {
+func (s *formService) Create(ctx context.Context, name, contentType string, schema, ui []byte) (repository.Form, error) {
+	ct, err := normalizeContentType(contentType)
+	if err != nil {
+		return repository.Form{}, err
+	}
 	if err := validateFormInput(name, schema, ui); err != nil {
 		return repository.Form{}, err
 	}
-	return s.repo.Create(ctx, name, schema, ui)
+	return s.repo.Create(ctx, name, ct, schema, ui)
 }
 
 func (s *formService) Get(ctx context.Context, id string) (repository.Form, error) {
@@ -105,11 +109,15 @@ func (s *formService) List(ctx context.Context, page, perPage int) ([]repository
 	return s.repo.List(ctx, page, perPage)
 }
 
-func (s *formService) Update(ctx context.Context, id, name string, schema, ui []byte) (repository.Form, error) {
+func (s *formService) Update(ctx context.Context, id, name, contentType string, schema, ui []byte) (repository.Form, error) {
+	ct, err := normalizeContentType(contentType)
+	if err != nil {
+		return repository.Form{}, err
+	}
 	if err := validateFormInput(name, schema, ui); err != nil {
 		return repository.Form{}, err
 	}
-	return s.repo.Update(ctx, id, name, schema, ui)
+	return s.repo.Update(ctx, id, name, ct, schema, ui)
 }
 
 func (s *formService) Delete(ctx context.Context, id string) error {
@@ -231,6 +239,19 @@ func findUsageNode(nodes []*model.NodeContent, nodeID string) *model.NodeContent
 	return nil
 }
 
+// normalizeContentType maps an omitted content type to JSON and passes
+// the two supported media types through; anything else is invalid.
+func normalizeContentType(contentType string) (string, error) {
+	switch contentType {
+	case "":
+		return model.MediaTypeJSON, nil
+	case model.MediaTypeJSON, model.MediaTypeMultipart:
+		return contentType, nil
+	default:
+		return "", fmt.Errorf("%w: content type must be %q or %q", model.ErrInvalid, model.MediaTypeJSON, model.MediaTypeMultipart)
+	}
+}
+
 // validateFormInput enforces the write-time contract shared by create and
 // full-overwrite update: a non-blank name, a schema document that compiles,
 // and a ui that is either absent or a JSON object. An explicit null ui is
@@ -241,6 +262,9 @@ func validateFormInput(name string, schema, ui []byte) error {
 		return fmt.Errorf("%w: form name is required", model.ErrInvalid)
 	}
 	if err := form.CheckSchema(schema); err != nil {
+		return fmt.Errorf("%w: %v", model.ErrInvalid, err)
+	}
+	if err := form.CheckFileFields(schema); err != nil {
 		return fmt.Errorf("%w: %v", model.ErrInvalid, err)
 	}
 	if len(ui) > 0 {
