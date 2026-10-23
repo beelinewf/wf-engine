@@ -1413,8 +1413,9 @@ components:
     Forbidden:
       description: >-
         Authenticated but not allowed: the caller's roles do not carry the
-        endpoint permission, or the input node's allowed_roles does not include
-        one of them. A valid API token is the service principal and is never refused.
+        endpoint permission, or the input node's gate does not admit the
+        caller (allowed_users when the node lists users, else allowed_roles).
+        A valid API token is the service principal and is never refused.
         On PUT /input an anonymous caller with no credential is also answered
         here when the waiting input node is not public.
       content:
@@ -1858,7 +1859,7 @@ components:
           description: Advisory rollback target hint; the rollback endpoint stays the source of truth
     PendingInput:
       type: object
-      required: [node_id, channel, output_property, allowed_roles, record_actor, public, accept]
+      required: [node_id, channel, output_property, allowed_roles, allowed_users, record_actor, public, accept]
       properties:
         node_id: { type: string, format: uuid }
         channel: { type: string }
@@ -1893,9 +1894,27 @@ components:
           type: array
           items: { type: string }
           description: |
-            The node's role gate, the second authorization check applied to a
-            delivery. Empty means the node is open to any caller that already
-            holds input:deliver.
+            The node's role gate, checked against the caller's token roles.
+            Consulted only when allowed_users is empty; a non-empty user
+            list is the only gate consulted. Empty means no role
+            restriction. Always empty on a public node, which ignores both
+            gates.
+        allowed_users:
+          type: array
+          items:
+            type: object
+            required: [id]
+            properties:
+              id:
+                type: string
+                format: uuid
+                description: Users.id uuid of a caller allowed to deliver to this node.
+          description: |
+            The node's user gate, checked against the caller's resolved user
+            id. When non-empty it is the only gate consulted: a listed user
+            passes however their roles read, and allowed_roles is ignored.
+            Empty means no user restriction. Always empty on a public node,
+            which ignores both gates.
         record_actor:
           type: boolean
           description: |
@@ -1908,8 +1927,10 @@ components:
           description: |
             True when the node also accepts a delivery carrying no
             credential at all, so PUT /input admits an anonymous caller even
-            with auth enabled. Always paired with an empty allowed_roles and
-            record_actor=false; the flag only exists on input nodes. An
+            with auth enabled. A public node ignores allowed_roles and
+            allowed_users, which are reported empty here while staying
+            stored on the definition; record_actor is still always false,
+            and the flag only exists on input nodes. An
             anonymous delivery is written as the bare payload and marked
             delivered_by anonymous in the delivery history.
     ParallelExecution:

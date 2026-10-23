@@ -805,6 +805,110 @@ func TestParseInputNodeAllowedRoles(t *testing.T) {
 	}
 }
 
+// allowed_users is the input node's user gate: a list of {id} entries naming
+// the users.id uuids admitted regardless of their roles. Like allowed_roles
+// it is optional, and entries are trimmed and deduplicated in authored order.
+func TestParseInputNodeAllowedUsers(t *testing.T) {
+	nc := mustParseContent(t, `{
+		"type": "input", "channel": "http", "output_property": "user",
+		"allowed_users": [
+			{"id": "22222222-2222-7222-8222-222222222222"},
+			{"id": " 33333333-3333-7333-8333-333333333333 "},
+			{"id": "22222222-2222-7222-8222-222222222222"}
+		]
+	}`)
+	want := []string{
+		"22222222-2222-7222-8222-222222222222",
+		"33333333-3333-7333-8333-333333333333",
+	}
+	if len(nc.AllowedUsers) != len(want) {
+		t.Fatalf("AllowedUsers = %v, want %v", nc.AllowedUsers, want)
+	}
+	for i := range want {
+		if nc.AllowedUsers[i].ID != want[i] {
+			t.Fatalf("AllowedUsers = %v, want %v", nc.AllowedUsers, want)
+		}
+	}
+	if got := nc.AllowedUserIDs(); len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("AllowedUserIDs() = %v, want %v", got, want)
+	}
+	// Both gates coexist on one node.
+	both := mustParseContent(t, `{"type":"input","channel":"http","output_property":"user",
+		"allowed_roles":["finance"],"allowed_users":[{"id":"22222222-2222-7222-8222-222222222222"}]}`)
+	if len(both.AllowedRoles) != 1 || len(both.AllowedUsers) != 1 {
+		t.Errorf("roles = %v, users = %v, want both gates kept", both.AllowedRoles, both.AllowedUsers)
+	}
+}
+
+// An absent or empty allowed_users means no user restriction, which is what
+// every definition written before the field existed resolves to.
+func TestParseInputNodeAllowedUsersAbsentIsOpen(t *testing.T) {
+	for name, raw := range map[string]string{
+		"absent": `{"type":"input","channel":"http","output_property":"user"}`,
+		"empty":  `{"type":"input","channel":"http","output_property":"user","allowed_users":[]}`,
+		"null":   `{"type":"input","channel":"http","output_property":"user","allowed_users":null}`,
+	} {
+		nc := mustParseContent(t, raw)
+		if len(nc.AllowedUsers) != 0 {
+			t.Errorf("%s: AllowedUsers = %v, want empty", name, nc.AllowedUsers)
+		}
+		if nc.AllowedUserIDs() != nil {
+			t.Errorf("%s: AllowedUserIDs() = %v, want nil", name, nc.AllowedUserIDs())
+		}
+	}
+}
+
+// Every entry must name a canonical users.id uuid. Anything else is a
+// definition error, because an id that never matches would silently admit
+// nobody instead of the author finding the typo.
+func TestParseAllowedUsersRejectsInvalidIDs(t *testing.T) {
+	cases := map[string]string{
+		"empty id":           `{"type":"input","channel":"http","output_property":"user","allowed_users":[{"id":""}]}`,
+		"blank id":           `{"type":"input","channel":"http","output_property":"user","allowed_users":[{"id":"   "}]}`,
+		"missing id":         `{"type":"input","channel":"http","output_property":"user","allowed_users":[{}]}`,
+		"non-uuid id":        `{"type":"input","channel":"http","output_property":"user","allowed_users":[{"id":"alice"}]}`,
+		"non-canonical case": `{"type":"input","channel":"http","output_property":"user","allowed_users":[{"id":"22222222-2222-7222-8222-2222222222AB"}]}`,
+		"string":             `{"type":"input","channel":"http","output_property":"user","allowed_users":"22222222-2222-7222-8222-222222222222"}`,
+		"string entry":       `{"type":"input","channel":"http","output_property":"user","allowed_users":["22222222-2222-7222-8222-222222222222"]}`,
+	}
+	for name, raw := range cases {
+		_, err := model.ParseNodeContent([]byte(raw), testLimits)
+		if err == nil {
+			t.Errorf("%s: error = nil, want the invalid entry rejected", name)
+		}
+	}
+	// The valid list still normalizes.
+	nc := mustParseContent(t, `{"type":"input","channel":"http","output_property":"user",
+		"allowed_users":[{"id":" 22222222-2222-7222-8222-222222222222 "}]}`)
+	if len(nc.AllowedUsers) != 1 || nc.AllowedUsers[0].ID != "22222222-2222-7222-8222-222222222222" {
+		t.Errorf("AllowedUsers = %v, want the trimmed valid id", nc.AllowedUsers)
+	}
+}
+
+// The user gate is matched on every delivery attempt like the role gate, so
+// it carries the same bound against a pathological definition.
+func TestParseAllowedUsersRejectsOversizedLists(t *testing.T) {
+	node := func(n int) string {
+		entries := make([]string, n)
+		for i := range entries {
+			entries[i] = fmt.Sprintf(`{"id":"22222222-2222-7222-8222-%012d"}`, i)
+		}
+		return `{"type":"input","channel":"http","output_property":"user","allowed_users":[` +
+			strings.Join(entries, ",") + `]}`
+	}
+	nc := mustParseContent(t, node(64))
+	if len(nc.AllowedUsers) != 64 {
+		t.Errorf("AllowedUsers = %d entries, want all 64 kept", len(nc.AllowedUsers))
+	}
+	_, err := model.ParseNodeContent([]byte(node(65)), testLimits)
+	if err == nil {
+		t.Fatal("65 users: error = nil, want the oversized list rejected")
+	}
+	if !strings.Contains(err.Error(), "allowed_users") {
+		t.Errorf("error = %q, want it to name allowed_users", err)
+	}
+}
+
 // An absent or empty allowed_roles means the node is open, which is what
 // every definition written before the field existed resolves to.
 func TestParseInputNodeAllowedRolesAbsentIsOpen(t *testing.T) {
@@ -917,29 +1021,44 @@ func TestParseInputNodePublic(t *testing.T) {
 }
 
 // A public node is open to everyone and cannot attribute the caller, so it
-// must not also carry a role gate or the actor envelope. Rejecting the
-// combination keeps a definition from promising an authorization it cannot
-// honor: the role list would never be consulted, and record_actor would have
-// no user_id to write.
-func TestParseInputNodePublicRejectsGates(t *testing.T) {
+// ignores both authorization gates while carrying them as authored, and
+// only the actor envelope is refused: an anonymous delivery has no user_id
+// to write.
+func TestParseInputNodePublicRejectsActor(t *testing.T) {
 	cases := map[string]string{
-		"roles":            `{"type":"input","channel":"http","output_property":"post","public":true,"allowed_roles":["finance"]}`,
-		"record_actor":     `{"type":"input","channel":"http","output_property":"post","public":true,"record_actor":true}`,
-		"roles and actor":  `{"type":"input","channel":"http","output_property":"post","public":true,"allowed_roles":["finance"],"record_actor":true}`,
-		"record_actor off": `{"type":"input","channel":"http","output_property":"post","public":true,"record_actor":false,"allowed_roles":["finance"]}`,
+		"record_actor":    `{"type":"input","channel":"http","output_property":"post","public":true,"record_actor":true}`,
+		"roles and actor": `{"type":"input","channel":"http","output_property":"post","public":true,"allowed_roles":["finance"],"record_actor":true}`,
+		"users and actor": `{"type":"input","channel":"http","output_property":"post","public":true,"allowed_users":[{"id":"22222222-2222-7222-8222-222222222222"}],"record_actor":true}`,
 	}
 	for name, raw := range cases {
 		_, err := model.ParseNodeContent([]byte(raw), testLimits)
 		if err == nil {
-			t.Errorf("%s: error = nil, want the gate rejected", name)
+			t.Errorf("%s: error = nil, want the actor envelope rejected", name)
 			continue
 		}
 		if !strings.Contains(err.Error(), "public input node") {
 			t.Errorf("%s: error = %q, want it to name the public constraint", name, err)
 		}
+		if !strings.Contains(err.Error(), "record_actor") {
+			t.Errorf("%s: error = %q, want it to name record_actor", name, err)
+		}
+	}
+	// The gates stay legal on a public node and are stored as authored so a
+	// later definition version that drops public re-arms them; delivery
+	// time ignores them instead.
+	nc := mustParseContent(t, `{"type":"input","channel":"http","output_property":"post","public":true,
+		"allowed_roles":["finance"],"allowed_users":[{"id":"22222222-2222-7222-8222-222222222222"}]}`)
+	if !nc.Public {
+		t.Error("Public = false, want true")
+	}
+	if len(nc.AllowedRoles) != 1 || nc.AllowedRoles[0] != "finance" {
+		t.Errorf("AllowedRoles = %v, want the authored list kept", nc.AllowedRoles)
+	}
+	if len(nc.AllowedUsers) != 1 || nc.AllowedUsers[0].ID != "22222222-2222-7222-8222-222222222222" {
+		t.Errorf("AllowedUsers = %v, want the authored list kept", nc.AllowedUsers)
 	}
 	// The compatible shapes stay legal: an absent record_actor is false, and
-	// an empty role list is the open gate a public node wants.
+	// an empty gate list is the open gate a public node wants.
 	for name, raw := range map[string]string{
 		"plain":     `{"type":"input","channel":"http","output_property":"post","public":true}`,
 		"empty":     `{"type":"input","channel":"http","output_property":"post","public":true,"allowed_roles":[]}`,
@@ -957,8 +1076,10 @@ func TestParseInputNodePublicRejectsGates(t *testing.T) {
 func TestParseAllowedRolesRejectsNonInputTypes(t *testing.T) {
 	cases := map[string]string{
 		"allowed_roles on script": `{"type":"script","script":"return 1;","allowed_roles":["finance"]}`,
+		"allowed_users on script": `{"type":"script","script":"return 1;","allowed_users":[{"id":"22222222-2222-7222-8222-222222222222"}]}`,
 		"record_actor on script":  `{"type":"script","script":"return 1;","record_actor":true}`,
 		"allowed_roles on output": `{"type":"output","channel":"redis","context_path":"a.b","allowed_roles":["finance"]}`,
+		"allowed_users on output": `{"type":"output","channel":"redis","context_path":"a.b","allowed_users":[{"id":"22222222-2222-7222-8222-222222222222"}]}`,
 		"record_actor on group":   `{"type":"group","start_node_id":"22222222-2222-7222-8222-222222222222","nodes":[{"type":"script","id":"22222222-2222-7222-8222-222222222222","script":"return 1;"}],"record_actor":true}`,
 		"public on script":        `{"type":"script","script":"return 1;","public":true}`,
 		"public on output":        `{"type":"output","channel":"redis","context_path":"a.b","public":true}`,
@@ -970,7 +1091,7 @@ func TestParseAllowedRolesRejectsNonInputTypes(t *testing.T) {
 			t.Errorf("%s: error = nil, want error", name)
 			continue
 		}
-		if !strings.Contains(err.Error(), "allowed_roles") && !strings.Contains(err.Error(), "record_actor") {
+		if !strings.Contains(err.Error(), "allowed_roles") && !strings.Contains(err.Error(), "allowed_users") && !strings.Contains(err.Error(), "record_actor") {
 			t.Errorf("%s: error = %q, want it to name the offending field", name, err)
 		}
 	}
@@ -984,6 +1105,7 @@ func TestParseAllowedRolesRejectsNonInputTypes(t *testing.T) {
 func TestParseAllowedRolesRejectsNodeDefinitionRefs(t *testing.T) {
 	for name, raw := range map[string]string{
 		"allowed_roles": `{"type":"input","node_definition_id":"22222222-2222-7222-8222-222222222222","allowed_roles":["finance"]}`,
+		"allowed_users": `{"type":"input","node_definition_id":"22222222-2222-7222-8222-222222222222","allowed_users":[{"id":"22222222-2222-7222-8222-222222222222"}]}`,
 		"record_actor":  `{"type":"input","node_definition_id":"22222222-2222-7222-8222-222222222222","record_actor":true}`,
 		"public":        `{"type":"input","node_definition_id":"22222222-2222-7222-8222-222222222222","public":true}`,
 		"both":          `{"type":"input","node_definition_id":"22222222-2222-7222-8222-222222222222","allowed_roles":["finance"],"record_actor":true}`,

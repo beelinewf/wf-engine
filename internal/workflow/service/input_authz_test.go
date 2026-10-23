@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -726,6 +727,177 @@ func TestAnonymousReplayFollowsTheTargetNode(t *testing.T) {
 	}
 }
 
+// TestInputUserGate walks the user-gate matrix: a listed user passes the
+// node however their roles read, while an unlisted caller is refused
+// without consulting the role list, and the gate never skips the endpoint
+// permission.
+func TestInputUserGate(t *testing.T) {
+	// adaUserID is the seeded just-in-time identity: a stranger to the
+	// instance, which parkedInstance creates as gateUserID.
+	const adaUserID = "44444444-4444-7444-8444-444444444444"
+	ownerFinance := &auth.Principal{UserID: gateUserID, Roles: []string{"finance"}}
+	ownerManager := &auth.Principal{UserID: gateUserID, Roles: []string{"manager"}}
+	unresolved := &auth.Principal{Roles: []string{"finance"}}
+	service1 := &auth.Principal{UserID: gateUserID, Service: true}
+	stranger := &auth.Principal{UserID: adaUserID, Roles: []string{"finance"}}
+
+	users := func(ids ...string) []any {
+		out := make([]any, 0, len(ids))
+		for _, id := range ids {
+			out = append(out, map[string]any{"id": id})
+		}
+		return out
+	}
+
+	cases := []struct {
+		name      string
+		extra     map[string]any
+		principal *auth.Principal
+		wantErr   error
+	}{
+		// The listed owner passes the node however their roles read.
+		{"listed user passes", map[string]any{"allowed_users": users(gateUserID)}, ownerFinance, nil},
+		// Priority is inside the node gate only: a listed user without
+		// the endpoint permission is still refused.
+		{"listed user without the permission is refused", map[string]any{"allowed_users": users(gateUserID)}, ownerManager, model.ErrForbidden},
+		// The owner is not listed and the node lists no role they hold.
+		{"unlisted user is refused", map[string]any{"allowed_users": users(adaUserID)}, ownerFinance, model.ErrForbidden},
+		// A caller with no resolved user id never matches the gate.
+		{"unresolved caller is refused", map[string]any{"allowed_users": users(gateUserID)}, unresolved, model.ErrForbidden},
+		// Both gates together: the user match wins over the wrong roles.
+		{"user match wins over roles", map[string]any{"allowed_users": users(gateUserID), "allowed_roles": []string{"manager"}}, ownerFinance, nil},
+		// Both gates together: the user list is the only gate consulted,
+		// so a listed role does not admit an unlisted user.
+		{"role match does not admit an unlisted user", map[string]any{"allowed_users": users(adaUserID), "allowed_roles": []string{"finance"}}, ownerFinance, model.ErrForbidden},
+		{"unlisted caller without roles is refused", map[string]any{"allowed_users": users(adaUserID), "allowed_roles": []string{"manager"}}, ownerFinance, model.ErrForbidden},
+		// The service principal bypasses the user gate like the role gate.
+		{"service bypasses a users-only node", map[string]any{"allowed_users": users(adaUserID)}, service1, nil},
+		{"absent principal bypasses a users-only node", map[string]any{"allowed_users": users(adaUserID)}, nil, nil},
+		// A listed stranger never reaches the gate: the instance object
+		// check binds delivery to the owner first and answers 404.
+		{"listed stranger fails the object check", map[string]any{"allowed_users": users(adaUserID)}, stranger, model.ErrNotFound},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db, svc, instanceID := parkedInstance(t, tc.extra)
+			delivery, err := deliverAs(svc, instanceID, "key-1", `{"success":true}`, tc.principal)
+			if tc.wantErr != nil {
+				if !errors.Is(err, tc.wantErr) {
+					t.Fatalf("DeliverInput() error = %v, want %v", err, tc.wantErr)
+				}
+				if delivery != nil {
+					t.Errorf("delivery = %+v, want no delivery returned to a refused caller", delivery)
+				}
+				assertNoDelivery(t, db, instanceID)
+				return
+			}
+			if err != nil {
+				t.Fatalf("DeliverInput() error = %v, want accepted", err)
+			}
+			if !delivery.Accepted {
+				t.Errorf("Accepted = false, want accepted")
+			}
+		})
+	}
+}
+
+// A user-gate refusal names the gate that failed: the user list when the
+// node carries one, else the role list. The roles-only message keeps its
+// historical shape, and the audit event carries the refused caller's
+// resolved user id next to the roles without ever recording the payload.
+func TestInputUserGateDenialNamesTheGate(t *testing.T) {
+	const adaUserID = "44444444-4444-7444-8444-444444444444"
+	cases := []struct {
+		name       string
+		extra      map[string]any
+		want       []string
+		wantAbsent []string
+	}{
+		{"users only", map[string]any{"allowed_users": []any{map[string]any{"id": adaUserID}}},
+			[]string{"users [" + adaUserID + "]"}, nil},
+		{"both gates name only the user list", map[string]any{
+			"allowed_users": []any{map[string]any{"id": adaUserID}},
+			"allowed_roles": []string{"manager"},
+		}, []string{"users [" + adaUserID + "]"}, []string{"roles ["}},
+		{"roles only keeps its message", map[string]any{"allowed_roles": []string{"manager"}},
+			[]string{"roles [manager] are required to deliver to this input node"}, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db, svc, instanceID := parkedInstance(t, tc.extra)
+			p := &auth.Principal{UserID: gateUserID, Roles: []string{"finance"}}
+			if _, err := deliverAs(svc, instanceID, "denied-1", `{"ok":true}`, p); !errors.Is(err, model.ErrForbidden) {
+				t.Fatalf("DeliverInput() error = %v, want ErrForbidden", err)
+			}
+			found := false
+			for _, e := range loadEvents(t, db, instanceID) {
+				if e.Type != "input_forbidden" {
+					continue
+				}
+				found = true
+				var data map[string]any
+				_ = json.Unmarshal(e.Data, &data)
+				reason, _ := data["reason"].(string)
+				for _, want := range tc.want {
+					if !strings.Contains(reason, want) {
+						t.Errorf("reason = %q, want it to contain %q", reason, want)
+					}
+				}
+				for _, absent := range tc.wantAbsent {
+					if strings.Contains(reason, absent) {
+						t.Errorf("reason = %q, want it not to mention %q", reason, absent)
+					}
+				}
+				if data["user_id"] != gateUserID {
+					t.Errorf("event user_id = %v, want the refused caller %q", data["user_id"], gateUserID)
+				}
+			}
+			if !found {
+				t.Error("no input_forbidden audit event was recorded")
+			}
+		})
+	}
+}
+
+// A public node ignores both authorization gates: an anonymous caller and a
+// credentialed caller neither listed nor role-matched are both accepted.
+func TestPublicNodeIgnoresAllowedGates(t *testing.T) {
+	const adaUserID = "44444444-4444-7444-8444-444444444444"
+	extra := map[string]any{
+		"public":        true,
+		"allowed_roles": []string{"manager"},
+		"allowed_users": []any{map[string]any{"id": adaUserID}},
+	}
+	_, svc, instanceID := parkedInstance(t, extra)
+	finance := &auth.Principal{UserID: gateUserID, Roles: []string{"finance"}}
+	delivery, err := deliverAs(svc, instanceID, "key-1", `{"ok":true}`, finance)
+	if err != nil {
+		t.Fatalf("DeliverInput() error = %v, want a public node to ignore both gates", err)
+	}
+	if !delivery.Accepted {
+		t.Fatalf("delivery = %+v, want accepted", delivery)
+	}
+	// The same key replays the stored delivery to an anonymous caller: the
+	// replay re-authorizes against the public target node.
+	replay, err := deliverAnonymously(svc, instanceID, "key-1", `{"ok":true}`)
+	if err != nil {
+		t.Fatalf("anonymous replay error = %v, want the stored delivery", err)
+	}
+	if replay.ID != delivery.ID {
+		t.Errorf("replay = %+v, want the stored delivery %s", replay, delivery.ID)
+	}
+	// Anonymous first on a fresh instance is accepted outright.
+	_, svc2, instanceID2 := parkedInstance(t, extra)
+	anon, err := deliverAnonymously(svc2, instanceID2, "anon-1", `{"ok":true}`)
+	if err != nil {
+		t.Fatalf("anonymous DeliverInput() error = %v, want accepted", err)
+	}
+	if !anon.Accepted {
+		t.Fatalf("delivery = %+v, want accepted", anon)
+	}
+}
+
 // The status contract tells the frontend the node is public, so it can show
 // the anonymous path before anyone tries it.
 func TestPendingInputExposesPublic(t *testing.T) {
@@ -830,5 +1002,71 @@ func TestPendingInputOpenNodeReportsEmptyRoles(t *testing.T) {
 	}
 	if detail.PendingInput.RecordActor {
 		t.Error("RecordActor = true, want false for a node that did not opt in")
+	}
+}
+
+// The status contract carries the user gate in the same [{"id": ...}] shape
+// the definition authors, so the frontend can explain a refusal. A public
+// node reports both gates empty: it ignores them, so showing the authored
+// lists would hide a form that is actually open.
+func TestPendingInputExposesAllowedUsers(t *testing.T) {
+	const adaUserID = "44444444-4444-7444-8444-444444444444"
+	pendingFor := func(t *testing.T, extra map[string]any) *service.PendingInput {
+		t.Helper()
+		db := setupSvcDB(t)
+		ctx := context.Background()
+		svc := svcInstanceServiceWithCatalog(db, gateCatalog)
+
+		n1 := "11111111-1111-7111-8111-111111111101"
+		wfID := svcCreateWorkflow(t, db, n1,
+			svcNodeJSON(n1, "input", "ask", "", "", extra),
+		)
+		inst, err := svc.Create(ctx, service.CreateInstance{WorkflowDefinitionID: wfID, Context: json.RawMessage(`{}`), Actor: gateUserID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cur := driveEngine(t, db, inst.ID); cur.Status != model.WorkflowWaiting {
+			t.Fatalf("instance = %+v, want waiting", cur)
+		}
+		detail, err := svc.GetStatusDetail(ctx, inst.ID, auth.Principal{UserID: gateUserID})
+		if err != nil {
+			t.Fatalf("GetStatusDetail() error = %v", err)
+		}
+		if detail.PendingInput == nil {
+			t.Fatal("PendingInput = nil, want the waiting-input contract")
+		}
+		return detail.PendingInput
+	}
+
+	base := map[string]any{
+		"channel":         "http",
+		"output_property": "webhook",
+		"allowed_roles":   []string{"finance"},
+		"allowed_users":   []any{map[string]any{"id": adaUserID}},
+	}
+	pi := pendingFor(t, base)
+	if len(pi.AllowedRoles) != 1 || pi.AllowedRoles[0] != "finance" {
+		t.Errorf("AllowedRoles = %v, want the authored role gate", pi.AllowedRoles)
+	}
+	if len(pi.AllowedUsers) != 1 || pi.AllowedUsers[0].ID != adaUserID {
+		t.Errorf("AllowedUsers = %+v, want the authored user gate", pi.AllowedUsers)
+	}
+
+	public := map[string]any{
+		"channel":         "http",
+		"output_property": "webhook",
+		"public":          true,
+		"allowed_roles":   []string{"manager"},
+		"allowed_users":   []any{map[string]any{"id": adaUserID}},
+	}
+	pub := pendingFor(t, public)
+	if !pub.Public {
+		t.Error("Public = false, want true")
+	}
+	if len(pub.AllowedRoles) != 0 {
+		t.Errorf("AllowedRoles = %v, want empty for a public node", pub.AllowedRoles)
+	}
+	if len(pub.AllowedUsers) != 0 {
+		t.Errorf("AllowedUsers = %+v, want empty for a public node", pub.AllowedUsers)
 	}
 }

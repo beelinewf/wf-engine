@@ -210,7 +210,7 @@ func TestNodeSchemaOnFailureOnlyWhereParserAllows(t *testing.T) {
 // TestNodeSchemaPublicOnlyOnInput pins the input node's authorization
 // surface to the one type that parses it, mirroring the parser guard.
 func TestNodeSchemaPublicOnlyOnInput(t *testing.T) {
-	authzFields := []string{"allowed_roles", "record_actor", "public"}
+	authzFields := []string{"allowed_roles", "allowed_users", "record_actor", "public"}
 	for _, nodeType := range builtinTypes {
 		raw, _ := model.NodeSchema(nodeType)
 		props := decodeSchema(t, raw)["properties"].(map[string]any)
@@ -231,6 +231,23 @@ func TestNodeSchemaPublicOnlyOnInput(t *testing.T) {
 	}
 	if err := compiled.Validate(instance); err != nil {
 		t.Errorf("input schema rejected public content: %v", err)
+	}
+	// The served input schema accepts the user-gate content the parser
+	// accepts, and rejects an entry without an id.
+	var gated any
+	if err := json.Unmarshal([]byte(`{"type":"input","channel":"http","output_property":"post",
+		"allowed_roles":["finance"],"allowed_users":[{"id":"aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa"}]}`), &gated); err != nil {
+		t.Fatal(err)
+	}
+	if err := compiled.Validate(gated); err != nil {
+		t.Errorf("input schema rejected allowed_users content: %v", err)
+	}
+	var idless any
+	if err := json.Unmarshal([]byte(`{"type":"input","channel":"http","allowed_users":[{}]}`), &idless); err != nil {
+		t.Fatal(err)
+	}
+	if err := compiled.Validate(idless); err == nil {
+		t.Error("input schema accepted an allowed_users entry without an id, want it rejected")
 	}
 }
 

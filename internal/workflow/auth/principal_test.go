@@ -112,6 +112,37 @@ func TestCanSatisfyRoles(t *testing.T) {
 	}
 }
 
+func TestMatchesUserID(t *testing.T) {
+	cases := []struct {
+		name      string
+		principal auth.Principal
+		allowed   []string
+		want      bool
+	}{
+		{"listed user", auth.Principal{UserID: "u-1"}, []string{"u-1", "u-2"}, true},
+		{"unlisted user", auth.Principal{UserID: "u-9"}, []string{"u-1", "u-2"}, false},
+		{"empty user id never matches", auth.Principal{}, []string{"u-1"}, false},
+		{"empty list never matches", auth.Principal{UserID: "u-1"}, []string{}, false},
+		{"nil list never matches", auth.Principal{UserID: "u-1"}, nil, false},
+		{"case differs", auth.Principal{UserID: "U-1"}, []string{"u-1"}, false},
+	}
+	for _, tc := range cases {
+		if got := tc.principal.MatchesUserID(tc.allowed); got != tc.want {
+			t.Errorf("%s: MatchesUserID(%v) = %v, want %v", tc.name, tc.allowed, got, tc.want)
+		}
+	}
+	// The matcher has no service shortcut: the service principal bypasses in
+	// the service layer before either gate is consulted. A system principal
+	// carrying the system user id still matches a list that names it.
+	sys := auth.SystemPrincipal("system-id")
+	if !sys.MatchesUserID([]string{"system-id"}) {
+		t.Error("system principal must match a list naming its user id")
+	}
+	if sys.MatchesUserID([]string{"other-id"}) {
+		t.Error("system principal must not match a list naming someone else")
+	}
+}
+
 // The two gates are independent: holding the endpoint permission does not
 // imply satisfying the node gate, and the reverse is not even checked.
 func TestGatesAreIndependent(t *testing.T) {

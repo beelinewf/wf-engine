@@ -343,8 +343,15 @@ type PendingInputResponse struct {
 	// snapshot_forms. Absent for live instances and formless nodes.
 	Form *SnapshotFormResponse `json:"form,omitempty"`
 	// AllowedRoles is the node's role gate. Empty means the node is open to
-	// any caller that holds input:deliver.
+	// any caller that holds input:deliver, unless AllowedUsers is
+	// non-empty: a non-empty user list is the only gate consulted. Always
+	// empty on a public node, which ignores both gates.
 	AllowedRoles []string `json:"allowed_roles"`
+	// AllowedUsers is the node's user gate: when non-empty, only the listed
+	// users may deliver, regardless of their roles, and AllowedRoles is
+	// not consulted. Empty means no user restriction, and like AllowedRoles
+	// it is always empty on a public node.
+	AllowedUsers []AllowedUserResponse `json:"allowed_users"`
 	// RecordActor reports that an accepted delivery is written as the
 	// attribution envelope {user_id, input_data} rather than the bare
 	// payload, so the frontend knows which shape the context will hold.
@@ -356,6 +363,12 @@ type PendingInputResponse struct {
 	// Accept lists the request media types the node delivers. A frontend
 	// reads it to decide between a JSON body and a multipart upload.
 	Accept []string `json:"accept"`
+}
+
+// AllowedUserResponse is one entry of a pending input's user gate: the
+// users.id uuid of a caller allowed to deliver to the node.
+type AllowedUserResponse struct {
+	ID string `json:"id"`
 }
 
 // NodeOccurrenceResponse maps a workflow graph node id to its executed

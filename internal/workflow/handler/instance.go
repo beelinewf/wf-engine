@@ -479,10 +479,11 @@ func (h *InstanceHandler) Input(c *gin.Context) {
 		return
 	}
 	// The principal is passed through so the service can apply the input
-	// node's role gate and record the deliverer. With authentication off
-	// there is no principal, and a nil one is what the service reads as
-	// the service principal: an unauthenticated deployment keeps accepting
-	// deliveries on nodes that list allowed_roles.
+	// node's user and role gates and record the deliverer. With
+	// authentication off there is no principal, and a nil one is what the
+	// service reads as the service principal: an unauthenticated deployment
+	// keeps accepting deliveries on nodes that list allowed_roles or
+	// allowed_users.
 	//
 	// A request that reached this handler with no principal while the route
 	// serves anonymous callers is the public input node's case, and it is
@@ -753,6 +754,10 @@ func toPendingInputResponse(p *service.PendingInput) *PendingInputResponse {
 	if allowed == nil {
 		allowed = []string{}
 	}
+	users := make([]AllowedUserResponse, 0, len(p.AllowedUsers))
+	for _, u := range p.AllowedUsers {
+		users = append(users, AllowedUserResponse{ID: u.ID})
+	}
 	accept := p.Accept
 	if accept == nil {
 		accept = []string{}
@@ -768,6 +773,7 @@ func toPendingInputResponse(p *service.PendingInput) *PendingInputResponse {
 		FormID:         p.FormID,
 		Form:           form,
 		AllowedRoles:   allowed,
+		AllowedUsers:   users,
 		RecordActor:    p.RecordActor,
 		Public:         p.Public,
 		Accept:         accept,

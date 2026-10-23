@@ -239,6 +239,23 @@ func TestPendingInputResponseCarriesAccept(t *testing.T) {
 	}
 }
 
+// The status contract carries the node's user gate in the same [{"id": ...}]
+// shape the definition authors; a nil list degrades to empty rather than
+// null, like allowed_roles.
+func TestPendingInputResponseCarriesAllowedUsers(t *testing.T) {
+	got := toPendingInputResponse(&service.PendingInput{
+		NodeID: "n", Channel: "http",
+		AllowedUsers: []model.AllowedUser{{ID: "22222222-2222-7222-8222-222222222222"}},
+	})
+	if len(got.AllowedUsers) != 1 || got.AllowedUsers[0].ID != "22222222-2222-7222-8222-222222222222" {
+		t.Errorf("allowed_users = %+v, want the single listed id", got.AllowedUsers)
+	}
+	empty := toPendingInputResponse(&service.PendingInput{NodeID: "n", Channel: "http"})
+	if empty.AllowedUsers == nil || len(empty.AllowedUsers) != 0 {
+		t.Errorf("allowed_users = %v, want an empty non-nil list", empty.AllowedUsers)
+	}
+}
+
 // The boundary parameter rides the Content-Type header: the dispatch parses
 // the media type, not the raw header.
 func TestInputMultipartWithBoundaryDispatches(t *testing.T) {
