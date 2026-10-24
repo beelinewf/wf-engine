@@ -62,7 +62,7 @@ func (e *CommandExecutor) Execute(ctx context.Context, req Request) (*Result, er
 	}
 	stdin := ""
 	if cfg.Stdin != "" {
-		rendered, err := contextpath.RenderTemplate(cfg.Stdin, req.Context)
+		rendered, err := contextpath.RenderTemplate(cfg.Stdin, req.TemplateData())
 		if err != nil {
 			return nil, &NodeError{Node: req.Node, Reason: "command", Err: fmt.Errorf("render stdin: %w", err)}
 		}

@@ -296,10 +296,7 @@ func (e *Executor) Execute(ctx context.Context, req executor.Request) (*executor
 	if !ok {
 		return nil, fmt.Errorf("s3fetch: node custom config has unexpected type %T", req.Node.Custom)
 	}
-	tplCtx := req.Context
-	if tplCtx == nil {
-		tplCtx = map[string]any{}
-	}
+	tplCtx := req.TemplateData()
 	endpoint, err := renderField(cfg.Endpoint, tplCtx)
 	if err != nil {
 		return nil, &executor.NodeError{Node: req.Node, Reason: "s3fetch", Err: fmt.Errorf("endpoint: %w", err)}

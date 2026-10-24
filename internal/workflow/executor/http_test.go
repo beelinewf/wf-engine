@@ -79,6 +79,33 @@ func TestHTTPExecutorPostsTemplatedBody(t *testing.T) {
 	}
 }
 
+func TestHTTPExecutorURLSeesReservedRoots(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	ex := executor.NewExecutors(executor.Limits{HTTPAllowlist: []string{"*"}, MaxRedirects: 5}, nil, executor.Dependencies{})[model.NodeTypeExternalCall]
+	node := httpNode(&model.HTTPConfig{
+		URL:    srv.URL + "/{{ branch_id }}/{{ node_id }}",
+		Method: "GET",
+	})
+	node.ID = "notify"
+	_, err := ex.Execute(context.Background(), executor.Request{
+		Node:     node,
+		Context:  map[string]any{"branch_id": "user-value"},
+		BranchID: "br-1",
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if gotPath != "/br-1/notify" {
+		t.Errorf("path = %q, want /br-1/notify (reserved wins)", gotPath)
+	}
+}
+
 func TestHTTPExecutorDynamicConfig(t *testing.T) {
 	var gotPath, gotMethod, gotAuth string
 	var gotBody any

@@ -226,7 +226,7 @@ func sleepForRetry(ctx context.Context, d time.Duration) bool {
 
 func (e *HTTPExecutor) build(ctx context.Context, req Request) (*httpConfig, error) {
 	cfg := req.Node.HTTP
-	return e.buildConfig(ctx, cfg.URL, cfg.Method, cfg.Headers, cfg.Body, req.Context)
+	return e.buildConfig(ctx, cfg.URL, cfg.Method, cfg.Headers, cfg.Body, req.TemplateData())
 }
 
 // buildConfig renders and validates one outbound HTTP call configuration
