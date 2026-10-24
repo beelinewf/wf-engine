@@ -54,12 +54,43 @@ type Request struct {
 	// retries of the same logical step hit the same external request.
 	IdempotencyKey string
 	// InstanceID is the workflow instance id; output nodes use it to derive
-	// their redis channel, and poller templates expose it as the reserved
+	// their redis channel, and templates expose it as the reserved
 	// read-only root workflow_instance_id.
 	InstanceID string
-	// NodeInstanceID is the current node occurrence id; poller templates
-	// expose it as the reserved read-only root node_instance_id.
+	// NodeInstanceID is the current node occurrence id; templates expose
+	// it as the reserved read-only root node_instance_id.
 	NodeInstanceID string
+	// BranchID is the current parallel branch id, "" in the parent scope.
+	BranchID string
+	// ParallelExecutionID is the id of the parallel execution the scope
+	// runs in, "" in the parent scope (at a join: the execution joining).
+	ParallelExecutionID string
+	// BranchName and BranchIndex identify the branch; empty/0 outside a branch.
+	BranchName  string
+	BranchIndex int
+}
+
+// Identity builds the execution identity of this request from its id
+// fields. NodeID comes from the node content and is "" when Node is nil.
+func (r Request) Identity() Identity {
+	ident := Identity{
+		WorkflowInstanceID:  r.InstanceID,
+		NodeInstanceID:      r.NodeInstanceID,
+		BranchID:            r.BranchID,
+		ParallelExecutionID: r.ParallelExecutionID,
+		BranchName:          r.BranchName,
+		BranchIndex:         r.BranchIndex,
+	}
+	if r.Node != nil {
+		ident.NodeID = r.Node.ID
+	}
+	return ident
+}
+
+// TemplateData returns the ephemeral render map for this request: the
+// workflow context plus the reserved identity roots (see Identity).
+func (r Request) TemplateData() map[string]any {
+	return r.Identity().TemplateData(r.Context)
 }
 
 // Result is produced by a successful node execution.

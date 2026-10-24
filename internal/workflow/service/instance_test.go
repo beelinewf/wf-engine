@@ -3871,6 +3871,43 @@ func TestDeliverBranchInputWakesBranch(t *testing.T) {
 	}
 }
 
+func TestDeliverBranchInputPostHookSeesMeta(t *testing.T) {
+	db := setupSvcDB(t)
+	ctx := context.Background()
+	svc := svcInstanceService(db)
+	wfID := svcCreateBranchInputWorkflow(t, db, map[string]any{
+		"channel":         "http",
+		"output_property": "webhook",
+		"post_script":     map[string]any{"script": `context.delivered_to = meta.branch_id + "/" + meta.node_id;`},
+	})
+	instID, a, _ := svcSetupBranchInput(t, db, svc, wfID)
+
+	d, err := svc.DeliverInput(ctx, service.DeliverInput{
+		InstanceID: instID, BranchID: a.ID, IdempotencyKey: "bk-meta", Payload: []byte(`{"success":true}`),
+	})
+	if err != nil {
+		t.Fatalf("DeliverInput() error = %v", err)
+	}
+	if !d.Accepted {
+		t.Fatalf("delivery = %+v, want accepted", d)
+	}
+	prepo := repository.NewParallelRepository(db)
+	got, err := prepo.GetBranch(ctx, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bctx map[string]any
+	if err := json.Unmarshal(got.Context, &bctx); err != nil {
+		t.Fatal(err)
+	}
+	if bctx["delivered_to"] != a.ID+"/"+svcBranchAsk {
+		t.Errorf("delivered_to = %v, want %s/%s", bctx["delivered_to"], a.ID, svcBranchAsk)
+	}
+	if _, ok := bctx["meta"]; ok {
+		t.Errorf("meta leaked into branch context: %v", bctx)
+	}
+}
+
 // Branch deliveries are script-only too: the branch input node's form_id is
 // never consulted by the backend.
 func TestDeliverBranchInputIgnoresFormSchema(t *testing.T) {

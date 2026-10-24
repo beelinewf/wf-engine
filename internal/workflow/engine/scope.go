@@ -3,6 +3,7 @@ package engine
 import (
 	"encoding/json"
 
+	"github.com/beelinewf/wf-engine/internal/workflow/executor"
 	"github.com/beelinewf/wf-engine/internal/workflow/model"
 )
 
@@ -55,6 +56,21 @@ func (s *execScope) branchIdentity() map[string]any {
 		"branch_index":  s.branchIndex,
 		"start_node_id": s.branchStartNodeID,
 		"end_node_id":   s.endNodeID,
+	}
+}
+
+// identity builds the executor identity for a node run in this scope.
+// nodeInstanceID is "" where no attempt exists yet (group entry, input
+// parking, joins).
+func (s *execScope) identity(nodeID, nodeInstanceID string) executor.Identity {
+	return executor.Identity{
+		WorkflowInstanceID:  s.instanceID,
+		NodeInstanceID:      nodeInstanceID,
+		BranchID:            s.branchID,
+		ParallelExecutionID: s.executionID,
+		BranchName:          s.branchName,
+		BranchIndex:         s.branchIndex,
+		NodeID:              nodeID,
 	}
 }
 

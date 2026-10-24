@@ -37,6 +37,7 @@ func (e *ScriptExecutor) Execute(ctx context.Context, req Request) (*Result, err
 		Timeout: req.Node.Timeout,
 		Funcs:   e.funcs,
 		Vars:    req.Vars,
+		Meta:    req.Identity().Meta(),
 	})
 	if err != nil {
 		return nil, err
@@ -67,6 +68,7 @@ func (e *ConditionExecutor) evaluate(ctx context.Context, req Request) (*Conditi
 			Timeout: req.Node.Timeout,
 			Funcs:   e.funcs,
 			Frozen:  true,
+			Meta:    req.Identity().Meta(),
 		})
 		if err != nil {
 			return nil, &NodeError{Node: req.Node, Reason: "conditions", Err: err}
@@ -119,6 +121,7 @@ func (e *InputExecutor) Validate(ctx context.Context, req Request) (*ValidationR
 		Funcs:   e.funcs,
 		Frozen:  true,
 		Vars:    map[string]any{"input": string(req.Payload)},
+		Meta:    req.Identity().Meta(),
 	})
 	if err != nil {
 		return nil, &NodeError{Node: req.Node, Reason: "input-validation", Err: err}

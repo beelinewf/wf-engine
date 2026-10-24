@@ -64,10 +64,11 @@ func NewPollerPredicateEvaluator(funcs *jsfunc.Registry) *PollerPredicateEvaluat
 	return &PollerPredicateEvaluator{funcs: funcs}
 }
 
-// Evaluate runs the until script with the frozen workflow context and the
-// frozen response and requires an actual boolean result. Script errors,
-// timeouts, and non-boolean results fail the poller.
-func (e *PollerPredicateEvaluator) Evaluate(ctx context.Context, until string, timeout time.Duration, wfCtx map[string]any, response *PollerResponse) (bool, error) {
+// Evaluate runs the until script with the frozen workflow context, the
+// frozen response, and the frozen identity meta, and requires an actual
+// boolean result. Script errors, timeouts, and non-boolean results fail
+// the poller.
+func (e *PollerPredicateEvaluator) Evaluate(ctx context.Context, until string, timeout time.Duration, wfCtx map[string]any, response *PollerResponse, ident Identity) (bool, error) {
 	res, err := RunScript(ctx, ScriptOptions{
 		Source:     until,
 		Context:    wfCtx,
@@ -76,6 +77,7 @@ func (e *PollerPredicateEvaluator) Evaluate(ctx context.Context, until string, t
 		Frozen:     true,
 		Vars:       map[string]any{"response": response},
 		FrozenVars: []string{"response"},
+		Meta:       ident.Meta(),
 	})
 	if err != nil {
 		return false, err
@@ -148,21 +150,6 @@ func (e *PollerExecutor) Execute(ctx context.Context, req Request) (*Result, err
 	}
 }
 
-// templateData returns a shallow copy of the workflow context enriched with
-// the reserved automatic template roots workflow_instance_id and
-// node_instance_id, which always win over same-named user values. The
-// reserved values are only visible while rendering poller configuration and
-// are never written back to the workflow context.
-func (e *PollerExecutor) templateData(req Request) map[string]any {
-	data := make(map[string]any, len(req.Context)+2)
-	for k, v := range req.Context {
-		data[k] = v
-	}
-	data["workflow_instance_id"] = req.InstanceID
-	data["node_instance_id"] = req.NodeInstanceID
-	return data
-}
-
 // pollHTTP repeats an outbound HTTP call until the predicate matches or
 // max_attempts calls are exhausted. The first request starts immediately;
 // delay applies only between attempts. Every call counts toward
@@ -170,7 +157,7 @@ func (e *PollerExecutor) templateData(req Request) map[string]any {
 // evaluated by the predicate, not transport errors.
 func (e *PollerExecutor) pollHTTP(ctx context.Context, req Request) (*Result, error) {
 	cfg := req.Node.PollerHTTP
-	built, err := e.http.buildConfig(ctx, cfg.URL, cfg.Method, cfg.Headers, cfg.Body, e.templateData(req))
+	built, err := e.http.buildConfig(ctx, cfg.URL, cfg.Method, cfg.Headers, cfg.Body, req.TemplateData())
 	if err != nil {
 		return nil, &NodeError{Node: req.Node, Reason: "poller", Err: err}
 	}
@@ -201,7 +188,7 @@ func (e *PollerExecutor) pollHTTP(ctx context.Context, req Request) (*Result, er
 			outHeaders[k] = v
 		}
 		resp := NewHTTPPollerResponse(status, outHeaders, NormalizePollerBody(body))
-		matched, err := e.pred.Evaluate(ctx, cfg.Until, req.Node.PredicateTimeout, req.Context, resp)
+		matched, err := e.pred.Evaluate(ctx, cfg.Until, req.Node.PredicateTimeout, req.Context, resp, req.Identity())
 		if err != nil {
 			return nil, &NodeError{Node: req.Node, Reason: "poller-until", Err: err}
 		}
@@ -251,7 +238,7 @@ func (e *PollerExecutor) pollRedis(ctx context.Context, req Request) (*Result, e
 // with body null. Every call, including one ending in a transport error,
 // counts toward max_attempts.
 func (e *PollerExecutor) redisGet(ctx context.Context, req Request, cfg *model.PollerRedisConfig) (*Result, error) {
-	key, err := renderString(cfg.Key, e.templateData(req))
+	key, err := renderString(cfg.Key, req.TemplateData())
 	if err != nil {
 		return nil, &NodeError{Node: req.Node, Reason: "poller", Err: err}
 	}
@@ -280,7 +267,7 @@ func (e *PollerExecutor) redisGet(ctx context.Context, req Request, cfg *model.P
 		} else {
 			resp = NewRedisPollerResponse(nil)
 		}
-		matched, err := e.pred.Evaluate(ctx, cfg.Until, req.Node.PredicateTimeout, req.Context, resp)
+		matched, err := e.pred.Evaluate(ctx, cfg.Until, req.Node.PredicateTimeout, req.Context, resp, req.Identity())
 		if err != nil {
 			return nil, &NodeError{Node: req.Node, Reason: "poller-until", Err: err}
 		}
@@ -308,7 +295,7 @@ type redisSubResult struct {
 // pub/sub is broadcast: multiple active pollers may accept the same message
 // and messages published while nobody is subscribed are lost.
 func (e *PollerExecutor) redisSub(ctx context.Context, req Request, cfg *model.PollerRedisConfig) (*Result, error) {
-	channel, err := renderString(cfg.Channel, e.templateData(req))
+	channel, err := renderString(cfg.Channel, req.TemplateData())
 	if err != nil {
 		return nil, &NodeError{Node: req.Node, Reason: "poller", Err: err}
 	}
@@ -320,7 +307,7 @@ func (e *PollerExecutor) redisSub(ctx context.Context, req Request, cfg *model.P
 	results := make(chan redisSubResult, 1)
 	handler := func(ctx context.Context, _ string, payload []byte) error {
 		resp := NewRedisPollerResponse(NormalizePollerBody(payload))
-		matched, err := e.pred.Evaluate(ctx, cfg.Until, req.Node.PredicateTimeout, req.Context, resp)
+		matched, err := e.pred.Evaluate(ctx, cfg.Until, req.Node.PredicateTimeout, req.Context, resp, req.Identity())
 		if err != nil {
 			select {
 			case results <- redisSubResult{err: err}:
@@ -390,7 +377,7 @@ func (e *PollerExecutor) pollRabbit(ctx context.Context, req Request) (*Result, 
 	if e.rabbit == nil {
 		return nil, &NodeError{Node: req.Node, Reason: "poller", Err: errors.New("rabbitmq polling client is not configured")}
 	}
-	queue, err := renderString(cfg.Queue, e.templateData(req))
+	queue, err := renderString(cfg.Queue, req.TemplateData())
 	if err != nil {
 		return nil, &NodeError{Node: req.Node, Reason: "poller", Err: err}
 	}
@@ -402,7 +389,7 @@ func (e *PollerExecutor) pollRabbit(ctx context.Context, req Request) (*Result, 
 	results := make(chan rabbitSubResult, 1)
 	handler := func(msg transport.RabbitPollerMessage) (transport.RabbitPollerSettlement, error) {
 		resp := NewRabbitPollerResponse(msg.Headers, NormalizePollerBody(msg.Body))
-		matched, err := e.pred.Evaluate(ctx, cfg.Until, req.Node.PredicateTimeout, req.Context, resp)
+		matched, err := e.pred.Evaluate(ctx, cfg.Until, req.Node.PredicateTimeout, req.Context, resp, req.Identity())
 		if err != nil {
 			select {
 			case results <- rabbitSubResult{err: err}:

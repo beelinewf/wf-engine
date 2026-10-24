@@ -133,7 +133,7 @@ func TestPollerPredicate(t *testing.T) {
 	wfCtx := map[string]any{"job": map[string]any{"id": "j1"}}
 	resp := executor.NewHTTPPollerResponse(200, nil, map[string]any{"status": "completed"})
 	eval := func(src string, timeout time.Duration) (bool, error) {
-		return ev.Evaluate(context.Background(), src, timeout, wfCtx, resp)
+		return ev.Evaluate(context.Background(), src, timeout, wfCtx, resp, executor.Identity{})
 	}
 
 	if ok, err := eval("return response.body.status === 'completed';", time.Second); err != nil || !ok {

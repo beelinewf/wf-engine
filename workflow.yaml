@@ -43,9 +43,13 @@
 #     Defaults: http GET / 5s delay / 30s request_timeout / 10
 #     max_attempts; redis GET 5s / 30s / 10; redis SUB and rabbitmq 5m
 #     max_wait_time; retry_on_recovery true. poller request_timeout and
-#     max_wait_time are not capped by engine.max_node_timeout. Templates
-#     may also use the reserved automatic roots workflow_instance_id and
-#     node_instance_id (read-only, never persisted into context).
+#     max_wait_time are not capped by engine.max_node_timeout. Every
+#     template surface also sees the reserved automatic roots
+#     workflow_instance_id, node_instance_id, branch_id,
+#     parallel_execution_id, branch_name, branch_index, and node_id
+#     (read-only, never persisted into context; see
+#     docs/integration/fields.md). Scripts read the same values from the
+#     frozen meta global (meta.branch_id, ...).
 #   - the optional top-level status_update block fans one logical event out
 #     to every configured transport (http/redis/rabbitmq), each with its own
 #     retry policy; redis publishes to workflow:status:<instance_id>,
