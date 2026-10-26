@@ -344,13 +344,15 @@ type PendingInputResponse struct {
 	Form *SnapshotFormResponse `json:"form,omitempty"`
 	// AllowedRoles is the node's role gate. Empty means the node is open to
 	// any caller that holds input:deliver, unless AllowedUsers is
-	// non-empty: a non-empty user list is the only gate consulted. Always
-	// empty on a public node, which ignores both gates.
+	// non-empty; the two gates are a union, so a listed role passes even
+	// when AllowedUsers is non-empty. Always empty on a public node,
+	// which ignores both gates.
 	AllowedRoles []string `json:"allowed_roles"`
-	// AllowedUsers is the node's user gate: when non-empty, only the listed
-	// users may deliver, regardless of their roles, and AllowedRoles is
-	// not consulted. Empty means no user restriction, and like AllowedRoles
-	// it is always empty on a public node.
+	// AllowedUsers is the node's user gate: a listed user may deliver
+	// regardless of their roles. The two gates are a union, so a listed
+	// role passes even when this list is non-empty. Empty means no user
+	// restriction, and like AllowedRoles it is always empty on a public
+	// node.
 	AllowedUsers []AllowedUserResponse `json:"allowed_users"`
 	// RecordActor reports that an accepted delivery is written as the
 	// attribution envelope {user_id, input_data} rather than the bare

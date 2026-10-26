@@ -127,12 +127,13 @@ type NodeContent struct {
 	// permission, so a role may hold input:deliver and still be refused by
 	// a node that does not list it. Absent or empty means open, which is
 	// what every definition written before this field existed resolves to.
-	// It is consulted only when AllowedUsers is empty, and a public node
-	// ignores it (see Public).
+	// The two gates are a union: a listed role passes even when
+	// AllowedUsers is non-empty, and a public node ignores it (see
+	// Public).
 	AllowedRoles []string `json:"allowed_roles,omitempty"`
-	// AllowedUsers is the input node's user gate, with strict priority over
-	// AllowedRoles: when non-empty, only a listed user id passes the node,
-	// however the caller's roles read, and the role list is not consulted.
+	// AllowedUsers is the input node's user gate: a listed user id passes
+	// the node however the caller's roles read. The two gates are a
+	// union, so a listed role passes even when this list is non-empty.
 	// Absent or empty means no user restriction. A public node ignores it
 	// (see Public).
 	AllowedUsers []AllowedUser `json:"allowed_users,omitempty"`

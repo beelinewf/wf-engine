@@ -728,9 +728,8 @@ func TestAnonymousReplayFollowsTheTargetNode(t *testing.T) {
 }
 
 // TestInputUserGate walks the user-gate matrix: a listed user passes the
-// node however their roles read, while an unlisted caller is refused
-// without consulting the role list, and the gate never skips the endpoint
-// permission.
+// node however their roles read, the two gates are a union when the node
+// carries both, and the gate never skips the endpoint permission.
 func TestInputUserGate(t *testing.T) {
 	// adaUserID is the seeded just-in-time identity: a stranger to the
 	// instance, which parkedInstance creates as gateUserID.
@@ -757,19 +756,22 @@ func TestInputUserGate(t *testing.T) {
 	}{
 		// The listed owner passes the node however their roles read.
 		{"listed user passes", map[string]any{"allowed_users": users(gateUserID)}, ownerFinance, nil},
-		// Priority is inside the node gate only: a listed user without
+		// The union is inside the node gate only: a listed user without
 		// the endpoint permission is still refused.
 		{"listed user without the permission is refused", map[string]any{"allowed_users": users(gateUserID)}, ownerManager, model.ErrForbidden},
 		// The owner is not listed and the node lists no role they hold.
 		{"unlisted user is refused", map[string]any{"allowed_users": users(adaUserID)}, ownerFinance, model.ErrForbidden},
 		// A caller with no resolved user id never matches the gate.
 		{"unresolved caller is refused", map[string]any{"allowed_users": users(gateUserID)}, unresolved, model.ErrForbidden},
-		// Both gates together: the user match wins over the wrong roles.
+		// Both gates together are a union: a user match passes despite the
+		// wrong roles, and a role match passes despite an unlisted user.
 		{"user match wins over roles", map[string]any{"allowed_users": users(gateUserID), "allowed_roles": []string{"manager"}}, ownerFinance, nil},
-		// Both gates together: the user list is the only gate consulted,
-		// so a listed role does not admit an unlisted user.
-		{"role match does not admit an unlisted user", map[string]any{"allowed_users": users(adaUserID), "allowed_roles": []string{"finance"}}, ownerFinance, model.ErrForbidden},
+		{"role match admits an unlisted user", map[string]any{"allowed_users": users(adaUserID), "allowed_roles": []string{"finance"}}, ownerFinance, nil},
+		// A caller matching neither list is refused.
 		{"unlisted caller without roles is refused", map[string]any{"allowed_users": users(adaUserID), "allowed_roles": []string{"manager"}}, ownerFinance, model.ErrForbidden},
+		// A caller with no resolved user id still passes on a listed role:
+		// the user half fails closed, the union does not.
+		{"unresolved caller passes on a listed role", map[string]any{"allowed_users": users(adaUserID), "allowed_roles": []string{"finance"}}, unresolved, nil},
 		// The service principal bypasses the user gate like the role gate.
 		{"service bypasses a users-only node", map[string]any{"allowed_users": users(adaUserID)}, service1, nil},
 		{"absent principal bypasses a users-only node", map[string]any{"allowed_users": users(adaUserID)}, nil, nil},
@@ -802,10 +804,11 @@ func TestInputUserGate(t *testing.T) {
 	}
 }
 
-// A user-gate refusal names the gate that failed: the user list when the
-// node carries one, else the role list. The roles-only message keeps its
-// historical shape, and the audit event carries the refused caller's
-// resolved user id next to the roles without ever recording the payload.
+// A user-gate refusal names the gate that failed: both lists when the node
+// carries both, else the single list it carries. The single-gate messages
+// keep their historical shape, and the audit event carries the refused
+// caller's resolved user id next to the roles without ever recording the
+// payload.
 func TestInputUserGateDenialNamesTheGate(t *testing.T) {
 	const adaUserID = "44444444-4444-7444-8444-444444444444"
 	cases := []struct {
@@ -816,10 +819,10 @@ func TestInputUserGateDenialNamesTheGate(t *testing.T) {
 	}{
 		{"users only", map[string]any{"allowed_users": []any{map[string]any{"id": adaUserID}}},
 			[]string{"users [" + adaUserID + "]"}, nil},
-		{"both gates name only the user list", map[string]any{
+		{"both gates name both lists", map[string]any{
 			"allowed_users": []any{map[string]any{"id": adaUserID}},
 			"allowed_roles": []string{"manager"},
-		}, []string{"users [" + adaUserID + "]"}, []string{"roles ["}},
+		}, []string{"users [" + adaUserID + "] or roles [manager] are required to deliver to this input node"}, nil},
 		{"roles only keeps its message", map[string]any{"allowed_roles": []string{"manager"}},
 			[]string{"roles [manager] are required to deliver to this input node"}, nil},
 	}

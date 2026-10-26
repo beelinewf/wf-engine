@@ -4325,14 +4325,14 @@ const docTemplate = `{
                     }
                 },
                 "allowed_roles": {
-                    "description": "AllowedRoles is the node's role gate. Empty means the node is open to\nany caller that holds input:deliver, unless AllowedUsers is\nnon-empty: a non-empty user list is the only gate consulted. Always\nempty on a public node, which ignores both gates.",
+                    "description": "AllowedRoles is the node's role gate. Empty means the node is open to\nany caller that holds input:deliver, unless AllowedUsers is\nnon-empty; the two gates are a union, so a listed role passes even\nwhen AllowedUsers is non-empty. Always empty on a public node,\nwhich ignores both gates.",
                     "type": "array",
                     "items": {
                         "type": "string"
                     }
                 },
                 "allowed_users": {
-                    "description": "AllowedUsers is the node's user gate: when non-empty, only the listed\nusers may deliver, regardless of their roles, and AllowedRoles is\nnot consulted. Empty means no user restriction, and like AllowedRoles\nit is always empty on a public node.",
+                    "description": "AllowedUsers is the node's user gate: a listed user may deliver\nregardless of their roles. The two gates are a union, so a listed\nrole passes even when this list is non-empty. Empty means no user\nrestriction, and like AllowedRoles it is always empty on a public\nnode.",
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/internal_workflow_handler.AllowedUserResponse"

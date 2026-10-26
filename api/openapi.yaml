@@ -1413,8 +1413,8 @@ components:
     Forbidden:
       description: >-
         Authenticated but not allowed: the caller's roles do not carry the
-        endpoint permission, or the input node's gate does not admit the
-        caller (allowed_users when the node lists users, else allowed_roles).
+        endpoint permission, or the input node's gates admit neither the
+        caller's user id nor any of their roles (the two gates are a union).
         A valid API token is the service principal and is never refused.
         On PUT /input an anonymous caller with no credential is also answered
         here when the waiting input node is not public.
@@ -1895,10 +1895,9 @@ components:
           items: { type: string }
           description: |
             The node's role gate, checked against the caller's token roles.
-            Consulted only when allowed_users is empty; a non-empty user
-            list is the only gate consulted. Empty means no role
-            restriction. Always empty on a public node, which ignores both
-            gates.
+            The two gates are a union: a listed role passes even when
+            allowed_users is non-empty. Empty means no role restriction.
+            Always empty on a public node, which ignores both gates.
         allowed_users:
           type: array
           items:
@@ -1911,10 +1910,10 @@ components:
                 description: Users.id uuid of a caller allowed to deliver to this node.
           description: |
             The node's user gate, checked against the caller's resolved user
-            id. When non-empty it is the only gate consulted: a listed user
-            passes however their roles read, and allowed_roles is ignored.
-            Empty means no user restriction. Always empty on a public node,
-            which ignores both gates.
+            id. A listed user passes however their roles read, and the two
+            gates are a union: a listed role passes even when this list is
+            non-empty. Empty means no user restriction. Always empty on a
+            public node, which ignores both gates.
         record_actor:
           type: boolean
           description: |

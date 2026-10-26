@@ -232,10 +232,10 @@ Response:
   when the node references no form. `form` carries the frozen `{schema, ui}` bytes when the instance was created with
   `"snapshot_forms": true`; the frontend renders it when present, else fetches `GET /v1/forms/{form_id}`. Live
   instances serve `form_id` only: the bytes never ride on status except on a snapshot run. `allowed_users` lists the
-  `{id}` entries admitted regardless of roles; when it is non-empty it is the only gate the backend consults, so a
-  frontend must not treat a listed `allowed_roles` entry as an admission there. Both gates report `[]` on a public
-  node, which ignores them. `accept` lists the media types the node delivers, so the frontend knows whether a
-  multipart upload is welcome.
+  `{id}` entries admitted regardless of roles, and the two gates are a union: when both are non-empty a listed
+  `allowed_roles` entry is an admission too, so a frontend must treat a caller matching either list as admitted.
+  Both gates report `[]` on a public node, which ignores them. `accept` lists the media types the node delivers,
+  so the frontend knows whether a multipart upload is welcome.
 
 ### `GET /v1/workflow/instance/{id}/context` → `200`
 
