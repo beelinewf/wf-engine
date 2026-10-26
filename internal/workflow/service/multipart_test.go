@@ -296,6 +296,33 @@ if (input.images[0].mime_type !== 'image/jpeg') { return 'first image must be jp
 	}
 }
 
+// A multipart delivery whose post hook throws is still an accepted delivery
+// (202) that fails the workflow — and its uploads are cleaned up like any
+// other failed delivery. Only a fully successful commit keeps the objects.
+func TestDeliverMultipartPostFailureCleansUp(t *testing.T) {
+	db := setupSvcDB(t)
+	ctx := context.Background()
+	store := newMpFakeStore()
+	svc := svcMultipartService(db, store)
+	extra := mpInputExtra()
+	extra["post_script"] = map[string]any{"script": "throw new Error('mp post boom');"}
+	instID := mpParkedInstance(t, db, svc, extra)
+
+	delivery, err := svc.DeliverInput(ctx, mpDelivery(t, instID, "mp-post-fail", mpImageParts()))
+	if err != nil {
+		t.Fatalf("DeliverInput() error = %v", err)
+	}
+	if !delivery.Accepted {
+		t.Fatalf("delivery = %+v, want accepted (202) even though the post hook fails", delivery)
+	}
+	if !strings.Contains(delivery.Error, "mp post boom") {
+		t.Errorf("delivery error = %q, want post-script cause", delivery.Error)
+	}
+	if puts, objects := store.stats(); puts != 3 || objects != 0 {
+		t.Errorf("store puts = %d objects = %d, want 3 uploads all cleaned up", puts, objects)
+	}
+}
+
 // A multipart replay returns the stored delivery without re-uploading and
 // without the JSON path's payload-equality 409: even a different body replays.
 func TestDeliverMultipartReplaySkipsReupload(t *testing.T) {

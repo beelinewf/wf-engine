@@ -261,6 +261,9 @@ system audit user. Key settings:
 | `infra.http.host`                                        | `localhost:9999`       | Compose overrides to `0.0.0.0:8080`                                                                             |
 | `infra.http.swagger_enabled`                             | `true`                 | Serves UI at `/swagger/index.html`                                                                              |
 | `infra.http.metrics_enabled`                             | `true`                 | Serves Prometheus exposition at `/metrics` (`BEELINEWF_INFRA_HTTP_METRICS_ENABLED`; `false` answers 404)        |
+| `infra.http.max_body_bytes`                              | `1048576` (1 MiB)      | JSON body cap for context replace + input delivery; breach answers 413 (`BEELINEWF_INFRA_HTTP_MAX_BODY_BYTES`)  |
+| `infra.http.read_header_timeout`                         | `10s`                  | Max wait for request headers; closes slow-header connections (`BEELINEWF_INFRA_HTTP_READ_HEADER_TIMEOUT`)       |
+| `infra.http.idle_timeout`                                | `60s`                  | Idle keep-alive cleanup; no write timeout so SSE streams are never cut (`BEELINEWF_INFRA_HTTP_IDLE_TIMEOUT`)    |
 | `infra.http.cors.allowed_origins`                        | `"*" (allow all)`      | Origin list to restrict; empty file value disables (`BEELINEWF_INFRA_HTTP_CORS_ALLOWED_ORIGINS`)                |
 | `infra.http.cors.allowed_methods`                        | `GET, POST, ...`       | PUT, DELETE, OPTIONS also allowed by default (`BEELINEWF_INFRA_HTTP_CORS_ALLOWED_METHODS`)                      |
 | `infra.http.cors.allowed_headers`                        | `Authorization, ...`   | Content-Type and X-Api-Token also allowed by default (`BEELINEWF_INFRA_HTTP_CORS_ALLOWED_HEADERS`)              |

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -316,6 +317,40 @@ func TestEngineDispatcherOptions(t *testing.T) {
 		opts.PollInterval != 200*time.Millisecond || opts.Heartbeat != 5*time.Second ||
 		opts.Lease != 30*time.Second || opts.BatchSize != 10 {
 		t.Errorf("engineDispatcherOptions() from defaults = %+v, want 1000/200ms/5s/30s/10", opts)
+	}
+}
+
+// TestNewHTTPServer pins the config→server mapping: explicit timeout values
+// reach the server verbatim, and Load defaults yield 10s/60s (the original
+// bug: run() built the server with no timeouts, so slow-header connections
+// exhausted it). WriteTimeout stays unset so SSE streams are never cut.
+func TestNewHTTPServer(t *testing.T) {
+	explicit := &configuration.Config{}
+	explicit.Infra.HTTP.Host = "127.0.0.1:1234"
+	explicit.Infra.HTTP.ReadHeaderTimeout = 3 * time.Second
+	explicit.Infra.HTTP.IdleTimeout = 4 * time.Second
+	srv := newHTTPServer(explicit, http.NewServeMux())
+	if srv.Addr != "127.0.0.1:1234" || srv.ReadHeaderTimeout != 3*time.Second || srv.IdleTimeout != 4*time.Second {
+		t.Fatalf("newHTTPServer() = %+v, want explicit values verbatim", srv)
+	}
+	if srv.Handler == nil {
+		t.Error("newHTTPServer().Handler is nil, want the passed handler")
+	}
+	if srv.WriteTimeout != 0 {
+		t.Errorf("newHTTPServer().WriteTimeout = %v, want 0 (SSE must never be cut)", srv.WriteTimeout)
+	}
+
+	t.Setenv("BEELINEWF_INFRA_POSTGRESQL_DSN", "default-dsn")
+	loaded, err := configuration.Load(configuration.WithConfigFile(filepath.Join(t.TempDir(), "does-not-exist.yaml")))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	def := newHTTPServer(loaded, http.NewServeMux())
+	if def.ReadHeaderTimeout != 10*time.Second || def.IdleTimeout != 60*time.Second {
+		t.Errorf("newHTTPServer() from defaults = %+v, want 10s/60s", def)
+	}
+	if def.WriteTimeout != 0 {
+		t.Errorf("newHTTPServer() from defaults WriteTimeout = %v, want 0", def.WriteTimeout)
 	}
 }
 

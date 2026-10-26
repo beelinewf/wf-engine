@@ -110,12 +110,15 @@ func (d *Dispatcher) claimLoop() {
 		d.metrics.DispatcherClaimsAdd(len(claimed))
 		for _, w := range claimed {
 			w := w
+			d.wg.Add(1)
 			err := d.pool.Submit(func() {
+				defer d.wg.Done()
 				if err := d.engine.Process(d.ctx, w); err != nil && d.ctx.Err() == nil {
 					slog.Warn("dispatcher process failed", "worker", d.workerID, "instance", w.ID, "error", err)
 				}
 			})
 			if err != nil {
+				d.wg.Done()
 				// Pool closed (shutdown): run the transition inline rather
 				// than dropping the claim.
 				if err := d.engine.Process(d.ctx, w); err != nil && d.ctx.Err() == nil {
@@ -144,12 +147,15 @@ func (d *Dispatcher) claimBranches() {
 	}
 	for _, b := range branches {
 		b := b
+		d.wg.Add(1)
 		err := d.pool.Submit(func() {
+			defer d.wg.Done()
 			if err := d.engine.ProcessBranch(d.ctx, b); err != nil && d.ctx.Err() == nil {
 				slog.Warn("dispatcher branch process failed", "worker", d.workerID, "branch", b.ID, "error", err)
 			}
 		})
 		if err != nil {
+			d.wg.Done()
 			// Pool closed (shutdown): run the transition inline rather
 			// than dropping the claim.
 			if err := d.engine.ProcessBranch(d.ctx, b); err != nil && d.ctx.Err() == nil {

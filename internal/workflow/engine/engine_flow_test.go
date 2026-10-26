@@ -1313,6 +1313,75 @@ func TestEnginePollerExhaustionRoutesToOnFailureInput(t *testing.T) {
 	}
 }
 
+func TestEngineFailureRoutedGroupExit(t *testing.T) {
+	db := setupEngineDB(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"pending"}`))
+	}))
+	defer srv.Close()
+
+	wfID := createWorkflow(t, db, g1,
+		nodeJSON(g1, "group", "main", "", n2, "", map[string]any{
+			"start_node_id": n1,
+			"post_script":   map[string]any{"script": "context.gpost_ran = true;"},
+			"nodes": []map[string]any{
+				{
+					"id": n1, "type": "poller", "name": "wait-job",
+					"http": map[string]any{
+						"url":          srv.URL,
+						"delay":        "10ms",
+						"max_attempts": 2,
+						"until":        `return response.body.status === "completed";`,
+					},
+					"on_failure": map[string]any{
+						"next_node":       n3,
+						"output_property": "poller_err",
+					},
+					"post_script": map[string]any{"script": "context.post_ran = true;"},
+				},
+				{"id": n3, "type": "script", "name": "fallback", "script": "return 'recovered';", "output_property": "rec"},
+			},
+		}),
+		nodeJSON(n2, "script", "after", "return 'after';", "", "after", nil),
+	)
+	instanceID := insertInstance(t, db, wfID, g1, map[string]any{})
+	e, instances := testEngineWithExec(t, db, model.DefaultLimits(), executor.Limits{HTTPAllowlist: []string{"127.0.0.1"}})
+	cur := runEngine(t, db, e, instanceID)
+
+	if cur.Status != model.WorkflowFinished {
+		t.Fatalf("status = %s, want finished (error: %q)", cur.Status, cur.Error)
+	}
+	ctxMap := instanceContext(t, db, instanceID)
+	if _, ok := ctxMap["post_ran"]; ok {
+		t.Error("post_script ran on failed poller node")
+	}
+	if ctxMap["gpost_ran"] != true {
+		t.Errorf("gpost_ran = %v, want true (exited group post hook skipped on failure route)", ctxMap["gpost_ran"])
+	}
+	if _, ok := ctxMap["poller_err"]; !ok {
+		t.Errorf("context missing poller_err output: %v", ctxMap)
+	}
+	if ctxMap["rec"] != "recovered" {
+		t.Errorf("rec = %v, want recovered via in-group on_failure target", ctxMap["rec"])
+	}
+	events, _ := repository.NewInstanceRepository(db).ListEvents(context.Background(), instanceID)
+	types := map[string]int{}
+	for _, ev := range events {
+		types[ev.Type]++
+	}
+	if types["group_exited"] != 1 || types["node_failure_routed"] != 1 {
+		t.Errorf("events = %v, want one group_exited and one node_failure_routed", types)
+	}
+	attempt, err := instances.GetNodeInstanceByNode(context.Background(), instanceID, n1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attempt.Status != model.NodeFailed {
+		t.Errorf("attempt.Status = %s, want failed", attempt.Status)
+	}
+}
+
 func TestEngineRecoveryFailureRoutesToOnFailure(t *testing.T) {
 	db := setupEngineDB(t)
 	wfID := createWorkflow(t, db, n1,

@@ -802,6 +802,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "422": { $ref: "#/components/responses/Unprocessable" }
   /v1/workflow/instance/{id}/status/node/{node_id}:
     get:
@@ -1432,7 +1433,7 @@ components:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
     PayloadTooLarge:
-      description: Multipart delivery breaching a size limit; nothing is uploaded
+      description: Request body breaching infra.http.max_body_bytes (default 1 MiB), or a multipart delivery breaching a size limit; a failed multipart delivery uploads nothing
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }

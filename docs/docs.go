@@ -2133,6 +2133,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_workflow_handler.Problem"
                         }
                     },
+                    "413": {
+                        "description": "Request Entity Too Large",
+                        "schema": {
+                            "$ref": "#/definitions/internal_workflow_handler.Problem"
+                        }
+                    },
                     "422": {
                         "description": "Unprocessable Entity",
                         "schema": {

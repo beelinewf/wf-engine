@@ -50,6 +50,9 @@ type Deps struct {
 	Metrics *metrics.Recorder
 	// MetricsRefresh updates live gauges before each scrape; may be nil.
 	MetricsRefresh func()
+	// MaxBodyBytes caps the JSON bodies the instance handler reads; a
+	// breach answers 413. Non-positive keeps the handler default.
+	MaxBodyBytes int64
 }
 
 // authEnabled reports whether any credential is accepted. With neither
@@ -154,7 +157,7 @@ func NewRouter(deps Deps) *gin.Engine {
 		// the service decides against the pending node's public flag and
 		// refuses a private node.
 		if deps.Instances != nil {
-			v1.PUT("/workflow/instance/:id/input", TryAuth(authCfg), NewInstanceHandler(deps.Instances).Input)
+			v1.PUT("/workflow/instance/:id/input", TryAuth(authCfg), NewInstanceHandler(deps.Instances).WithMaxBodyBytes(deps.MaxBodyBytes).Input)
 		}
 		v1.Use(RequireAuth(authCfg))
 	}
@@ -233,7 +236,7 @@ func NewRouter(deps Deps) *gin.Engine {
 	}
 
 	if deps.Instances != nil {
-		instances := NewInstanceHandler(deps.Instances)
+		instances := NewInstanceHandler(deps.Instances).WithMaxBodyBytes(deps.MaxBodyBytes)
 		group := v1.Group("/workflow/instance")
 		gate(group, auth.ActionInstancesCreate, http.MethodPost, "", instances.Create)
 		gate(group, auth.ActionInstancesRead, http.MethodGet, "", instances.List)

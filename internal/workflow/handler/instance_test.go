@@ -1245,3 +1245,43 @@ func TestControlsWithoutAuthSendNoActor(t *testing.T) {
 		t.Errorf("controls = %v, want an empty actor", svc.controls)
 	}
 }
+
+// Bodies breaching the configured body cap are rejected with 413 before
+// reaching the service (CQ-H2).
+func TestInstanceUpdateContextTooLarge(t *testing.T) {
+	svc := &fakeInstanceSvc{updateCtxRes: &model.WorkflowInstance{ID: instanceID}}
+	r := NewRouter(Deps{Health: NewHealth(fakePinger{}), Instances: svc, MaxBodyBytes: 32})
+	w := performJSON(r, http.MethodPut, "/v1/workflow/instance/"+instanceID+"/context",
+		`{"k":"`+strings.Repeat("x", 64)+`"}`, nil)
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413 (%s)", w.Code, w.Body.String())
+	}
+	if svc.updateCtxReq != nil {
+		t.Error("oversized body reached the service; want rejection in the handler")
+	}
+}
+
+// A body of exactly the cap is admitted: the cap is the maximum accepted size.
+func TestInstanceUpdateContextAtCapPasses(t *testing.T) {
+	inst := model.WorkflowInstance{ID: instanceID, Context: json.RawMessage(`{"k":"ok"}`)}
+	svc := &fakeInstanceSvc{updateCtxRes: &inst}
+	body := `{"k":"ok"}`
+	r := NewRouter(Deps{Health: NewHealth(fakePinger{}), Instances: svc, MaxBodyBytes: int64(len(body))})
+	w := performJSON(r, http.MethodPut, "/v1/workflow/instance/"+instanceID+"/context", body, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%s)", w.Code, w.Body.String())
+	}
+}
+
+func TestInstanceInputTooLarge(t *testing.T) {
+	svc := &fakeInstanceSvc{delivery: &model.InputDelivery{Accepted: true}}
+	r := NewRouter(Deps{Health: NewHealth(fakePinger{}), Instances: svc, MaxBodyBytes: 32})
+	w := performJSON(r, http.MethodPut, "/v1/workflow/instance/"+instanceID+"/input",
+		`{"k":"`+strings.Repeat("x", 64)+`"}`, map[string]string{"Idempotency-Key": "key-1"})
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413 (%s)", w.Code, w.Body.String())
+	}
+	if svc.deliverReq != nil {
+		t.Error("oversized body reached the service; want rejection in the handler")
+	}
+}
