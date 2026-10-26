@@ -135,6 +135,25 @@ func (p Principal) CanSatisfyRoles(allowed []string) bool {
 	return false
 }
 
+// MatchesUserID reports whether the principal's resolved user id appears in
+// the input node's user gate. It is a pure matcher with no open-gate or
+// service semantics: the service consults it exclusively whenever the node
+// lists users, so a listed user passes however their roles read and an
+// unlisted caller is refused without consulting the role list. A principal
+// with no resolved user id never matches, so the gate fails closed rather
+// than admitting an unknown caller.
+func (p Principal) MatchesUserID(allowed []string) bool {
+	if p.UserID == "" {
+		return false
+	}
+	for _, want := range allowed {
+		if p.UserID == want {
+			return true
+		}
+	}
+	return false
+}
+
 // ContextWithPrincipal returns a context carrying the principal and its
 // resolved permissions.
 func ContextWithPrincipal(ctx context.Context, p Principal, catalog Catalog) context.Context {

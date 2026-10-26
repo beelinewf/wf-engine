@@ -303,6 +303,39 @@ func TestMaterializeInheritsInputFormID(t *testing.T) {
 	}
 }
 
+func TestMaterializeInheritsInputAllowedGates(t *testing.T) {
+	ndRepo := newFakeNodeRepo()
+	ndRepo.defs[nodeDefA] = model.NodeDefinition{
+		ID: nodeDefA, Name: "shared-input", Version: 1, LineageID: lineageID,
+		Type: "input", Content: json.RawMessage(`{"type":"input","channel":"http","output_property":"user",
+			"allowed_roles":["finance"],"allowed_users":[{"id":"22222222-2222-7222-8222-222222222222"}]}`),
+	}
+	svc := newWorkflowService(newFakeWorkflowRepo(), ndRepo)
+
+	content := `{"start_node_id":"aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa","nodes":[
+		{"id":"aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa","node_definition_id":"` + nodeDefA + `","next_node":"bbbbbbbb-bbbb-7bbb-8bbb-bbbbbbbbbbbb"},
+		{"id":"bbbbbbbb-bbbb-7bbb-8bbb-bbbbbbbbbbbb","type":"script","script":"return 2;"}
+	]}`
+	wc, err := model.ParseWorkflowContent([]byte(content), testLimits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	merged, err := svc.Materialize(context.Background(), wc)
+	if err != nil {
+		t.Fatalf("Materialize() error = %v", err)
+	}
+	first := merged.Nodes[0]
+	if first.Type != model.NodeTypeInput {
+		t.Fatalf("type = %s, want input", first.Type)
+	}
+	if len(first.AllowedRoles) != 1 || first.AllowedRoles[0] != "finance" {
+		t.Errorf("AllowedRoles = %v, want the definition's role gate", first.AllowedRoles)
+	}
+	if len(first.AllowedUsers) != 1 || first.AllowedUsers[0].ID != "22222222-2222-7222-8222-222222222222" {
+		t.Errorf("AllowedUsers = %+v, want the definition's user gate", first.AllowedUsers)
+	}
+}
+
 func TestCreateWorkflowDefinitionUnknownFormIDRejected(t *testing.T) {
 	svc := newWorkflowServiceWithForms(newFakeWorkflowRepo(), nil, newFakeFormRepo())
 	content := `{"start_node_id":"aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa","nodes":[

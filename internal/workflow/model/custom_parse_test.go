@@ -153,6 +153,7 @@ func TestParseCustomNodeRejectsBuiltinKeys(t *testing.T) {
 		// authorization surface is refused by the same guard as any other
 		// builtin executable field.
 		{"allowed_roles", `{"type":"parsecustom","config":{"city":"x"},"allowed_roles":["finance"]}`, "does not support"},
+		{"allowed_users", `{"type":"parsecustom","config":{"city":"x"},"allowed_users":[{"id":"22222222-2222-7222-8222-222222222222"}]}`, "does not support"},
 		{"record_actor", `{"type":"parsecustom","config":{"city":"x"},"record_actor":true}`, "does not support"},
 		{"public", `{"type":"parsecustom","config":{"city":"x"},"public":true}`, "does not support"},
 	}

@@ -394,18 +394,21 @@ configured catalog.
 `GET /v1/roles` and `GET /v1/roles/{name}` are read-only and need
 `roles:read`.
 
-### Input delivery has two gates
+### Input delivery is gated by permission, user, then role
 
 `PUT /v1/workflow/instance/{id}/input` applies, in order:
 
 1. the endpoint permission `input:deliver`;
-2. the input node's `allowed_roles`, intersected with the caller's roles.
+2. the input node's `allowed_users`, checked against the caller's user id;
+3. the input node's `allowed_roles`, intersected with the caller's roles.
 
-Both are independent, so a caller holding `input:deliver` is still refused
-with **403** when the parked node does not list one of its roles. An absent
-or empty `allowed_roles` leaves the node open to any `input:deliver` holder.
-A refusal writes no delivery row and records an `input_forbidden` audit
-event without the payload.
+The user gate has strict priority: when the node lists users, only a listed
+user passes, however their roles read, and a caller holding a listed role
+but no listed user id is refused with **403** without consulting the role
+list. The role gate applies only when no user list is present. A node
+carrying neither gate is open to any `input:deliver` holder. A refusal
+writes no delivery row and records an `input_forbidden` audit event without
+the payload.
 
 ```yaml
 - type: input
@@ -413,17 +416,18 @@ event without the payload.
   name: Approval
   channel: http
   output_property: approval
-  allowed_roles: [manager]   # optional; absent or empty is open
+  allowed_roles: [manager]   # optional; absent or empty is open; ignored when allowed_users is set
+  allowed_users: [{id: "…"}] # optional; when set, only listed users pass
   record_actor: true         # optional; defaults to false
 ```
 
-`allowed_roles` and `record_actor` belong to the node definition, not to the
-occurrence. An occurrence that references a reusable node definition cannot
-override them: it is rejected at parse time, because the occurrence does not
-know its own type until the definition is materialized, so a gate carried
-there would be silently dropped. Every occurrence of a definition therefore
-shares one gate. To park the same input node under a different gate, create a
-second node definition.
+`allowed_roles`, `allowed_users`, and `record_actor` belong to the node
+definition, not to the occurrence. An occurrence that references a reusable
+node definition cannot override them: it is rejected at parse time, because
+the occurrence does not know its own type until the definition is
+materialized, so a gate carried there would be silently dropped. Every
+occurrence of a definition therefore shares one gate. To park the same input
+node under a different gate, create a second node definition.
 
 ### Public input nodes accept anonymous delivery
 
@@ -445,14 +449,15 @@ authentication switched on, and `PUT /v1/workflow/instance/{id}/input` is
 the only endpoint exempted from the global auth gate to allow it. Everything
 else, including the status and forms-library reads, still requires a credential.
 
-The flag is opt-in and per node, and it forces the node open and
-unattributed: `public: true` combined with a non-empty `allowed_roles` or
+The flag is opt-in and per node, and it forces the delivery open and
+unattributed: a public node ignores `allowed_roles` and `allowed_users`,
+which stay legal on the definition and stay stored as authored, and only
 `record_actor: true` is rejected at parse time with
-`public input node must have empty allowed_roles and record_actor=false`. A
-public node cannot promise an authorization it cannot honor, since the role
-list would never be consulted and the envelope would have no `user_id` to
-write. It only exists on input nodes, and, like `allowed_roles`, it belongs
-to the node definition rather than the occurrence.
+`public input node must have record_actor=false`, since the envelope would
+have no `user_id` to write. Status reports both gates empty on a public
+node, so a frontend never hides a form that is actually open. The flag only
+exists on input nodes, and, like the gates, it belongs to the node
+definition rather than the occurrence.
 
 Three rules are worth stating plainly:
 
@@ -525,7 +530,7 @@ The authoritative contract is [api/openapi.yaml](api/openapi.yaml)
 | GET/PUT    | `/v1/workflow/instance/{id}/context`               | Get full context / replace it (paused only, 409 on race)                                                   |
 | GET        | `/v1/workflow/instance/{id}/status/node/{node_id}` | Node debug (`?attempt=N`; `not_started` for never-run nodes)                                                   |
 | GET        | `/v1/workflow/instance/{id}/debug/context`         | Debug context as TypeScript (debug runs only, `?node_id=`/`?attempt=N`)                                            |
-| PUT        | `/v1/workflow/instance/{id}/input`                 | Deliver input (`Idempotency-Key` required, 202; 403 by either input gate, or anonymous on a non-public node) |
+| PUT        | `/v1/workflow/instance/{id}/input`                 | Deliver input (`Idempotency-Key` required, 202; 403 by permission or node gates, or anonymous on a non-public node) |
 | POST       | `/v1/workflow/instance/{id}/pause`                 | Pause (200 immediate / 202 deferred)                                                                       |
 | POST       | `/v1/workflow/instance/{id}/resume`                | Resume                                                                                                     |
 | POST       | `/v1/workflow/instance/{id}/stop`                  | Terminal stop (fences workers, cancels in-flight execution)                                                |
@@ -534,7 +539,7 @@ The authoritative contract is [api/openapi.yaml](api/openapi.yaml)
 Instance statuses: `waiting`, `running`, `paused`, `finished`, `failed`,
 `stopped`. Errors follow RFC 7807 `problem+json`. A missing or invalid
 credential is **401**; a valid caller without the route's permission, or one
-refused by an input node's `allowed_roles`, is **403**. The one exception is
+refused by an input node's user or role gate, is **403**. The one exception is
 `PUT …/input` on a node with `public: true`, which is reachable with no
 credential at all; see
 [Public input nodes](#public-input-nodes-accept-anonymous-delivery).

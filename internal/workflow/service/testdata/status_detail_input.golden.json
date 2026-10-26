@@ -51,6 +51,7 @@
     "FormID": "<FORM>",
     "Form": null,
     "AllowedRoles": null,
+    "AllowedUsers": null,
     "RecordActor": false,
     "Public": false,
     "Accept": [
