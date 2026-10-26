@@ -55,6 +55,7 @@ type Infra struct {
 type HTTP struct {
 	Host           string `mapstructure:"host"`
 	SwaggerEnabled bool   `mapstructure:"swagger_enabled"`
+	MetricsEnabled bool   `mapstructure:"metrics_enabled"`
 	CORS           CORS   `mapstructure:"cors"`
 }
 
@@ -344,6 +345,7 @@ func Load(opts ...Option) (*Config, error) {
 	// config.yaml.
 	_ = v.BindEnv("engine.http_max_in_flight", "BEELINEWF_ENGINE_HTTP_MAX_IN_FLIGHT")
 	_ = v.BindEnv("engine.http_max_in_flight_per_host", "BEELINEWF_ENGINE_HTTP_MAX_IN_FLIGHT_PER_HOST")
+	_ = v.BindEnv("infra.http.metrics_enabled", "BEELINEWF_INFRA_HTTP_METRICS_ENABLED")
 	// CORS keys are operator toggles and must override the file, so a
 	// frontend origin can be allowed without rewriting config.yaml.
 	_ = v.BindEnv("infra.http.cors.allowed_origins", "BEELINEWF_INFRA_HTTP_CORS_ALLOWED_ORIGINS")
@@ -430,6 +432,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("infra.postgresql.conn_max_idle_time", "5m")
 	v.SetDefault("infra.http.host", "localhost:8080")
 	v.SetDefault("infra.http.swagger_enabled", true)
+	v.SetDefault("infra.http.metrics_enabled", true)
 	// CORS allows any origin by default, so a development frontend works
 	// with no configuration. The method default covers every verb the
 	// router registers; the header default covers the credentials the

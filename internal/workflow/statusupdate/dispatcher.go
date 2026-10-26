@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/beelinewf/wf-engine/internal/workflow/defcache"
+	"github.com/beelinewf/wf-engine/internal/workflow/metrics"
 	"github.com/beelinewf/wf-engine/internal/workflow/model"
 	"github.com/beelinewf/wf-engine/internal/workflow/repository"
 	"github.com/panjf2000/ants/v2"
@@ -56,6 +57,7 @@ type Dispatcher struct {
 	publishers map[string]Publisher
 	workerID   string
 	pool       *ants.Pool
+	metrics    *metrics.Recorder
 
 	pollInterval time.Duration
 	lease        time.Duration
@@ -64,6 +66,11 @@ type Dispatcher struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+}
+
+// SetMetrics installs the optional metrics recorder. Nil disables recording.
+func (d *Dispatcher) SetMetrics(rec *metrics.Recorder) {
+	d.metrics = rec
 }
 
 // NewDispatcher builds a dispatcher; it is inert until Run is called.
@@ -145,7 +152,14 @@ func (d *Dispatcher) claimLoop() {
 // deliver publishes a claimed event through its transport's publisher and
 // resolves the outbox row: delivered on success, retried (or dead-lettered
 // past max_retry) on failure using the per-transport retry policy.
-func (d *Dispatcher) deliver(ev repository.PendingStatusUpdate) error {
+func (d *Dispatcher) deliver(ev repository.PendingStatusUpdate) (err error) {
+	defer func() {
+		result := "success"
+		if err != nil {
+			result = "error"
+		}
+		d.metrics.StatusDelivered(ev.Transport, result)
+	}()
 	cfg, err := d.loader(d.ctx, ev.WorkflowDefinitionID)
 	if err != nil {
 		// The definition is missing or unreadable; it will never recover,

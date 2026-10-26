@@ -260,6 +260,7 @@ system audit user. Key settings:
 | -------------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------- |
 | `infra.http.host`                                        | `localhost:9999`       | Compose overrides to `0.0.0.0:8080`                                                                             |
 | `infra.http.swagger_enabled`                             | `true`                 | Serves UI at `/swagger/index.html`                                                                              |
+| `infra.http.metrics_enabled`                             | `true`                 | Serves Prometheus exposition at `/metrics` (`BEELINEWF_INFRA_HTTP_METRICS_ENABLED`; `false` answers 404)        |
 | `infra.http.cors.allowed_origins`                        | `"*" (allow all)`      | Origin list to restrict; empty file value disables (`BEELINEWF_INFRA_HTTP_CORS_ALLOWED_ORIGINS`)                |
 | `infra.http.cors.allowed_methods`                        | `GET, POST, ...`       | PUT, DELETE, OPTIONS also allowed by default (`BEELINEWF_INFRA_HTTP_CORS_ALLOWED_METHODS`)                      |
 | `infra.http.cors.allowed_headers`                        | `Authorization, ...`   | Content-Type and X-Api-Token also allowed by default (`BEELINEWF_INFRA_HTTP_CORS_ALLOWED_HEADERS`)              |
@@ -508,6 +509,7 @@ The authoritative contract is [api/openapi.yaml](api/openapi.yaml)
 | Method     | Path                                             | Purpose                                                                                                    |
 | ---------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
 | GET        | `/health/live`, `/health/ready`                      | Liveness / readiness (always public)                                                                       |
+| GET        | `/metrics`                                           | Prometheus exposition (see Metrics)                                                                        |
 | GET        | `/v1/auth/config`                                  | Public OIDC login contract                                                                                 |
 | GET        | `/v1/auth/me`                                      | The authenticated caller (identity, roles, effective permissions)                                          |
 | GET        | `/v1/roles`                                        | Role catalog (needs `roles:read`)                                                                            |
@@ -586,6 +588,76 @@ id (`Idempotency-Key` / `X-BeelineWF-Event-ID` on HTTP, AMQP `message_id` on
 RabbitMQ, embedded `id` on Redis). A transport configured without its
 broker DSN dead-letters. Full payload and ordering guarantees are in
 [ARCHITECTURE.md](ARCHITECTURE.md).
+
+## Metrics
+
+`GET /metrics` serves Prometheus exposition (`text/plain; version=0.0.4`)
+from the same Gin engine and port as the API — no separate metrics port.
+It carries Go/process series plus HTTP RED and the domain series below.
+
+Toggle: `infra.http.metrics_enabled` (default `true`,
+`BEELINEWF_INFRA_HTTP_METRICS_ENABLED`). `false` leaves no route, so
+`/metrics` answers `404` with or without a token.
+
+Auth follows the existing switch. With auth disabled, `/metrics` is public
+like `/health/live`; restrict it at the network layer in production. With
+auth enabled, only `X-Api-Token` equal to `auth.api_token` passes — OIDC
+`Bearer` alone is `401`, and auth enabled with no token configured is `401`
+for every request (fail closed). A `401` body carries no series. Rotating
+`BEELINEWF_API_TOKEN` rotates scrape access.
+
+```bash
+curl -s http://localhost:9999/metrics | head
+curl -s -H "X-Api-Token: $BEELINEWF_API_TOKEN" http://localhost:9999/metrics | head
+```
+
+```yaml
+# prometheus.yml: inject the token from a secret, never a committed literal.
+scrape_configs:
+  - job_name: wf-engine
+    static_configs:
+      - targets: ["wf-engine:8080"]
+    http_headers:
+      X-Api-Token:
+        credentials:
+          file: /run/secrets/beelinewf_api_token
+```
+
+Series (labels are bounded enums and route templates only — never an
+instance ID, definition ID, user, host URL, or raw request path):
+
+| Series | Type / labels | Scaling decision it informs |
+| ------ | ------------- | --------------------------- |
+| `http_requests_total`, `http_request_duration_seconds` | counter / histogram `{method,route,status}` | API replica count; `route` is the Gin template |
+| `wf_instances_created_total` | counter | Inbound demand rate |
+| `wf_instances_terminal_total{status}` | counter (`finished`/`failed`/`stopped`) | Completion rate, error budget |
+| `wf_instances_active{status}` | gauge (cached snapshot) | Concurrency headroom vs `worker.pool.size` |
+| `wf_instance_duration_seconds{status}` | histogram | End-to-end capacity; tail-latency regressions |
+| `wf_node_executions_total{node_type,result}` | counter (`success`/`error`/`timeout`) | Which node types drive load/failure |
+| `wf_node_execution_duration_seconds{node_type}` | histogram | Worker sizing; slow-node detection |
+| `wf_dispatcher_backlog` | gauge (cached) | Add replicas / raise claim batch — work waiting, not running |
+| `wf_dispatcher_oldest_pending_age_seconds` | gauge (cached) | Starvation alert; backlog growth vs slowness |
+| `wf_dispatcher_claims_total` | counter | Dispatcher throughput per replica |
+| `wf_status_outbox_backlog` | gauge (cached) | Status-dispatcher scaling (`worker.status_pool.size`) |
+| `wf_status_deliveries_total{transport,result}` | counter (`success`/`error`) | Status delivery health per transport |
+| `wf_scheduler_fires_total{result}` | counter (`fired`/`failed`/`skipped`) | Scheduler load; missed/failed fires |
+| `wf_broker_consumer_healthy{transport}` | gauge 0/1 | Broker consumer liveness without scraping `/health/ready` |
+| `wf_http_bulkhead_inflight` | gauge (global scope) | `engine.http_max_in_flight` tuning |
+| `wf_db_pool_open_connections`, `wf_db_pool_in_use`, `wf_db_pool_wait_count_total`, `wf_db_pool_wait_duration_seconds_total` | gauges/counters from `sql.DB.Stats()` | `infra.postgresql.max_open_conns` sizing |
+
+Scaling runbook:
+
+- Backlog + oldest-age rising while node durations stay flat → add
+  replicas / raise the worker pool; work is waiting, not slow.
+- DB wait count rising → raise `infra.postgresql.max_open_conns`.
+- Bulkhead inflight pinned at cap → raise `engine.http_max_in_flight`.
+- Terminal `failed` rate rising with node `error` on one type → that node
+  type is the fault, not capacity.
+
+DB-backed gauges serve a TTL-cached snapshot (15s), so scrape load is flat
+regardless of Prometheus interval; treat them as up-to-15s stale, never
+real-time. `/metrics` is intentionally absent from OpenAPI/Swagger: the
+exposition is `text/plain`, not a JSON contract.
 
 ## Development
 

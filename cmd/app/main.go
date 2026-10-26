@@ -38,6 +38,7 @@ import (
 	"github.com/beelinewf/wf-engine/internal/workflow/executor"
 	"github.com/beelinewf/wf-engine/internal/workflow/handler"
 	"github.com/beelinewf/wf-engine/internal/workflow/inputtransport"
+	"github.com/beelinewf/wf-engine/internal/workflow/metrics"
 	"github.com/beelinewf/wf-engine/internal/workflow/model"
 	"github.com/beelinewf/wf-engine/internal/workflow/multipart"
 	"github.com/beelinewf/wf-engine/internal/workflow/objectstore"
@@ -58,7 +59,11 @@ const (
 	// statusLoaderCacheSize bounds the memoized status_update configs
 	// served to the delivery dispatcher.
 	statusLoaderCacheSize = 1024
+	// snapshotTimeout bounds one metrics snapshot query.
+	snapshotTimeout = 5 * time.Second
 )
+
+var errMetricsSnapshot = errors.New("metrics snapshot not implemented")
 
 func main() {
 	configPath := flag.String("config", "", "path to config file (default: config.yaml in working directory)")
@@ -194,6 +199,18 @@ func statusDispatcherOptions(cfg *configuration.Config, limits model.Limits) sta
 		Lease:        limits.LeaseDuration,
 		BatchSize:    limits.ClaimBatchSize,
 		PoolSize:     cfg.Worker.StatusPool.Size,
+	}
+}
+
+// metricsRefresh returns the per-scrape live-gauge updater: broker consumer
+// liveness and bulkhead occupancy are in-memory and cheap, so they refresh
+// on every scrape with no TTL staleness and no goroutine.
+func metricsRefresh(rec *metrics.Recorder, monitors map[string]handler.ConsumerMonitor, bulkhead *executor.HTTPBulkhead) func() {
+	return func() {
+		for transport, m := range monitors {
+			rec.SetConsumerHealthy(transport, m.Healthy())
+		}
+		rec.SetBulkheadInflight(float64(bulkhead.GlobalInflight()))
 	}
 }
 
@@ -499,6 +516,65 @@ func run(ctx context.Context, cfg *configuration.Config, logger *logrus.Logger) 
 	// the configured transport publishers (http always; redis and rabbitmq
 	// when their clients exist).
 	statusUpdates := repository.NewStatusUpdateRepository(db)
+
+	// Metrics registry with snapshot sources. DB pool stats read
+	// sqlDB.Stats in memory; repository snapshots refresh at most once
+	// per TTL inside the collector, so scrape load stays flat. Narrow
+	// interface assertions keep the repository interfaces untouched:
+	// a repo that does not implement a snapshot simply leaves its
+	// gauge at zero.
+	recorder := metrics.New(metrics.Sources{
+		DBStats: func() (metrics.DBPoolStats, error) {
+			s := sqlDB.Stats()
+			return metrics.DBPoolStats{
+				OpenConnections: s.OpenConnections,
+				InUse:           s.InUse,
+				WaitCount:       s.WaitCount,
+				WaitDuration:    s.WaitDuration,
+			}, nil
+		},
+		InstancesActive: func() (map[string]int64, error) {
+			type counter interface {
+				CountActiveByStatus(context.Context) (map[string]int64, error)
+			}
+			s, ok := instances.(counter)
+			if !ok {
+				return nil, errMetricsSnapshot
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), snapshotTimeout)
+			defer cancel()
+			return s.CountActiveByStatus(ctx)
+		},
+		DispatcherStats: func() (int64, float64, error) {
+			type stats interface {
+				PendingDispatchStats(context.Context) (int64, float64, error)
+			}
+			s, ok := instances.(stats)
+			if !ok {
+				return 0, 0, errMetricsSnapshot
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), snapshotTimeout)
+			defer cancel()
+			return s.PendingDispatchStats(ctx)
+		},
+		StatusOutboxDepth: func() (int64, error) {
+			type depth interface {
+				OutboxDepth(context.Context) (int64, error)
+			}
+			s, ok := statusUpdates.(depth)
+			if !ok {
+				return 0, errMetricsSnapshot
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), snapshotTimeout)
+			defer cancel()
+			return s.OutboxDepth(ctx)
+		},
+	})
+	eng.SetMetrics(recorder)
+	dispatcher.SetMetrics(recorder)
+	if s, ok := instSvc.(interface{ SetMetrics(*metrics.Recorder) }); ok {
+		s.SetMetrics(recorder)
+	}
 	statusLoader := func(ctx context.Context, definitionID string) (*model.StatusUpdateConfig, error) {
 		def, err := wfDefs.GetByID(ctx, definitionID)
 		if err != nil {
@@ -523,6 +599,7 @@ func run(ctx context.Context, cfg *configuration.Config, logger *logrus.Logger) 
 	if err != nil {
 		return fmt.Errorf("status dispatcher: %w", err)
 	}
+	statusDispatcher.SetMetrics(recorder)
 	statusDispatcher.Run()
 	defer func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
@@ -543,6 +620,7 @@ func run(ctx context.Context, cfg *configuration.Config, logger *logrus.Logger) 
 		cronScheduler := scheduler.New(ctx, schedRepo, instSvc, "scheduler-"+hostname, scheduler.SchedulerOptions{
 			RefreshInterval: cfg.Scheduler.RefreshInterval,
 		})
+		cronScheduler.SetMetrics(recorder)
 		onScheduleChange = cronScheduler.Refresh
 		if err := cronScheduler.Run(); err != nil {
 			return fmt.Errorf("scheduler: %w", err)
@@ -568,6 +646,9 @@ func run(ctx context.Context, cfg *configuration.Config, logger *logrus.Logger) 
 		Statistics:          statsSvc,
 		Auth:                authSvc,
 		SwaggerEnabled:      cfg.Infra.HTTP.SwaggerEnabled,
+		MetricsEnabled:      cfg.Infra.HTTP.MetricsEnabled,
+		Metrics:             recorder,
+		MetricsRefresh:      metricsRefresh(recorder, monitors, execLimits.HTTPBulkhead),
 		AuthSettings:        cfg.Auth,
 		CORS:                cfg.Infra.HTTP.CORS,
 		OIDC:                oidcVerifier,

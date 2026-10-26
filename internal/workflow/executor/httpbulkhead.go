@@ -110,6 +110,14 @@ func (b *HTTPBulkhead) bucketFor(host string) chan struct{} {
 	return ch
 }
 
+// GlobalInflight reports process-wide bulkhead occupancy. Nil-safe.
+func (b *HTTPBulkhead) GlobalInflight() int {
+	if b == nil {
+		return 0
+	}
+	return len(b.global)
+}
+
 // parseRetryAfter parses a Retry-After header value: either delay-seconds
 // or an HTTP date. It reports false for empty, negative, and unparseable
 // values. A date in the past yields a zero delay with true.

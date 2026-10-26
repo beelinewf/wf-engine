@@ -577,3 +577,23 @@ is safe: multiple `app` replicas share the database; leases and SKIP LOCKED
 prevent duplicate execution, the heartbeat propagates stops across replicas,
 and per-transport outbox ordering keeps status delivery correct across
 replicas.
+
+## Metrics and observability
+
+The operational surface is `/health/live`, `/health/ready`, and
+`GET /metrics` (Prometheus exposition on the same port; no OpenAPI entry —
+`text/plain` is not a JSON contract). The registry lives in
+`internal/workflow/metrics`, which imports nothing from engine, executor,
+or service: labels are plain strings, so dependency direction stays clean.
+Components receive the recorder through `SetMetrics` setters; a nil
+recorder is a no-op, so unit tests construct components exactly as before.
+
+Counters and histograms update inline on the hot path (atomic increments);
+DB-backed gauges serve a TTL-cached snapshot (15s) refreshed inside the
+collector with a mutex and last-fetch timestamp — no goroutine, no
+per-scrape queries, up-to-15s stale by design. Consumer liveness and
+bulkhead occupancy are in-memory reads refreshed on every scrape. Every
+label is a bounded enum or route template; no label ever carries an
+instance ID, definition ID, user, host URL, or raw request path. If custom
+node types ever become user-controlled, the `node_type` label set must be
+audited before it can ride the series.

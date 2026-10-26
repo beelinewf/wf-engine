@@ -16,6 +16,7 @@ import (
 	"github.com/beelinewf/wf-engine/internal/workflow/auth"
 	"github.com/beelinewf/wf-engine/internal/workflow/executor"
 	"github.com/beelinewf/wf-engine/internal/workflow/kernel"
+	"github.com/beelinewf/wf-engine/internal/workflow/metrics"
 	"github.com/beelinewf/wf-engine/internal/workflow/model"
 	"github.com/beelinewf/wf-engine/internal/workflow/multipart"
 	"github.com/beelinewf/wf-engine/internal/workflow/objectstore"
@@ -450,6 +451,12 @@ type instanceService struct {
 	// multipart carries the object store and streaming limits multipart
 	// input deliveries upload through.
 	multipart MultipartDeps
+	metrics   *metrics.Recorder
+}
+
+// SetMetrics installs the optional metrics recorder. Nil disables recording.
+func (s *instanceService) SetMetrics(rec *metrics.Recorder) {
+	s.metrics = rec
 }
 
 // MultipartDeps carries the object store and streaming limits multipart
@@ -702,6 +709,7 @@ func (s *instanceService) Create(ctx context.Context, req CreateInstance) (model
 		Data:      createdEventData(def.ID, req.Debug),
 		CreatedBy: actor, CreatedAt: now,
 	})
+	s.metrics.InstanceCreated()
 	return w, nil
 }
 
@@ -1602,6 +1610,7 @@ func (s *instanceService) Stop(ctx context.Context, req ControlRequest) (*Contro
 	if pending && s.cancels != nil {
 		s.cancels.Cancel(id)
 	}
+	s.metrics.InstanceTerminal(string(model.WorkflowStopped), nowUTC().Sub(inst.CreatedAt))
 	return &ControlResult{Status: model.WorkflowStopped, TerminationPending: pending}, nil
 }
 
@@ -1941,6 +1950,8 @@ func (s *instanceService) Migrate(ctx context.Context, req MigrateRequest) (*Mig
 	if s.cancels != nil {
 		s.cancels.Cancel(inst.ID)
 	}
+	s.metrics.InstanceCreated()
+	s.metrics.InstanceTerminal(string(model.WorkflowStopped), now.Sub(inst.CreatedAt))
 	return &MigrateResult{Instance: w, SourceStatus: model.WorkflowStopped}, nil
 }
 
