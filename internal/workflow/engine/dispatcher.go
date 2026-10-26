@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/beelinewf/wf-engine/internal/workflow/metrics"
 	"github.com/beelinewf/wf-engine/internal/workflow/repository"
 	"github.com/panjf2000/ants/v2"
 )
@@ -28,6 +29,7 @@ type Dispatcher struct {
 	parallel  repository.ParallelRepository
 	workerID  string
 	pool      *ants.Pool
+	metrics   *metrics.Recorder
 
 	pollInterval time.Duration
 	lease        time.Duration
@@ -37,6 +39,11 @@ type Dispatcher struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+}
+
+// SetMetrics installs the optional metrics recorder. Nil disables recording.
+func (d *Dispatcher) SetMetrics(rec *metrics.Recorder) {
+	d.metrics = rec
 }
 
 // NewDispatcher builds a dispatcher; it is inert until Run is called.
@@ -100,6 +107,7 @@ func (d *Dispatcher) claimLoop() {
 			}
 			continue
 		}
+		d.metrics.DispatcherClaimsAdd(len(claimed))
 		for _, w := range claimed {
 			w := w
 			err := d.pool.Submit(func() {
@@ -130,6 +138,7 @@ func (d *Dispatcher) claimBranches() {
 		}
 		return
 	}
+	d.metrics.DispatcherClaimsAdd(len(branches))
 	if len(branches) > 0 {
 		slog.Debug("dispatcher claimed branches", "worker", d.workerID, "count", len(branches))
 	}

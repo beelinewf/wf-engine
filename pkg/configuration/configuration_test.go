@@ -1360,3 +1360,26 @@ func TestShippedConfigsCarryStorageAndMultipart(t *testing.T) {
 		}
 	}
 }
+
+func TestMetricsEnabledDefaultsTrue(t *testing.T) {
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !cfg.Infra.HTTP.MetricsEnabled {
+		t.Error("metrics_enabled = false, want true by default")
+	}
+}
+
+func TestMetricsEnabledEnvOverride(t *testing.T) {
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+	setenv(t, "BEELINEWF_INFRA_HTTP_METRICS_ENABLED", "false")
+	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Infra.HTTP.MetricsEnabled {
+		t.Error("metrics_enabled = true, want false from environment")
+	}
+}
