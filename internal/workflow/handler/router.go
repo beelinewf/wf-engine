@@ -2,8 +2,11 @@ package handler
 
 import (
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/beelinewf/wf-engine/internal/workflow/auth"
+	"github.com/beelinewf/wf-engine/internal/workflow/metrics"
 	"github.com/beelinewf/wf-engine/internal/workflow/service"
 	"github.com/beelinewf/wf-engine/pkg/configuration"
 	"github.com/gin-gonic/gin"
@@ -40,6 +43,13 @@ type Deps struct {
 	Catalog auth.Catalog
 	// SystemUserID is the audit actor the API-token bypass acts as.
 	SystemUserID string
+	// MetricsEnabled exposes GET /metrics. Disabled leaves no route (404).
+	MetricsEnabled bool
+	// Metrics is the recorder serving /metrics and the RED middleware.
+	// Nil disables instrumentation; the router behaves exactly as before.
+	Metrics *metrics.Recorder
+	// MetricsRefresh updates live gauges before each scrape; may be nil.
+	MetricsRefresh func()
 }
 
 // authEnabled reports whether any credential is accepted. With neither
@@ -53,6 +63,23 @@ func (d Deps) authEnabled() bool {
 	return d.AuthSettings.Enabled || d.OIDC != nil
 }
 
+// metricsMiddleware records HTTP RED with route-template labels. A nil
+// recorder passes requests through untouched.
+func metricsMiddleware(rec *metrics.Recorder) gin.HandlerFunc {
+	if rec == nil {
+		return func(c *gin.Context) { c.Next() }
+	}
+	return func(c *gin.Context) {
+		start := time.Now()
+		c.Next()
+		route := c.FullPath()
+		if route == "" {
+			route = "unknown"
+		}
+		rec.ObserveHTTP(c.Request.Method, route, strconv.Itoa(c.Writer.Status()), time.Since(start))
+	}
+}
+
 // NewRouter builds the Gin engine with all routes registered.
 func NewRouter(deps Deps) *gin.Engine {
 	r := gin.New()
@@ -60,6 +87,7 @@ func NewRouter(deps Deps) *gin.Engine {
 	// CORS runs before every group so preflights are answered without
 	// authentication and refusals still carry the origin header.
 	r.Use(CORS(deps.CORS))
+	r.Use(metricsMiddleware(deps.Metrics))
 
 	health := r.Group("/health")
 	health.GET("/live", deps.Health.Live)
@@ -71,6 +99,20 @@ func NewRouter(deps Deps) *gin.Engine {
 
 	v1 := r.Group("/v1")
 	enabled := deps.authEnabled()
+
+	if deps.MetricsEnabled && deps.Metrics != nil {
+		metricsHandler := func(c *gin.Context) {
+			if deps.MetricsRefresh != nil {
+				deps.MetricsRefresh()
+			}
+			deps.Metrics.Handler().ServeHTTP(c.Writer, c.Request)
+		}
+		if enabled {
+			r.GET("/metrics", RequireAPIToken(AuthConfig{APIToken: deps.AuthSettings.APIToken}), metricsHandler)
+		} else {
+			r.GET("/metrics", metricsHandler)
+		}
+	}
 
 	// The login contract is public and is registered before the
 	// authentication middleware: a frontend has to read it to learn where
