@@ -318,14 +318,8 @@ func (e *Engine) runNode(ctx context.Context, sc *execScope, g *workflowGraph, f
 		a := newAttempt(sc.instanceID, sc.branchID, nc, now)
 		attempt = &a
 		attempt.Status = model.NodeRunning
-		if sc.contextMode == "lean" {
-			attempt.ContextBefore = json.RawMessage("null")
-		} else {
-			ctxBefore, err := marshal(ctxMap)
-			if err != nil {
-				return e.fail(ctx, sc, err)
-			}
-			attempt.ContextBefore = ctxBefore
+		if err := prepareAttemptContext(attempt, sc.contextMode, ctxMap); err != nil {
+			return e.fail(ctx, sc, err)
 		}
 		attempt.StartedAt = &now
 		if err := e.instances.InsertNodeInstance(ctx, *attempt); err != nil {
@@ -340,14 +334,8 @@ func (e *Engine) runNode(ctx context.Context, sc *execScope, g *workflowGraph, f
 		a := newAttempt(sc.instanceID, sc.branchID, nc, now)
 		attempt = &a
 		attempt.Status = model.NodeRunning
-		if sc.contextMode == "lean" {
-			attempt.ContextBefore = json.RawMessage("null")
-		} else {
-			ctxBefore, err := marshal(ctxMap)
-			if err != nil {
-				return e.fail(ctx, sc, err)
-			}
-			attempt.ContextBefore = ctxBefore
+		if err := prepareAttemptContext(attempt, sc.contextMode, ctxMap); err != nil {
+			return e.fail(ctx, sc, err)
 		}
 		attempt.StartedAt = &now
 		if err := e.instances.InsertNodeInstance(ctx, *attempt); err != nil {
@@ -357,14 +345,8 @@ func (e *Engine) runNode(ctx context.Context, sc *execScope, g *workflowGraph, f
 		// Loop iteration: a new attempt of the same occurrence.
 		attempt.Attempt++
 		attempt.Status = model.NodeRunning
-		if sc.contextMode == "lean" {
-			attempt.ContextBefore = json.RawMessage("null")
-		} else {
-			ctxBefore, err := marshal(ctxMap)
-			if err != nil {
-				return e.fail(ctx, sc, err)
-			}
-			attempt.ContextBefore = ctxBefore
+		if err := prepareAttemptContext(attempt, sc.contextMode, ctxMap); err != nil {
+			return e.fail(ctx, sc, err)
 		}
 		attempt.Output = json.RawMessage("null")
 		attempt.ContextAfter = json.RawMessage("null")
@@ -424,14 +406,8 @@ func (e *Engine) recover(ctx context.Context, sc *execScope, g *workflowGraph, f
 			attempt.ContextAfter = emptyDiffJSON()
 		}
 		attempt.Status = model.NodeRunning
-		if sc.contextMode == "lean" {
-			attempt.ContextBefore = json.RawMessage("null")
-		} else {
-			ctxBefore, err := marshal(ctxMap)
-			if err != nil {
-				return e.fail(ctx, sc, err)
-			}
-			attempt.ContextBefore = ctxBefore
+		if err := prepareAttemptContext(attempt, sc.contextMode, ctxMap); err != nil {
+			return e.fail(ctx, sc, err)
 		}
 		attempt.StartedAt = &now
 		attempt.RecoveryResult = "retried"
@@ -483,14 +459,8 @@ func (e *Engine) recover(ctx context.Context, sc *execScope, g *workflowGraph, f
 
 	attempt.Attempt++
 	attempt.Status = model.NodeRunning
-	if sc.contextMode == "lean" {
-		attempt.ContextBefore = json.RawMessage("null")
-	} else {
-		ctxBefore, err := marshal(ctxMap)
-		if err != nil {
-			return e.fail(ctx, sc, err)
-		}
-		attempt.ContextBefore = ctxBefore
+	if err := prepareAttemptContext(attempt, sc.contextMode, ctxMap); err != nil {
+		return e.fail(ctx, sc, err)
 	}
 	attempt.Output = json.RawMessage("null")
 	attempt.ContextAfter = json.RawMessage("null")
@@ -561,40 +531,9 @@ func (e *Engine) executeStep(ctx context.Context, sc *execScope, g *workflowGrap
 		return e.failNode(ctx, sc, attempt, startCtx, ctxMap, err)
 	}
 
-	next := nc.NextNode
-	outCtx := ctxMap
-	var hookOutput any
-	if nc.Type == model.NodeTypeConditions {
-		cr, ok := res.Output.(*executor.ConditionResult)
-		if !ok {
-			return e.failNode(ctx, sc, attempt, startCtx, ctxMap, errors.New("conditions executor returned an invalid result"))
-		}
-		if !cr.Matched {
-			return e.failNode(ctx, sc, attempt, startCtx, ctxMap, fmt.Errorf("no condition matched in node %s", nc.ID))
-		}
-		if cr.Key == "" {
-			next = ""
-		} else {
-			target, ok := g.KeyTarget(nc.ID, cr.Key)
-			if !ok {
-				return e.failNode(ctx, sc, attempt, startCtx, ctxMap, fmt.Errorf("condition key %q of node %s is not defined in its workflow or group", cr.Key, nc.ID))
-			}
-			next = target
-		}
-		hookOutput = map[string]any{"matched": cr.Matched, "index": cr.Index, "key": cr.Key}
-	} else {
-		if res.Context != nil {
-			outCtx = res.Context
-		}
-		key := strings.TrimSpace(nc.OutputProperty)
-		if key == "" {
-			key = nc.ID
-		}
-		if outCtx == nil {
-			outCtx = map[string]any{}
-		}
-		outCtx[key] = res.Output
-		hookOutput = res.Output
+	next, outCtx, hookOutput, err := resolveNext(g, nc, ctxMap, res)
+	if err != nil {
+		return e.failNode(ctx, sc, attempt, startCtx, ctxMap, err)
 	}
 
 	postCtx, err := e.hooks.RunPost(ctx, nc, outCtx, hookOutput, req.Identity())
@@ -604,33 +543,94 @@ func (e *Engine) executeStep(ctx context.Context, sc *execScope, g *workflowGrap
 	outCtx = postCtx
 
 	now := e.now()
-	attempt.Status = model.NodeFinished
-	output, err := marshal(res.Output)
-	if err != nil {
+	if err := finishAttempt(attempt, res.Output, startCtx, outCtx, sc.contextMode, now); err != nil {
 		return e.failNode(ctx, sc, attempt, startCtx, outCtx, err)
 	}
-	attempt.Output = output
-	if sc.contextMode == "lean" {
+	if err := e.instances.UpdateNodeInstance(ctx, *attempt); err != nil {
+		return err
+	}
+	_ = e.appendEvent(ctx, sc, "node_finished", map[string]any{"node_id": nc.ID, "occurrence_id": attempt.ID, "attempt": attempt.Attempt})
+
+	return e.commitAdvance(ctx, sc, g, frame, counters, nc, attempt, startCtx, outCtx, next, now)
+}
+
+// resolveNext routes an executor result to the next node id, the outgoing
+// context, and the post-hook output. Conditions nodes resolve the matched
+// key through the graph; every other node merges the result into context
+// under its output property (defaulting to the node id). A returned error
+// is a failNode cause.
+func resolveNext(g *workflowGraph, nc *model.NodeContent, ctxMap map[string]any, res *executor.Result) (string, map[string]any, any, error) {
+	next := nc.NextNode
+	outCtx := ctxMap
+	var hookOutput any
+	if nc.Type == model.NodeTypeConditions {
+		cr, ok := res.Output.(*executor.ConditionResult)
+		if !ok {
+			return "", nil, nil, errors.New("conditions executor returned an invalid result")
+		}
+		if !cr.Matched {
+			return "", nil, nil, fmt.Errorf("no condition matched in node %s", nc.ID)
+		}
+		if cr.Key == "" {
+			next = ""
+		} else {
+			target, ok := g.KeyTarget(nc.ID, cr.Key)
+			if !ok {
+				return "", nil, nil, fmt.Errorf("condition key %q of node %s is not defined in its workflow or group", cr.Key, nc.ID)
+			}
+			next = target
+		}
+		hookOutput = map[string]any{"matched": cr.Matched, "index": cr.Index, "key": cr.Key}
+		return next, outCtx, hookOutput, nil
+	}
+	if res.Context != nil {
+		outCtx = res.Context
+	}
+	key := strings.TrimSpace(nc.OutputProperty)
+	if key == "" {
+		key = nc.ID
+	}
+	if outCtx == nil {
+		outCtx = map[string]any{}
+	}
+	outCtx[key] = res.Output
+	hookOutput = res.Output
+	return next, outCtx, hookOutput, nil
+}
+
+// finishAttempt stamps a successful outcome onto the attempt: serialized
+// output plus the context-after snapshot (lean diff or full copy). The
+// caller persists the row and emits the finished event; a returned error
+// is a failNode cause.
+func finishAttempt(attempt *model.NodeInstance, output any, startCtx, outCtx map[string]any, contextMode string, now time.Time) error {
+	attempt.Status = model.NodeFinished
+	encoded, err := marshal(output)
+	if err != nil {
+		return err
+	}
+	attempt.Output = encoded
+	if contextMode == "lean" {
 		diff, err := contextdiff.DiffMaps(startCtx, outCtx)
 		if err != nil {
-			return e.failNode(ctx, sc, attempt, startCtx, outCtx, err)
+			return err
 		}
 		attempt.ContextBefore = json.RawMessage("null")
 		attempt.ContextAfter = diff.JSON()
 	} else {
 		ctxAfter, err := marshal(outCtx)
 		if err != nil {
-			return e.failNode(ctx, sc, attempt, startCtx, outCtx, err)
+			return err
 		}
 		attempt.ContextAfter = ctxAfter
 	}
 	attempt.FinishedAt = &now
 	attempt.UpdatedAt = now
-	if err := e.instances.UpdateNodeInstance(ctx, *attempt); err != nil {
-		return err
-	}
-	_ = e.appendEvent(ctx, sc, "node_finished", map[string]any{"node_id": nc.ID, "occurrence_id": attempt.ID, "attempt": attempt.Attempt})
+	return nil
+}
 
+// commitAdvance advances the frame to next, runs exited group post hooks
+// innermost-first, and checkpoints the transition.
+func (e *Engine) commitAdvance(ctx context.Context, sc *execScope, g *workflowGraph, frame *model.Frame, counters model.Counters, nc *model.NodeContent, attempt *model.NodeInstance, startCtx, outCtx map[string]any, next string, now time.Time) error {
 	done, exited, err := kernel.Advance(frame, g, next)
 	if err != nil {
 		return e.fail(ctx, sc, err)
@@ -740,30 +740,7 @@ func (e *Engine) routeFailure(ctx context.Context, sc *execScope, g *workflowGra
 		"reason":          reason,
 	})
 
-	done, exited, err := kernel.Advance(frame, g, nc.OnFailure.NextNode)
-	if err != nil {
-		return e.fail(ctx, sc, err)
-	}
-	finalCtx := outCtx
-	if len(exited) > 0 {
-		finalCtx, err = kernel.RunExitedGroupPosts(ctx, e.hooks, g, exited, outCtx, sc.identity(nc.ID, attempt.ID))
-		if err != nil {
-			return e.failWithContext(ctx, sc, err, finalCtx, &contextCommit{
-				start:        startCtx,
-				end:          finalCtx,
-				occurrenceID: attempt.ID,
-				nodeID:       attempt.NodeID,
-				attempt:      attempt.Attempt,
-			})
-		}
-	}
-	for _, gid := range exited {
-		_ = e.appendEvent(ctx, sc, "group_exited", map[string]any{"node_id": gid})
-	}
-	if done {
-		return e.checkpoint(ctx, sc, frame, counters, finalCtx, model.WorkflowFinished, "", "", &now, nil)
-	}
-	return e.checkpoint(ctx, sc, frame, counters, finalCtx, e.nextStatus(sc), "", "", nil, nil)
+	return e.commitAdvance(ctx, sc, g, frame, counters, nc, attempt, startCtx, outCtx, nc.OnFailure.NextNode, now)
 }
 
 // failNode marks the running attempt failed and fails the scope.
@@ -1313,4 +1290,19 @@ func cloneContextMap(ctxMap map[string]any) (map[string]any, error) {
 		return nil, err
 	}
 	return unmarshalContext(raw)
+}
+
+// prepareAttemptContext stamps the context-before snapshot onto the attempt:
+// null in lean mode, a full marshal of ctxMap otherwise.
+func prepareAttemptContext(attempt *model.NodeInstance, contextMode string, ctxMap map[string]any) error {
+	if contextMode == "lean" {
+		attempt.ContextBefore = json.RawMessage("null")
+		return nil
+	}
+	ctxBefore, err := marshal(ctxMap)
+	if err != nil {
+		return err
+	}
+	attempt.ContextBefore = ctxBefore
+	return nil
 }

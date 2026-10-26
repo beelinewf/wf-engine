@@ -181,7 +181,7 @@ func RunScript(ctx context.Context, opts ScriptOptions) (*ScriptResult, error) {
 	if err != nil {
 		var interrupted *goja.InterruptedError
 		if errors.As(err, &interrupted) {
-			if errors.Is(fmt.Errorf("%v", interrupted.Value()), ErrScriptTimeout) || ctx.Err() != nil {
+			if errVal, ok := interrupted.Value().(error); ok && errors.Is(errVal, ErrScriptTimeout) {
 				return nil, fmt.Errorf("%w: %v", ErrScriptTimeout, interrupted.Value())
 			}
 			return nil, fmt.Errorf("executor: script interrupted: %w", err)

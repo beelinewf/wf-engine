@@ -2218,37 +2218,37 @@ func (s *instanceService) assertInputParked(ctx context.Context, inst *model.Wor
 	return attempt, ctxMap, nil
 }
 
-func (s *instanceService) DeliverInput(ctx context.Context, req DeliverInput) (*model.InputDelivery, error) {
-	if strings.TrimSpace(req.IdempotencyKey) == "" {
-		return nil, fmt.Errorf("%w: Idempotency-Key header is required", model.ErrInvalid)
-	}
-	isMultipart := isMultipartRequest(req)
-	if !isMultipart && len(req.Payload) == 0 {
-		return nil, fmt.Errorf("%w: input body is required", model.ErrInvalid)
-	}
-	// Multipart uploads commit objects before the delivery succeeds, so
-	// every failure past the build deletes them and a failed delivery
-	// leaves nothing behind. The flag flips only on the persisted-success
-	// returns below: a persisted rejection still cleans up. The JSON path
-	// never uploads, so the guard is a no-op there.
-	var uploadBucket string
-	var uploaded []string
-	delivered := false
-	defer func() {
-		if !delivered && len(uploaded) > 0 {
-			s.deleteUploads(context.WithoutCancel(ctx), uploadBucket, uploaded)
-		}
-	}()
+// deliveryResolution carries the authorized target of an input delivery from
+// resolveAndAuthorize through validation and commit. The live attempt and
+// the pre-delivery context live on target (attempt/startCtx); the rest is
+// what validation, merge, and commit need without re-resolving.
+type deliveryResolution struct {
+	inst      *model.WorkflowInstance
+	graph     *contentGraph
+	target    *inputTarget
+	principal auth.Principal
+	actor     string
+	anonymous bool
+}
+
+// resolveAndAuthorize loads the instance, replays an already-recorded
+// delivery for the idempotency key, refuses terminal instances, resolves
+// the input target, authorizes the caller, and checks channel, parked
+// state, and media type — in that order, so error precedence matches the
+// inline flow this replaces. A replay hit returns the stored delivery as
+// the second value with a nil resolution; otherwise the resolution carries
+// forward to validation and commit.
+func (s *instanceService) resolveAndAuthorize(ctx context.Context, req DeliverInput) (*deliveryResolution, *model.InputDelivery, error) {
 	inst, err := s.instances.GetByID(ctx, req.InstanceID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	principal := s.deliveryPrincipal(req)
 	actor := s.deliveryActor(req, principal)
 	anonymous := isAnonymousDelivery(req, principal)
 	if err := authorizeInstance(inst, principal); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Idempotent replay: an already recorded delivery for this key returns
@@ -2262,11 +2262,15 @@ func (s *instanceService) DeliverInput(ctx context.Context, req DeliverInput) (*
 	case err == nil:
 		graph, gerr := s.contentGraph(ctx, inst)
 		if gerr != nil {
-			return nil, gerr
+			return nil, nil, gerr
 		}
-		return s.replayDelivery(ctx, inst, graph, existing, req, principal)
+		replay, rerr := s.replayDelivery(ctx, inst, graph, existing, req, principal)
+		if rerr != nil {
+			return nil, nil, rerr
+		}
+		return nil, replay, nil
 	case !errors.Is(err, repository.ErrDeliveryNotFound):
-		return nil, err
+		return nil, nil, err
 	}
 
 	// A terminal instance is refused once the key is known to be fresh, so a
@@ -2274,18 +2278,18 @@ func (s *instanceService) DeliverInput(ctx context.Context, req DeliverInput) (*
 	// stored result.
 	switch inst.Status {
 	case model.WorkflowFinished, model.WorkflowFailed, model.WorkflowStopped:
-		return nil, fmt.Errorf("%w: instance %s is terminal", model.ErrConflict, req.InstanceID)
+		return nil, nil, fmt.Errorf("%w: instance %s is terminal", model.ErrConflict, req.InstanceID)
 	}
 
 	graph, err := s.contentGraph(ctx, inst)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	tgt, err := s.resolveInputTarget(ctx, inst, graph, req)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	frame, inputNode := tgt.frame, tgt.node
+	inputNode := tgt.node
 	// Authorization is decided here, once the node the delivery targets is
 	// known, and before the channel match, so a source header cannot skip
 	// the gate. The endpoint permission and the node gate are independent:
@@ -2295,18 +2299,18 @@ func (s *instanceService) DeliverInput(ctx context.Context, req DeliverInput) (*
 	// is marked anonymous in the audit trail; an invalid credential never
 	// degrades to anonymous, because the router authenticates first.
 	if err := s.authorizeDelivery(ctx, inst, inputNode, principal, anonymous); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	source := req.Source
 	if source == "" {
 		source = model.InputChannelHTTP
 	}
 	if inputNode.Channel != source {
-		return nil, fmt.Errorf("%w: input source %q does not match input node channel %q", model.ErrConflict, source, inputNode.Channel)
+		return nil, nil, fmt.Errorf("%w: input source %q does not match input node channel %q", model.ErrConflict, source, inputNode.Channel)
 	}
 	attempt, ctxMap, err := s.assertInputParked(ctx, inst, tgt, req)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	tgt.attempt = attempt
 	tgt.startCtx = ctxMap
@@ -2319,50 +2323,82 @@ func (s *instanceService) DeliverInput(ctx context.Context, req DeliverInput) (*
 		mediaType = model.MediaTypeJSON
 	}
 	if !inputNode.Accepts(mediaType) {
-		return nil, fmt.Errorf("%w: input node does not accept %s", model.ErrUnsupportedMedia, mediaType)
+		return nil, nil, fmt.Errorf("%w: input node does not accept %s", model.ErrUnsupportedMedia, mediaType)
 	}
-	if isMultipart {
-		if s.multipart.Store == nil {
-			return nil, errors.New("multipart input needs infra.storage, which is not configured on this deployment")
-		}
-		if req.MultipartSource == nil {
-			return nil, fmt.Errorf("%w: multipart delivery needs a body source", model.ErrBadRequest)
-		}
-		mr, err := req.MultipartSource()
-		if err != nil {
-			return nil, fmt.Errorf("%w: cannot read multipart body: %v", model.ErrBadRequest, err)
-		}
-		if mr == nil {
-			return nil, fmt.Errorf("%w: multipart delivery needs a body source", model.ErrBadRequest)
-		}
-		// The build streams file parts into the object store and
-		// synthesizes the JSON payload the tail below validates, merges,
-		// and persists exactly like a JSON delivery. Its keys feed the
-		// cleanup guard above on every failure past this point.
-		result, err := multipart.Build(ctx, mr, inputNode, s.multipart.Store, s.multipart.Limits)
-		uploadBucket, uploaded = result.Bucket, result.Keys
-		if err != nil {
-			return nil, err
-		}
-		req.Payload = result.Payload
+	return &deliveryResolution{
+		inst: inst, graph: graph, target: tgt,
+		principal: principal, actor: actor, anonymous: anonymous,
+	}, nil, nil
+}
+
+// buildDeliveryPayload streams a multipart body into the object store and
+// rewrites req.Payload with the synthesized JSON the validation/merge tail
+// runs on. JSON deliveries pass through unchanged. The returned bucket and
+// keys feed the caller's cleanup guard: they are populated even on failure,
+// so a failed build still deletes every committed object.
+func (s *instanceService) buildDeliveryPayload(ctx context.Context, inputNode *model.NodeContent, req *DeliverInput) (bucket string, uploaded []string, err error) {
+	if !isMultipartRequest(*req) {
+		return "", nil, nil
 	}
-	// The validation script is the only backend gate on the payload. A
-	// referenced form is never consulted: forms are a frontend concern, and
-	// a payload violating the form's schema but passing the script is
-	// accepted. Rejection persists Accepted=false; anonymous deliveries
-	// record the anonymous marker alongside it, so the audit trail still
-	// distinguishes them.
+	if s.multipart.Store == nil {
+		return "", nil, errors.New("multipart input needs infra.storage, which is not configured on this deployment")
+	}
+	if req.MultipartSource == nil {
+		return "", nil, fmt.Errorf("%w: multipart delivery needs a body source", model.ErrBadRequest)
+	}
+	mr, err := req.MultipartSource()
+	if err != nil {
+		return "", nil, fmt.Errorf("%w: cannot read multipart body: %v", model.ErrBadRequest, err)
+	}
+	if mr == nil {
+		return "", nil, fmt.Errorf("%w: multipart delivery needs a body source", model.ErrBadRequest)
+	}
+	// The build streams file parts into the object store and synthesizes
+	// the JSON payload the tail validates, merges, and persists exactly
+	// like a JSON delivery. Its keys feed the cleanup guard on every
+	// failure past this point.
+	result, err := multipart.Build(ctx, mr, inputNode, s.multipart.Store, s.multipart.Limits)
+	if err != nil {
+		return result.Bucket, result.Keys, err
+	}
+	req.Payload = result.Payload
+	return result.Bucket, result.Keys, nil
+}
+
+// deliveryIdentity builds the executor identity validation, hooks, and
+// group posts observe for a delivery: the instance and attempt plus the
+// branch scope when the delivery targets a branch cursor.
+func deliveryIdentity(inst *model.WorkflowInstance, tgt *inputTarget) executor.Identity {
 	ident := executor.Identity{
 		WorkflowInstanceID: inst.ID,
-		NodeInstanceID:     attempt.ID,
+		NodeInstanceID:     tgt.attempt.ID,
 		BranchID:           tgt.branchID,
-		NodeID:             inputNode.ID,
+		NodeID:             tgt.node.ID,
 	}
 	if tgt.branch != nil {
 		ident.ParallelExecutionID = tgt.branch.ParallelExecutionID
 		ident.BranchName = tgt.branch.Name
 		ident.BranchIndex = tgt.branch.BranchIndex
 	}
+	return ident
+}
+
+// validateAndMerge runs the validation script, merges an accepted payload
+// into the context, and runs the post hook. A rejected payload persists
+// Accepted=false and returns the stored delivery as the second value; a
+// post-hook failure persists via failAcceptedInput the same way. Otherwise
+// it returns the merged post-hook context.
+func (s *instanceService) validateAndMerge(ctx context.Context, res *deliveryResolution, req DeliverInput) (map[string]any, *model.InputDelivery, error) {
+	inst, tgt := res.inst, res.target
+	inputNode, ctxMap := tgt.node, tgt.startCtx
+	attempt := tgt.attempt
+	// The validation script is the only backend gate on the payload. A
+	// referenced form is never consulted: forms are a frontend concern, and
+	// a payload violating the form's schema but passing the script is
+	// accepted. Rejection persists Accepted=false; anonymous deliveries
+	// record the anonymous marker alongside it, so the audit trail still
+	// distinguishes them.
+	ident := deliveryIdentity(inst, tgt)
 	vr, err := s.validator.Validate(ctx, executor.Request{
 		Node: inputNode, Context: ctxMap, Payload: req.Payload,
 		InstanceID: inst.ID, NodeInstanceID: attempt.ID,
@@ -2370,28 +2406,32 @@ func (s *instanceService) DeliverInput(ctx context.Context, req DeliverInput) (*
 		BranchName: ident.BranchName, BranchIndex: ident.BranchIndex,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("%w: input validation failed: %v", model.ErrInvalid, err)
+		return nil, nil, fmt.Errorf("%w: input validation failed: %v", model.ErrInvalid, err)
 	}
 	if !vr.Valid {
-		return s.instances.DeliverInput(ctx, repository.InputCompletion{
+		rejected, rerr := s.instances.DeliverInput(ctx, repository.InputCompletion{
 			InstanceID:     inst.ID,
 			NodeInstanceID: attempt.ID,
 			IdempotencyKey: req.IdempotencyKey,
 			Payload:        req.Payload,
 			Accepted:       false,
 			Error:          vr.Message,
-			CreatedBy:      actor,
-			Anonymous:      anonymous,
+			CreatedBy:      res.actor,
+			Anonymous:      res.anonymous,
 		})
+		if rerr != nil {
+			return nil, nil, rerr
+		}
+		return nil, rejected, nil
 	}
 
 	var payload any
 	if err := json.Unmarshal(req.Payload, &payload); err != nil {
-		return nil, fmt.Errorf("%w: input body must be valid JSON: %v", model.ErrInvalid, err)
+		return nil, nil, fmt.Errorf("%w: input body must be valid JSON: %v", model.ErrInvalid, err)
 	}
 	newCtx, err := cloneContext(ctxMap)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	key := strings.TrimSpace(inputNode.OutputProperty)
 	if key == "" {
@@ -2401,55 +2441,77 @@ func (s *instanceService) DeliverInput(ctx context.Context, req DeliverInput) (*
 	// output global all see the raw payload. Only the context merge
 	// changes, so record_actor cannot be used to smuggle a different shape
 	// past validation.
-	newCtx[key] = inputContextValue(inputNode, principal, actor, payload)
+	newCtx[key] = inputContextValue(inputNode, res.principal, res.actor, payload)
 
 	// The post hook sees the accepted payload as a frozen output global and
 	// may transform the context after the payload was written.
 	postCtx, err := s.hooks.RunPost(ctx, inputNode, newCtx, payload, ident)
 	if err != nil {
-		return s.failAcceptedInput(ctx, inst, tgt, req, model.NodeFailed, newCtx, err)
+		failed, ferr := s.failAcceptedInput(ctx, inst, tgt, req, model.NodeFailed, newCtx, err)
+		if ferr != nil {
+			return nil, nil, ferr
+		}
+		return nil, failed, nil
 	}
-	newCtx = postCtx
+	return postCtx, nil, nil
+}
 
+// commitDelivery advances the cursor past the input node, runs exited group
+// posts, and persists the accepted delivery. Group-post and
+// branch-termination failures persist via failAcceptedInput and return
+// committed=false, so the caller still cleans up multipart uploads; only a
+// fully successful commit returns committed=true.
+func (s *instanceService) commitDelivery(ctx context.Context, res *deliveryResolution, req DeliverInput, newCtx map[string]any) (*model.InputDelivery, bool, error) {
+	inst, tgt := res.inst, res.target
+	inputNode := tgt.node
+	frame := tgt.frame
+	ident := deliveryIdentity(inst, tgt)
 	next := inputNode.NextNode
-	done, exited, err := kernel.Advance(&frame, graph, next)
+	done, exited, err := kernel.Advance(&frame, res.graph, next)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if len(exited) > 0 {
-		finalCtx, herr := kernel.RunExitedGroupPosts(ctx, s.hooks, graph, exited, newCtx, ident)
+		finalCtx, herr := kernel.RunExitedGroupPosts(ctx, s.hooks, res.graph, exited, newCtx, ident)
 		if herr != nil {
 			// The input attempt finished; the structural group hook failure
 			// fails the scope with the latest completed context.
-			return s.failAcceptedInput(ctx, inst, tgt, req, model.NodeFinished, finalCtx, herr)
+			failed, ferr := s.failAcceptedInput(ctx, inst, tgt, req, model.NodeFinished, finalCtx, herr)
+			if ferr != nil {
+				return nil, false, ferr
+			}
+			return failed, false, nil
 		}
 		newCtx = finalCtx
 	}
 	c := repository.InputCompletion{
 		InstanceID:     inst.ID,
 		BranchID:       tgt.branchID,
-		NodeInstanceID: attempt.ID,
+		NodeInstanceID: tgt.attempt.ID,
 		IdempotencyKey: req.IdempotencyKey,
 		Payload:        req.Payload,
 		Accepted:       true,
 		NewFrame:       frame,
 		NewContext:     mustMarshal(newCtx),
-		CreatedBy:      actor,
-		Anonymous:      anonymous,
+		CreatedBy:      res.actor,
+		Anonymous:      res.anonymous,
 	}
 	if tgt.branchID != "" {
 		if done {
 			// Unreachable on validated graphs: every branch path
 			// reaches the join. Fail the branch loudly instead of
 			// dropping it.
-			return s.failAcceptedInput(ctx, inst, tgt, req, model.NodeFinished, newCtx, errors.New("branch terminated without reaching its parallel_end"))
+			failed, ferr := s.failAcceptedInput(ctx, inst, tgt, req, model.NodeFinished, newCtx, errors.New("branch terminated without reaching its parallel_end"))
+			if ferr != nil {
+				return nil, false, ferr
+			}
+			return failed, false, nil
 		}
 		delivery, err := s.instances.DeliverInput(ctx, c)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
-		delivered = true
-		return delivery, nil
+		return delivery, true, nil
 	}
 	status := model.WorkflowWaiting
 	var finished *time.Time
@@ -2465,12 +2527,59 @@ func (s *instanceService) DeliverInput(ctx context.Context, req DeliverInput) (*
 	}
 	c.Status = status
 	c.FinishedAt = finished
-	c.History = s.leanInputHistory(inst, ctxMap, newCtx, attempt)
+	c.History = s.leanInputHistory(inst, tgt.startCtx, newCtx, tgt.attempt)
 	delivery, err := s.instances.DeliverInput(ctx, c)
+	if err != nil {
+		return nil, false, err
+	}
+	return delivery, true, nil
+}
+
+func (s *instanceService) DeliverInput(ctx context.Context, req DeliverInput) (*model.InputDelivery, error) {
+	if strings.TrimSpace(req.IdempotencyKey) == "" {
+		return nil, fmt.Errorf("%w: Idempotency-Key header is required", model.ErrInvalid)
+	}
+	isMultipart := isMultipartRequest(req)
+	if !isMultipart && len(req.Payload) == 0 {
+		return nil, fmt.Errorf("%w: input body is required", model.ErrInvalid)
+	}
+	// Multipart uploads commit objects before the delivery succeeds, so
+	// every failure past the build deletes them and a failed delivery
+	// leaves nothing behind. The flag flips only when the commit below
+	// reports a persisted success: a persisted rejection or post failure
+	// still cleans up. The JSON path never uploads, so the guard is a
+	// no-op there.
+	var uploadBucket string
+	var uploaded []string
+	delivered := false
+	defer func() {
+		if !delivered && len(uploaded) > 0 {
+			s.deleteUploads(context.WithoutCancel(ctx), uploadBucket, uploaded)
+		}
+	}()
+	res, replay, err := s.resolveAndAuthorize(ctx, req)
 	if err != nil {
 		return nil, err
 	}
-	delivered = true
+	if replay != nil {
+		return replay, nil
+	}
+	uploadBucket, uploaded, err = s.buildDeliveryPayload(ctx, res.target.node, &req)
+	if err != nil {
+		return nil, err
+	}
+	newCtx, done, err := s.validateAndMerge(ctx, res, req)
+	if err != nil {
+		return nil, err
+	}
+	if done != nil {
+		return done, nil
+	}
+	delivery, committed, err := s.commitDelivery(ctx, res, req, newCtx)
+	if err != nil {
+		return nil, err
+	}
+	delivered = committed
 	return delivery, nil
 }
 

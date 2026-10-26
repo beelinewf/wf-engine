@@ -133,12 +133,15 @@ func (d *Dispatcher) claimLoop() {
 		}
 		for _, ev := range claimed {
 			ev := ev
+			d.wg.Add(1)
 			err := d.pool.Submit(func() {
+				defer d.wg.Done()
 				if err := d.deliver(ev); err != nil && d.ctx.Err() == nil {
 					slog.Warn("status update delivery failed", "worker", d.workerID, "event", ev.ID, "error", err)
 				}
 			})
 			if err != nil {
+				d.wg.Done()
 				// Pool closed (shutdown): deliver inline rather than
 				// dropping the claim.
 				if err := d.deliver(ev); err != nil && d.ctx.Err() == nil {

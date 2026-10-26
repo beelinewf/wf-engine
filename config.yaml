@@ -14,6 +14,20 @@ infra:
     # Operator override: BEELINEWF_INFRA_HTTP_METRICS_ENABLED.
     # false leaves no route (404).
     metrics_enabled: true
+    # Cap on the JSON request bodies the instance handler reads (context
+    # replace, input delivery); a breach answers 413. File uploads ride the
+    # multipart path with its own engine.multipart limits.
+    # Operator override: BEELINEWF_INFRA_HTTP_MAX_BODY_BYTES.
+    max_body_bytes: 1048576
+    # Server timeouts (Go duration strings). read_header_timeout bounds
+    # the wait for request headers, closing slow-header connections;
+    # idle_timeout reaps idle keep-alive connections. There is
+    # deliberately no write timeout: one would cut long-lived SSE
+    # streams. Operator overrides:
+    # BEELINEWF_INFRA_HTTP_READ_HEADER_TIMEOUT,
+    # BEELINEWF_INFRA_HTTP_IDLE_TIMEOUT.
+    read_header_timeout: 10s
+    idle_timeout: 60s
     # Cross-origin access for browser frontends deployed on another
     # origin. The default "*" allows any origin, which suits development;
     # for production, list the frontend origins (scheme://host[:port]) or

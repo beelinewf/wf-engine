@@ -167,6 +167,103 @@ func TestLoadDefaultsApplied(t *testing.T) {
 	if cfg.Worker.Pool.Size != 1000 {
 		t.Errorf("default pool size = %d, want 1000", cfg.Worker.Pool.Size)
 	}
+	if cfg.Infra.HTTP.MaxBodyBytes != 1048576 {
+		t.Errorf("default max_body_bytes = %d, want 1048576", cfg.Infra.HTTP.MaxBodyBytes)
+	}
+}
+
+func TestLoadMaxBodyBytesEnvOverridesFile(t *testing.T) {
+	path := writeConfig(t, `
+infra:
+  http:
+    max_body_bytes: 2048
+  postgresql:
+    dsn: "file-dsn"
+`)
+	setenv(t, "BEELINEWF_INFRA_HTTP_MAX_BODY_BYTES", "4096")
+
+	cfg, err := configuration.Load(configuration.WithConfigFile(path))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Infra.HTTP.MaxBodyBytes != 4096 {
+		t.Errorf("max_body_bytes = %d, want 4096 from environment", cfg.Infra.HTTP.MaxBodyBytes)
+	}
+}
+
+func TestLoadRejectsNonPositiveMaxBodyBytes(t *testing.T) {
+	for _, value := range []string{"0", "-1"} {
+		t.Run(value, func(t *testing.T) {
+			setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+			setenv(t, "BEELINEWF_INFRA_HTTP_MAX_BODY_BYTES", value)
+			if _, err := configuration.Load(configuration.WithConfigFile(missingPath(t))); err == nil {
+				t.Fatalf("Load() error = nil, want error for max_body_bytes=%s", value)
+			}
+		})
+	}
+}
+
+func TestLoadServerTimeoutDefaults(t *testing.T) {
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+
+	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Infra.HTTP.ReadHeaderTimeout != 10*time.Second {
+		t.Errorf("read_header_timeout = %v, want 10s", cfg.Infra.HTTP.ReadHeaderTimeout)
+	}
+	if cfg.Infra.HTTP.IdleTimeout != 60*time.Second {
+		t.Errorf("idle_timeout = %v, want 60s", cfg.Infra.HTTP.IdleTimeout)
+	}
+}
+
+func TestLoadServerTimeoutEnvOverridesFile(t *testing.T) {
+	path := writeConfig(t, `
+infra:
+  http:
+    read_header_timeout: 1s
+    idle_timeout: 2s
+  postgresql:
+    dsn: "file-dsn"
+`)
+	setenv(t, "BEELINEWF_INFRA_HTTP_READ_HEADER_TIMEOUT", "3s")
+	setenv(t, "BEELINEWF_INFRA_HTTP_IDLE_TIMEOUT", "4s")
+
+	cfg, err := configuration.Load(configuration.WithConfigFile(path))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Infra.HTTP.ReadHeaderTimeout != 3*time.Second {
+		t.Errorf("read_header_timeout = %v, want 3s from environment", cfg.Infra.HTTP.ReadHeaderTimeout)
+	}
+	if cfg.Infra.HTTP.IdleTimeout != 4*time.Second {
+		t.Errorf("idle_timeout = %v, want 4s from environment", cfg.Infra.HTTP.IdleTimeout)
+	}
+}
+
+func TestLoadRejectsNonPositiveServerTimeouts(t *testing.T) {
+	cases := []struct {
+		env  string
+		name string
+	}{
+		{"BEELINEWF_INFRA_HTTP_READ_HEADER_TIMEOUT", "infra.http.read_header_timeout"},
+		{"BEELINEWF_INFRA_HTTP_IDLE_TIMEOUT", "infra.http.idle_timeout"},
+	}
+	for _, tc := range cases {
+		for _, value := range []string{"0s", "-1s"} {
+			t.Run(tc.env+"="+value, func(t *testing.T) {
+				setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+				setenv(t, tc.env, value)
+				_, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+				if err == nil {
+					t.Fatalf("Load() error = nil, want error for %s=%s", tc.name, value)
+				} else if !strings.Contains(err.Error(), tc.name) {
+					t.Errorf("error = %q, want mention of %s", err, tc.name)
+				}
+			})
+		}
+	}
 }
 
 func TestLoadDispatcherTuningDefaults(t *testing.T) {

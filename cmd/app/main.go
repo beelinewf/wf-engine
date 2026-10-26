@@ -202,6 +202,18 @@ func statusDispatcherOptions(cfg *configuration.Config, limits model.Limits) sta
 	}
 }
 
+// newHTTPServer builds the API server from config. ReadHeaderTimeout closes
+// slow-header connections and IdleTimeout reaps idle keep-alives;
+// WriteTimeout stays unset so SSE streams are never cut.
+func newHTTPServer(cfg *configuration.Config, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              cfg.Infra.HTTP.Host,
+		Handler:           handler,
+		ReadHeaderTimeout: cfg.Infra.HTTP.ReadHeaderTimeout,
+		IdleTimeout:       cfg.Infra.HTTP.IdleTimeout,
+	}
+}
+
 // metricsRefresh returns the per-scrape live-gauge updater: broker consumer
 // liveness and bulkhead occupancy are in-memory and cheap, so they refresh
 // on every scrape with no TTL staleness and no goroutine.
@@ -647,6 +659,7 @@ func run(ctx context.Context, cfg *configuration.Config, logger *logrus.Logger) 
 		Auth:                authSvc,
 		SwaggerEnabled:      cfg.Infra.HTTP.SwaggerEnabled,
 		MetricsEnabled:      cfg.Infra.HTTP.MetricsEnabled,
+		MaxBodyBytes:        cfg.Infra.HTTP.MaxBodyBytes,
 		Metrics:             recorder,
 		MetricsRefresh:      metricsRefresh(recorder, monitors, execLimits.HTTPBulkhead),
 		AuthSettings:        cfg.Auth,
@@ -656,10 +669,7 @@ func run(ctx context.Context, cfg *configuration.Config, logger *logrus.Logger) 
 		SystemUserID:        actor,
 	})
 
-	srv := &http.Server{
-		Addr:    cfg.Infra.HTTP.Host,
-		Handler: router,
-	}
+	srv := newHTTPServer(cfg, router)
 
 	errCh := make(chan error, 1)
 	go func() {

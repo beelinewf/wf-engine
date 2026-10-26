@@ -56,7 +56,16 @@ type HTTP struct {
 	Host           string `mapstructure:"host"`
 	SwaggerEnabled bool   `mapstructure:"swagger_enabled"`
 	MetricsEnabled bool   `mapstructure:"metrics_enabled"`
-	CORS           CORS   `mapstructure:"cors"`
+	// MaxBodyBytes caps the JSON request bodies the instance handler
+	// reads (context replace, input delivery); a breach answers 413.
+	MaxBodyBytes int64 `mapstructure:"max_body_bytes"`
+	// ReadHeaderTimeout bounds the time the server waits for request
+	// headers, closing slow-header connections. WriteTimeout stays unset
+	// so long-lived SSE streams are never cut.
+	ReadHeaderTimeout time.Duration `mapstructure:"read_header_timeout"`
+	// IdleTimeout closes idle keep-alive connections for cleanup.
+	IdleTimeout time.Duration `mapstructure:"idle_timeout"`
+	CORS        CORS          `mapstructure:"cors"`
 }
 
 // CORS holds the cross-origin resource sharing settings. An empty
@@ -346,6 +355,9 @@ func Load(opts ...Option) (*Config, error) {
 	_ = v.BindEnv("engine.http_max_in_flight", "BEELINEWF_ENGINE_HTTP_MAX_IN_FLIGHT")
 	_ = v.BindEnv("engine.http_max_in_flight_per_host", "BEELINEWF_ENGINE_HTTP_MAX_IN_FLIGHT_PER_HOST")
 	_ = v.BindEnv("infra.http.metrics_enabled", "BEELINEWF_INFRA_HTTP_METRICS_ENABLED")
+	_ = v.BindEnv("infra.http.max_body_bytes", "BEELINEWF_INFRA_HTTP_MAX_BODY_BYTES")
+	_ = v.BindEnv("infra.http.read_header_timeout", "BEELINEWF_INFRA_HTTP_READ_HEADER_TIMEOUT")
+	_ = v.BindEnv("infra.http.idle_timeout", "BEELINEWF_INFRA_HTTP_IDLE_TIMEOUT")
 	// CORS keys are operator toggles and must override the file, so a
 	// frontend origin can be allowed without rewriting config.yaml.
 	_ = v.BindEnv("infra.http.cors.allowed_origins", "BEELINEWF_INFRA_HTTP_CORS_ALLOWED_ORIGINS")
@@ -433,6 +445,9 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("infra.http.host", "localhost:8080")
 	v.SetDefault("infra.http.swagger_enabled", true)
 	v.SetDefault("infra.http.metrics_enabled", true)
+	v.SetDefault("infra.http.max_body_bytes", 1048576)
+	v.SetDefault("infra.http.read_header_timeout", "10s")
+	v.SetDefault("infra.http.idle_timeout", "60s")
 	// CORS allows any origin by default, so a development frontend works
 	// with no configuration. The method default covers every verb the
 	// router registers; the header default covers the credentials the
@@ -515,6 +530,15 @@ func (c *Config) validate() error {
 	}
 	if c.Infra.PostgreSQL.ConnMaxIdleTime < 0 {
 		return errors.New("configuration: infra.postgresql.conn_max_idle_time must be >= 0")
+	}
+	if c.Infra.HTTP.MaxBodyBytes <= 0 {
+		return errors.New("configuration: infra.http.max_body_bytes must be > 0")
+	}
+	if c.Infra.HTTP.ReadHeaderTimeout <= 0 {
+		return errors.New("configuration: infra.http.read_header_timeout must be > 0")
+	}
+	if c.Infra.HTTP.IdleTimeout <= 0 {
+		return errors.New("configuration: infra.http.idle_timeout must be > 0")
 	}
 	cors := c.Infra.HTTP.CORS
 	wildcard := false

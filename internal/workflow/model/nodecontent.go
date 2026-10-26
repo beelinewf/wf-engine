@@ -480,7 +480,21 @@ func ParseNodeContent(raw []byte, limits NodeLimits) (*NodeContent, error) {
 	return parseRawNode(&r, limits)
 }
 
-func parseRawNode(r *rawNode, limits NodeLimits) (*NodeContent, error) {
+// onFailureAllowed reports whether a node type supports on_failure
+// routing: external_call, poller, and any registered custom type.
+func onFailureAllowed(t NodeType) bool {
+	if t == NodeTypeExternalCall || t == NodeTypePoller {
+		return true
+	}
+	_, ok := LookupCustomType(string(t))
+	return ok
+}
+
+// parseCommonFields parses the type-independent fields of a node: lifecycle
+// hooks, start_delay, on_failure, and the graph/common scalars. It runs
+// before the node_definition_id branch and before type dispatch, so
+// referenced nodes may carry (or explicitly null) the lifecycle fields.
+func parseCommonFields(r *rawNode, limits NodeLimits) (*NodeContent, error) {
 	// The inline form object was replaced by a forms-library reference.
 	// Reject the old key explicitly so it is never silently ignored; an
 	// explicit null still decodes as absent, as before.
@@ -540,58 +554,632 @@ func parseRawNode(r *rawNode, limits NodeLimits) (*NodeContent, error) {
 	if r.RetryOnRecovery != nil {
 		nc.RetryOnRecovery = *r.RetryOnRecovery
 	}
-	// branches/parallel_end_node_id/combining_script are parallel-only
-	// fields; they are validated per type below so parallel_start and
-	// parallel_end can carry them while every other type rejects them.
+	return nc, nil
+}
 
-	// onFailureAllowed reports whether a node type supports on_failure
-	// routing: external_call, poller, and any registered custom type.
-	onFailureAllowed := func(t NodeType) bool {
-		if t == NodeTypeExternalCall || t == NodeTypePoller {
-			return true
-		}
-		_, ok := LookupCustomType(string(t))
-		return ok
+// parseReferencedNode resolves a node that references a registered node
+// definition: it carries only graph fields while executable fields are
+// materialized from the definition. Common fields were already parsed.
+func parseReferencedNode(nc *NodeContent, r *rawNode) (*NodeContent, error) {
+	if !ids.Valid(*r.NodeDefinitionID) {
+		return nil, fmt.Errorf("node_definition_id %q is not a valid uuid", *r.NodeDefinitionID)
 	}
+	if r.Type != "" && !ValidNodeType(r.Type) {
+		return nil, fmt.Errorf("node type %q is not supported", r.Type)
+	}
+	if r.Type != "" && nc.OnFailure != nil && !onFailureAllowed(NodeType(r.Type)) {
+		return nil, fmt.Errorf("node type %q does not support on_failure", r.Type)
+	}
+	if r.ContextPath != nil {
+		return nil, errors.New("input node does not support context_path; use output_property")
+	}
+	if r.Script != nil || r.Conditions != nil || r.Channel != nil || r.FormID != nil || r.HTTPConfig != nil || r.ExecutionConfig != nil || r.Nodes != nil ||
+		r.PollerHTTP != nil || r.PollerRedis != nil || r.PollerRabbitMQ != nil || len(r.Config) > 0 ||
+		len(r.Branches) > 0 || r.ParallelEndNodeID != nil || r.CombiningScript != nil || len(r.Delay) > 0 ||
+		// allowed_roles, allowed_users, record_actor, and public are the
+		// input node's authorization surface, and accept/storage are its
+		// delivery contract. A reference resolves its type from the
+		// definition, so the occurrence cannot be judged here and
+		// materializing it would drop the fields silently; referenced
+		// nodes inherit both from their definition instead.
+		len(r.AllowedRoles) > 0 || len(r.AllowedUsers) > 0 || r.RecordActor != nil || r.Public != nil ||
+		len(r.Accept) > 0 || r.Storage != nil {
+		return nil, errors.New("node referencing a node_definition_id cannot carry inline executable fields")
+	}
+	nc.NodeDefinitionID = *r.NodeDefinitionID
+	nc.Type = NodeType(r.Type)
+	if len(r.Keys) > 0 {
+		keys, err := parseKeys(r.Keys)
+		if err != nil {
+			return nil, err
+		}
+		nc.Group = &GroupContent{Keys: keys}
+	}
+	return nc, nil
+}
 
+// nodeTypeParser returns the parse func for a builtin node type. It is a
+// plain dispatch: every arm is one lookup, the logic lives in the per-type
+// parse funcs. Custom types bypass it via parseCustomNode.
+func nodeTypeParser(t NodeType) (func(*NodeContent, *rawNode, NodeLimits) error, bool) {
+	switch t {
+	case NodeTypeScript:
+		return parseScriptNode, true
+	case NodeTypeConditions:
+		return parseConditionsNode, true
+	case NodeTypeInput:
+		return parseInputNode, true
+	case NodeTypeGroup:
+		return parseGroupNode, true
+	case NodeTypeExternalCall:
+		return parseExternalCallNode, true
+	case NodeTypeOutput:
+		return parseOutputNode, true
+	case NodeTypePoller:
+		return parsePollerNode, true
+	case NodeTypeParallelStart:
+		return parseParallelStartNode, true
+	case NodeTypeParallelEnd:
+		return parseParallelEndNode, true
+	case NodeTypeDelay:
+		return parseDelayNode, true
+	default:
+		return nil, false
+	}
+}
+
+// parseScriptNode parses the script and timeout of a script node.
+func parseScriptNode(nc *NodeContent, r *rawNode, limits NodeLimits) error {
+	if r.Script == nil || strings.TrimSpace(*r.Script) == "" {
+		return errors.New("script node requires a non-empty script")
+	}
+	nc.Script = *r.Script
+	d, err := nodeTimeout(r.Timeout, limits)
+	if err != nil {
+		return err
+	}
+	nc.Timeout = d
+	return nil
+}
+
+// parseConditionsNode parses the branch table of a conditions node.
+func parseConditionsNode(nc *NodeContent, r *rawNode, limits NodeLimits) error {
+	if len(r.Conditions) < 2 {
+		return errors.New("conditions node requires at least two conditions")
+	}
+	if r.NextNode != nil {
+		return errors.New("conditions node cannot have next_node")
+	}
+	if r.OutputProperty != nil {
+		return errors.New("conditions node cannot have output_property")
+	}
+	keys := make(map[string]bool, len(r.Conditions))
+	for _, rc := range r.Conditions {
+		if strings.TrimSpace(rc.Condition) == "" {
+			return errors.New("condition script must be non-empty")
+		}
+		key := ""
+		if rc.Key != nil && strings.TrimSpace(*rc.Key) != "" {
+			key = *rc.Key
+		}
+		if key != "" && keys[key] {
+			return fmt.Errorf("duplicate condition key %q", key)
+		}
+		keys[key] = true
+		if rc.NextNode != nil {
+			return errors.New("condition next_node is not supported; use workflow or group keys")
+		}
+		nc.Conditions = append(nc.Conditions, Condition{Key: key, Condition: rc.Condition})
+	}
+	nc.Timeout = limits.ConditionTimeout
+	return nil
+}
+
+// parseInputNode parses the channel, gates, and delivery contract of an
+// input node.
+func parseInputNode(nc *NodeContent, r *rawNode, limits NodeLimits) error {
+	if nc.StartDelaySet {
+		return errors.New("input node does not support start_delay")
+	}
+	if r.Channel == nil || strings.TrimSpace(*r.Channel) == "" {
+		return errors.New("input node requires a channel")
+	}
+	switch *r.Channel {
+	case InputChannelHTTP, InputChannelRedis, InputChannelRabbitMQ:
+	default:
+		return fmt.Errorf("input channel %q is not supported (allowed: http, redis, rabbitmq)", *r.Channel)
+	}
+	if r.ContextPath != nil {
+		return errors.New("input node does not support context_path; use output_property")
+	}
+	if r.OutputProperty != nil && strings.TrimSpace(*r.OutputProperty) != "" && !contextpath.ValidKey(strings.TrimSpace(*r.OutputProperty)) {
+		return errors.New("input output_property must be a bare key")
+	}
+	nc.Channel = *r.Channel
+	if strings.TrimSpace(nc.OutputProperty) != "" {
+		nc.OutputProperty = strings.TrimSpace(nc.OutputProperty)
+	} else {
+		nc.OutputProperty = ""
+	}
+	if r.Validation != nil {
+		if strings.TrimSpace(r.Validation.Script) == "" {
+			return errors.New("input validation script must be non-empty")
+		}
+		nc.Validation = &ValidationScript{Script: r.Validation.Script}
+	}
+	if r.FormID != nil {
+		if !ids.Valid(*r.FormID) {
+			return fmt.Errorf("form_id %q is not a valid uuid", *r.FormID)
+		}
+		nc.FormID = *r.FormID
+	}
+	allowedRoles, err := parseAllowedRoles(r.AllowedRoles)
+	if err != nil {
+		return err
+	}
+	nc.AllowedRoles = allowedRoles
+	allowedUsers, err := parseAllowedUsers(r.AllowedUsers)
+	if err != nil {
+		return err
+	}
+	nc.AllowedUsers = allowedUsers
+	if r.RecordActor != nil {
+		nc.RecordActor = *r.RecordActor
+	}
+	if r.Public != nil {
+		nc.Public = *r.Public
+	}
+	// A public node ignores allowed_roles and allowed_users at delivery
+	// time, so carrying them is legal and they take effect again if a
+	// later definition version drops public. Only record_actor is
+	// refused: an anonymous delivery has no user_id to write.
+	if nc.Public && nc.RecordActor {
+		return errors.New("public input node must have record_actor=false")
+	}
+	accept, err := parseAccept(r.Accept)
+	if err != nil {
+		return err
+	}
+	nc.Accept = accept
+	storage, err := parseInputStorage(r.Storage)
+	if err != nil {
+		return err
+	}
+	nc.Storage = storage
+	if nc.Accepts(MediaTypeMultipart) {
+		if nc.Channel != InputChannelHTTP {
+			return errors.New("multipart/form-data accept requires channel \"http\"")
+		}
+		if storage == nil {
+			return errors.New("multipart/form-data accept requires storage.bucket")
+		}
+	} else if storage != nil {
+		return errors.New("storage requires multipart/form-data in accept")
+	}
+	nc.Timeout = limits.ConditionTimeout
+	return nil
+}
+
+// parseOutputNode parses the channel and context path of an output node.
+func parseOutputNode(nc *NodeContent, r *rawNode, limits NodeLimits) error {
+	if r.Channel == nil {
+		return errors.New("output node requires a channel")
+	}
+	if *r.Channel != InputChannelRedis && *r.Channel != InputChannelRabbitMQ {
+		return fmt.Errorf("output channel %q is not supported (allowed: redis, rabbitmq)", *r.Channel)
+	}
+	if r.ContextPath == nil || strings.TrimSpace(*r.ContextPath) == "" {
+		return errors.New("output node requires a context_path")
+	}
+	nc.Channel = *r.Channel
+	nc.ContextPath = *r.ContextPath
+	d, err := nodeTimeout(r.Timeout, limits)
+	if err != nil {
+		return err
+	}
+	nc.Timeout = d
+	return nil
+}
+
+// parseExternalCallNode parses the http_config or execution_config of an
+// external_call node.
+func parseExternalCallNode(nc *NodeContent, r *rawNode, limits NodeLimits) error {
+	hasHTTP := r.HTTPConfig != nil
+	hasExec := r.ExecutionConfig != nil
+	if hasHTTP == hasExec {
+		return errors.New("external_call node requires exactly one of http_config or execution_config")
+	}
+	if hasHTTP {
+		cfg := r.HTTPConfig
+		if strings.TrimSpace(cfg.URL) == "" {
+			return errors.New("http_config.url is required")
+		}
+		if err := validateStaticHTTPURL(cfg.URL, "http_config.url"); err != nil {
+			return err
+		}
+		nc.HTTP = &HTTPConfig{URL: cfg.URL, Method: normalizeHTTPMethod(cfg.Method), Headers: cfg.Headers, Body: cfg.Body}
+	} else {
+		cmd := r.ExecutionConfig.Command
+		if len(cmd) == 0 {
+			return errors.New("execution_config.command must be non-empty")
+		}
+		for _, arg := range cmd {
+			if strings.TrimSpace(arg) == "" {
+				return errors.New("execution_config.command arguments must be non-empty")
+			}
+		}
+		nc.Execution = &ExecutionConfig{Command: cmd, Stdin: r.ExecutionConfig.Stdin}
+	}
+	d, err := nodeTimeout(r.Timeout, limits)
+	if err != nil {
+		return err
+	}
+	nc.Timeout = d
+	return nil
+}
+
+// validateStaticHTTPURL requires a static URL to be absolute http(s).
+// Templated URLs are validated at execution time after rendering.
+func validateStaticHTTPURL(rawURL, field string) error {
+	if contextpath.HasTemplate(rawURL) {
+		return nil
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return fmt.Errorf("%s %q must be an absolute http(s) url", field, rawURL)
+	}
+	return nil
+}
+
+// normalizeHTTPMethod defaults an empty method to GET and uppercases a
+// static method. Templated methods render at execution time and are kept
+// as authored.
+func normalizeHTTPMethod(method string) string {
+	if method == "" {
+		return "GET"
+	}
+	if contextpath.HasTemplate(method) {
+		return method
+	}
+	return strings.ToUpper(method)
+}
+
+// parsePollerNode parses the transport block of a poller node.
+func parsePollerNode(nc *NodeContent, r *rawNode, limits NodeLimits) error {
+	hasHTTP := r.PollerHTTP != nil
+	hasRedis := r.PollerRedis != nil
+	hasRabbit := r.PollerRabbitMQ != nil
+	if (hasHTTP && (hasRedis || hasRabbit)) || (hasRedis && hasRabbit) || (!hasHTTP && !hasRedis && !hasRabbit) {
+		return errors.New("poller node requires exactly one of http, redis, or rabbitmq")
+	}
+	switch {
+	case hasHTTP:
+		if err := parsePollerHTTP(nc, r.PollerHTTP); err != nil {
+			return err
+		}
+	case hasRedis:
+		if err := parsePollerRedis(nc, r.PollerRedis); err != nil {
+			return err
+		}
+	case hasRabbit:
+		if err := parsePollerRabbitMQ(nc, r.PollerRabbitMQ); err != nil {
+			return err
+		}
+	}
+	// Pollers are active waits; an interrupted attempt restarts by
+	// default rather than failing the workflow.
+	if r.RetryOnRecovery == nil {
+		nc.RetryOnRecovery = true
+	}
+	nc.PredicateTimeout = limits.ConditionTimeout
+	return nil
+}
+
+// parsePollerHTTP parses the http block of a poller node.
+func parsePollerHTTP(nc *NodeContent, cfg *rawPollerHTTPConfig) error {
+	if strings.TrimSpace(cfg.URL) == "" {
+		return errors.New("http.url is required")
+	}
+	if err := validateStaticHTTPURL(cfg.URL, "http.url"); err != nil {
+		return err
+	}
+	delay, reqTimeout, err := pollerCadence("http", cfg.Delay, cfg.RequestTimeout)
+	if err != nil {
+		return err
+	}
+	attempts, err := pollerMaxAttempts(cfg.MaxAttempts, "http")
+	if err != nil {
+		return err
+	}
+	until, err := requiredUntil(cfg.Until)
+	if err != nil {
+		return err
+	}
+	nc.PollerHTTP = &PollerHTTPConfig{URL: cfg.URL, Method: normalizeHTTPMethod(cfg.Method), Headers: cfg.Headers, Body: cfg.Body, Delay: delay, RequestTimeout: reqTimeout, MaxAttempts: attempts, Until: until}
+	return nil
+}
+
+// parsePollerRedis parses the redis block of a poller node.
+func parsePollerRedis(nc *NodeContent, cfg *rawPollerRedisConfig) error {
+	switch strings.ToUpper(strings.TrimSpace(cfg.Method)) {
+	case "GET":
+		return parsePollerRedisGET(nc, cfg)
+	case "SUB":
+		return parsePollerRedisSUB(nc, cfg)
+	default:
+		return fmt.Errorf("redis method %q is not supported (allowed: GET, SUB)", cfg.Method)
+	}
+}
+
+// parsePollerRedisGET parses a redis GET poll: repeated GET on a key.
+func parsePollerRedisGET(nc *NodeContent, cfg *rawPollerRedisConfig) error {
+	if cfg.Channel != nil {
+		return errors.New("redis GET does not support channel")
+	}
+	if cfg.MaxWaitTime != nil {
+		return errors.New("redis GET does not support max_wait_time")
+	}
+	if cfg.Key == nil || strings.TrimSpace(*cfg.Key) == "" {
+		return errors.New("redis GET requires a key")
+	}
+	delay, reqTimeout, err := pollerCadence("redis", cfg.Delay, cfg.RequestTimeout)
+	if err != nil {
+		return err
+	}
+	attempts, err := pollerMaxAttempts(cfg.MaxAttempts, "redis")
+	if err != nil {
+		return err
+	}
+	until, err := requiredUntil(cfg.Until)
+	if err != nil {
+		return err
+	}
+	nc.PollerRedis = &PollerRedisConfig{Method: "GET", Key: *cfg.Key, Delay: delay, RequestTimeout: reqTimeout, MaxAttempts: attempts, Until: until}
+	return nil
+}
+
+// parsePollerRedisSUB parses a redis SUB poll: a subscription wait on a
+// channel.
+func parsePollerRedisSUB(nc *NodeContent, cfg *rawPollerRedisConfig) error {
+	if cfg.Key != nil {
+		return errors.New("redis SUB does not support key")
+	}
+	if cfg.Delay != nil {
+		return errors.New("redis SUB does not support delay")
+	}
+	if cfg.RequestTimeout != nil {
+		return errors.New("redis SUB does not support request_timeout")
+	}
+	if cfg.MaxAttempts != nil {
+		return errors.New("redis SUB does not support max_attempts")
+	}
+	if cfg.Channel == nil || strings.TrimSpace(*cfg.Channel) == "" {
+		return errors.New("redis SUB requires a channel")
+	}
+	wait, err := pollerDuration(cfg.MaxWaitTime, "max_wait_time", 5*time.Minute)
+	if err != nil {
+		return fmt.Errorf("redis.%w", err)
+	}
+	until, err := requiredUntil(cfg.Until)
+	if err != nil {
+		return err
+	}
+	nc.PollerRedis = &PollerRedisConfig{Method: "SUB", Channel: *cfg.Channel, MaxWaitTime: wait, Until: until}
+	return nil
+}
+
+// parsePollerRabbitMQ parses the rabbitmq block of a poller node.
+func parsePollerRabbitMQ(nc *NodeContent, cfg *rawPollerRabbitMQConfig) error {
+	if strings.TrimSpace(cfg.Queue) == "" {
+		return errors.New("rabbitmq.queue is required")
+	}
+	wait, err := pollerDuration(cfg.MaxWaitTime, "max_wait_time", 5*time.Minute)
+	if err != nil {
+		return fmt.Errorf("rabbitmq.%w", err)
+	}
+	until, err := requiredUntil(cfg.Until)
+	if err != nil {
+		return err
+	}
+	nc.PollerRabbitMQ = &PollerRabbitMQConfig{Queue: cfg.Queue, MaxWaitTime: wait, Until: until}
+	return nil
+}
+
+// pollerCadence resolves the delay/request_timeout pair of an http or redis
+// GET poller, prefixing errors with the transport block name.
+func pollerCadence(prefix string, delayRaw, reqTimeoutRaw json.RawMessage) (time.Duration, time.Duration, error) {
+	delay, err := pollerDuration(delayRaw, "delay", 5*time.Second)
+	if err != nil {
+		return 0, 0, fmt.Errorf("%s.%w", prefix, err)
+	}
+	reqTimeout, err := pollerDuration(reqTimeoutRaw, "request_timeout", 30*time.Second)
+	if err != nil {
+		return 0, 0, fmt.Errorf("%s.%w", prefix, err)
+	}
+	return delay, reqTimeout, nil
+}
+
+// pollerMaxAttempts resolves a poller max_attempts field: an explicit
+// positive value, otherwise the default of 10.
+func pollerMaxAttempts(raw *int, field string) (int, error) {
+	if raw == nil {
+		return 10, nil
+	}
+	if *raw <= 0 {
+		return 0, fmt.Errorf("%s.max_attempts must be greater than zero", field)
+	}
+	return *raw, nil
+}
+
+// parseGroupNode parses the nested node list of a group node.
+func parseGroupNode(nc *NodeContent, r *rawNode, limits NodeLimits) error {
+	if r.StartNodeID == nil || !ids.Valid(*r.StartNodeID) {
+		return errors.New("group node requires a valid start_node_id")
+	}
+	if len(r.Nodes) == 0 {
+		return errors.New("group node requires a non-empty nodes array")
+	}
+	keys, err := parseKeys(r.Keys)
+	if err != nil {
+		return err
+	}
+	g := &GroupContent{StartNodeID: *r.StartNodeID, Keys: keys}
+	seen := make(map[string]bool, len(r.Nodes))
+	for _, rawChild := range r.Nodes {
+		var child rawNode
+		if err := json.Unmarshal(rawChild, &child); err != nil {
+			return fmt.Errorf("parse group node: %w", err)
+		}
+		if child.ID == "" || !ids.Valid(child.ID) {
+			return fmt.Errorf("group node child id %q is not a valid uuid", child.ID)
+		}
+		if seen[child.ID] {
+			return fmt.Errorf("duplicate node id %q in group", child.ID)
+		}
+		seen[child.ID] = true
+		childNc, err := parseRawNode(&child, limits)
+		if err != nil {
+			return err
+		}
+		g.Nodes = append(g.Nodes, childNc)
+	}
+	if !seen[g.StartNodeID] {
+		return fmt.Errorf("group start_node_id %q does not match any node in the group", g.StartNodeID)
+	}
+	nc.Group = g
+	return nil
+}
+
+// parseParallelStartNode parses the branches and join target of a
+// parallel_start node.
+func parseParallelStartNode(nc *NodeContent, r *rawNode, limits NodeLimits) error {
+	if r.CombiningScript != nil {
+		return errors.New("parallel_start node does not support combining_script")
+	}
+	if r.NextNode != nil {
+		return errors.New("parallel_start node cannot have next_node")
+	}
+	if r.OutputProperty != nil {
+		return errors.New("parallel_start node cannot have output_property")
+	}
+	var rawBranches map[string]string
+	if len(r.Branches) > 0 {
+		if err := json.Unmarshal(r.Branches, &rawBranches); err != nil {
+			return fmt.Errorf("parallel_start branches must be an object of branch name to node id: %w", err)
+		}
+	}
+	if len(rawBranches) < 2 {
+		return errors.New("parallel_start node requires at least two branches")
+	}
+	if max := limits.effectiveParallelLimits().MaxBranchesPerParallel; len(rawBranches) > max {
+		return fmt.Errorf("parallel_start node has %d branches, at most %d are allowed", len(rawBranches), max)
+	}
+	branches := make(map[string]string, len(rawBranches))
+	for name, target := range rawBranches {
+		if strings.TrimSpace(name) == "" {
+			return errors.New("parallel_start branch names must be non-empty")
+		}
+		if !ids.Valid(target) {
+			return fmt.Errorf("parallel_start branch %q target %q is not a valid uuid", name, target)
+		}
+		branches[name] = target
+	}
+	if r.ParallelEndNodeID == nil || !ids.Valid(*r.ParallelEndNodeID) {
+		return errors.New("parallel_start node requires a valid parallel_end_node_id")
+	}
+	nc.ParallelBranches = branches
+	nc.ParallelEndNodeID = *r.ParallelEndNodeID
+	nc.Timeout = limits.ConditionTimeout
+	return nil
+}
+
+// parseParallelEndNode parses the combining script of a parallel_end node.
+func parseParallelEndNode(nc *NodeContent, r *rawNode, limits NodeLimits) error {
+	if len(r.Branches) > 0 {
+		return errors.New("parallel_end node does not support branches")
+	}
+	if r.ParallelEndNodeID != nil {
+		return errors.New("parallel_end node does not support parallel_end_node_id")
+	}
+	if r.CombiningScript == nil || strings.TrimSpace(*r.CombiningScript) == "" {
+		return errors.New("parallel_end node requires a non-empty combining_script")
+	}
+	nc.CombiningScript = *r.CombiningScript
+	nc.Timeout = limits.ConditionTimeout
+	return nil
+}
+
+// parseDelayNode parses the wait of a delay node.
+func parseDelayNode(nc *NodeContent, r *rawNode, limits NodeLimits) error {
+	if nc.StartDelaySet {
+		return errors.New("delay node does not support start_delay")
+	}
+	if len(r.Delay) == 0 || string(r.Delay) == "null" {
+		return errors.New("delay node requires a delay")
+	}
+	d, _, err := optionalCappedDuration(r.Delay, "delay", limits.MaxTimeout)
+	if err != nil {
+		return err
+	}
+	nc.Delay = d
+	// A delay wait is idempotent; an interrupted attempt restarts by
+	// default rather than failing the workflow.
+	if r.RetryOnRecovery == nil {
+		nc.RetryOnRecovery = true
+	}
+	nc.Timeout = limits.ConditionTimeout
+	return nil
+}
+
+// rejectForeignFields refuses fields that belong to another node type. It
+// runs after type dispatch because a referenced node definition resolves
+// its type from the definition, not from the occurrence.
+func rejectForeignFields(nc *NodeContent, r *rawNode) error {
+	if _, ok := LookupCustomType(string(nc.Type)); !ok && nc.Type != NodeTypeInput && r.FormID != nil {
+		return fmt.Errorf("node type %q does not support form_id", nc.Type)
+	}
+	// allowed_roles, allowed_users, record_actor, and public are the
+	// input node's authorization surface, and accept/storage are its
+	// delivery contract, so no other builtin type may carry them. The
+	// guard sits after the type switch because a referenced node
+	// definition resolves its type from the definition, not from the
+	// occurrence.
+	if nc.Type != NodeTypeInput && (len(r.AllowedRoles) > 0 || len(r.AllowedUsers) > 0 || r.RecordActor != nil || r.Public != nil) {
+		return fmt.Errorf("node type %q does not support allowed_roles, allowed_users, record_actor, or public", nc.Type)
+	}
+	if nc.Type != NodeTypeInput && (len(r.Accept) > 0 || r.Storage != nil) {
+		return fmt.Errorf("node type %q does not support accept or storage", nc.Type)
+	}
+	if _, ok := LookupCustomType(string(nc.Type)); !ok && len(r.Config) > 0 {
+		return fmt.Errorf("node type %q does not support config", nc.Type)
+	}
+	// branches/parallel_end_node_id/combining_script are parallel-only:
+	// the parallel cases above accept their own fields and reject the
+	// sibling's, so anything reaching here on another builtin type is
+	// foreign.
+	if nc.Type != NodeTypeParallelStart && nc.Type != NodeTypeParallelEnd {
+		if len(r.Branches) > 0 {
+			return fmt.Errorf("node type %q does not support branches", nc.Type)
+		}
+		if r.ParallelEndNodeID != nil {
+			return fmt.Errorf("node type %q does not support parallel_end_node_id", nc.Type)
+		}
+		if r.CombiningScript != nil {
+			return fmt.Errorf("node type %q does not support combining_script", nc.Type)
+		}
+	}
+	return nil
+}
+
+func parseRawNode(r *rawNode, limits NodeLimits) (*NodeContent, error) {
+	nc, err := parseCommonFields(r, limits)
+	if err != nil {
+		return nil, err
+	}
 	// A node referencing a registered node definition carries only graph
 	// fields; executable fields are materialized from the definition.
 	if r.NodeDefinitionID != nil {
-		if !ids.Valid(*r.NodeDefinitionID) {
-			return nil, fmt.Errorf("node_definition_id %q is not a valid uuid", *r.NodeDefinitionID)
-		}
-		if r.Type != "" && !ValidNodeType(r.Type) {
-			return nil, fmt.Errorf("node type %q is not supported", r.Type)
-		}
-		if r.Type != "" && nc.OnFailure != nil && !onFailureAllowed(NodeType(r.Type)) {
-			return nil, fmt.Errorf("node type %q does not support on_failure", r.Type)
-		}
-		if r.ContextPath != nil {
-			return nil, errors.New("input node does not support context_path; use output_property")
-		}
-		if r.Script != nil || r.Conditions != nil || r.Channel != nil || r.FormID != nil || r.HTTPConfig != nil || r.ExecutionConfig != nil || r.Nodes != nil ||
-			r.PollerHTTP != nil || r.PollerRedis != nil || r.PollerRabbitMQ != nil || len(r.Config) > 0 ||
-			len(r.Branches) > 0 || r.ParallelEndNodeID != nil || r.CombiningScript != nil || len(r.Delay) > 0 ||
-			// allowed_roles, allowed_users, record_actor, and public are the
-			// input node's authorization surface, and accept/storage are its
-			// delivery contract. A reference resolves its type from the
-			// definition, so the occurrence cannot be judged here and
-			// materializing it would drop the fields silently; referenced
-			// nodes inherit both from their definition instead.
-			len(r.AllowedRoles) > 0 || len(r.AllowedUsers) > 0 || r.RecordActor != nil || r.Public != nil ||
-			len(r.Accept) > 0 || r.Storage != nil {
-			return nil, errors.New("node referencing a node_definition_id cannot carry inline executable fields")
-		}
-		nc.NodeDefinitionID = *r.NodeDefinitionID
-		nc.Type = NodeType(r.Type)
-		if len(r.Keys) > 0 {
-			keys, err := parseKeys(r.Keys)
-			if err != nil {
-				return nil, err
-			}
-			nc.Group = &GroupContent{Keys: keys}
-		}
-		return nc, nil
+		return parseReferencedNode(nc, r)
 	}
 
 	if r.Type == "" {
@@ -608,470 +1196,24 @@ func parseRawNode(r *rawNode, limits NodeLimits) (*NodeContent, error) {
 		return nil, errors.New("keys are only valid for group nodes")
 	}
 
-	// Custom types skip the builtin switch below: only type+config are
+	// Custom types skip the builtin dispatch below: only type+config are
 	// custom, all common fields above were already parsed by core.
 	if _, ok := LookupCustomType(string(nc.Type)); ok {
 		return parseCustomNode(nc, r, limits)
 	}
 
-	switch nc.Type {
-	case NodeTypeScript:
-		if r.Script == nil || strings.TrimSpace(*r.Script) == "" {
-			return nil, errors.New("script node requires a non-empty script")
-		}
-		nc.Script = *r.Script
-		d, err := nodeTimeout(r.Timeout, limits)
-		if err != nil {
-			return nil, err
-		}
-		nc.Timeout = d
-
-	case NodeTypeConditions:
-		if len(r.Conditions) < 2 {
-			return nil, errors.New("conditions node requires at least two conditions")
-		}
-		if r.NextNode != nil {
-			return nil, errors.New("conditions node cannot have next_node")
-		}
-		if r.OutputProperty != nil {
-			return nil, errors.New("conditions node cannot have output_property")
-		}
-		keys := make(map[string]bool, len(r.Conditions))
-		for _, rc := range r.Conditions {
-			if strings.TrimSpace(rc.Condition) == "" {
-				return nil, errors.New("condition script must be non-empty")
-			}
-			key := ""
-			if rc.Key != nil && strings.TrimSpace(*rc.Key) != "" {
-				key = *rc.Key
-			}
-			if key != "" && keys[key] {
-				return nil, fmt.Errorf("duplicate condition key %q", key)
-			}
-			keys[key] = true
-			if rc.NextNode != nil {
-				return nil, errors.New("condition next_node is not supported; use workflow or group keys")
-			}
-			nc.Conditions = append(nc.Conditions, Condition{Key: key, Condition: rc.Condition})
-		}
-		nc.Timeout = limits.ConditionTimeout
-
-	case NodeTypeInput:
-		if nc.StartDelaySet {
-			return nil, errors.New("input node does not support start_delay")
-		}
-		if r.Channel == nil || strings.TrimSpace(*r.Channel) == "" {
-			return nil, errors.New("input node requires a channel")
-		}
-		switch *r.Channel {
-		case InputChannelHTTP, InputChannelRedis, InputChannelRabbitMQ:
-		default:
-			return nil, fmt.Errorf("input channel %q is not supported (allowed: http, redis, rabbitmq)", *r.Channel)
-		}
-		if r.ContextPath != nil {
-			return nil, errors.New("input node does not support context_path; use output_property")
-		}
-		if r.OutputProperty != nil && strings.TrimSpace(*r.OutputProperty) != "" && !contextpath.ValidKey(strings.TrimSpace(*r.OutputProperty)) {
-			return nil, errors.New("input output_property must be a bare key")
-		}
-		nc.Channel = *r.Channel
-		if strings.TrimSpace(nc.OutputProperty) != "" {
-			nc.OutputProperty = strings.TrimSpace(nc.OutputProperty)
-		} else {
-			nc.OutputProperty = ""
-		}
-		if r.Validation != nil {
-			if strings.TrimSpace(r.Validation.Script) == "" {
-				return nil, errors.New("input validation script must be non-empty")
-			}
-			nc.Validation = &ValidationScript{Script: r.Validation.Script}
-		}
-		if r.FormID != nil {
-			if !ids.Valid(*r.FormID) {
-				return nil, fmt.Errorf("form_id %q is not a valid uuid", *r.FormID)
-			}
-			nc.FormID = *r.FormID
-		}
-		allowedRoles, err := parseAllowedRoles(r.AllowedRoles)
-		if err != nil {
-			return nil, err
-		}
-		nc.AllowedRoles = allowedRoles
-		allowedUsers, err := parseAllowedUsers(r.AllowedUsers)
-		if err != nil {
-			return nil, err
-		}
-		nc.AllowedUsers = allowedUsers
-		if r.RecordActor != nil {
-			nc.RecordActor = *r.RecordActor
-		}
-		if r.Public != nil {
-			nc.Public = *r.Public
-		}
-		// A public node ignores allowed_roles and allowed_users at delivery
-		// time, so carrying them is legal and they take effect again if a
-		// later definition version drops public. Only record_actor is
-		// refused: an anonymous delivery has no user_id to write.
-		if nc.Public && nc.RecordActor {
-			return nil, errors.New("public input node must have record_actor=false")
-		}
-		accept, err := parseAccept(r.Accept)
-		if err != nil {
-			return nil, err
-		}
-		nc.Accept = accept
-		storage, err := parseInputStorage(r.Storage)
-		if err != nil {
-			return nil, err
-		}
-		nc.Storage = storage
-		if nc.Accepts(MediaTypeMultipart) {
-			if nc.Channel != InputChannelHTTP {
-				return nil, errors.New("multipart/form-data accept requires channel \"http\"")
-			}
-			if storage == nil {
-				return nil, errors.New("multipart/form-data accept requires storage.bucket")
-			}
-		} else if storage != nil {
-			return nil, errors.New("storage requires multipart/form-data in accept")
-		}
-		nc.Timeout = limits.ConditionTimeout
-
-	case NodeTypeOutput:
-		if r.Channel == nil {
-			return nil, errors.New("output node requires a channel")
-		}
-		if *r.Channel != InputChannelRedis && *r.Channel != InputChannelRabbitMQ {
-			return nil, fmt.Errorf("output channel %q is not supported (allowed: redis, rabbitmq)", *r.Channel)
-		}
-		if r.ContextPath == nil || strings.TrimSpace(*r.ContextPath) == "" {
-			return nil, errors.New("output node requires a context_path")
-		}
-		nc.Channel = *r.Channel
-		nc.ContextPath = *r.ContextPath
-		d, err := nodeTimeout(r.Timeout, limits)
-		if err != nil {
-			return nil, err
-		}
-		nc.Timeout = d
-
-	case NodeTypeExternalCall:
-		hasHTTP := r.HTTPConfig != nil
-		hasExec := r.ExecutionConfig != nil
-		if hasHTTP == hasExec {
-			return nil, errors.New("external_call node requires exactly one of http_config or execution_config")
-		}
-		if hasHTTP {
-			cfg := r.HTTPConfig
-			if strings.TrimSpace(cfg.URL) == "" {
-				return nil, errors.New("http_config.url is required")
-			}
-			// Templated URLs are validated at execution time after rendering;
-			// static URLs must already be absolute http(s).
-			if !contextpath.HasTemplate(cfg.URL) {
-				u, err := url.Parse(cfg.URL)
-				if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-					return nil, fmt.Errorf("http_config.url %q must be an absolute http(s) url", cfg.URL)
-				}
-			}
-			method := cfg.Method
-			if method == "" {
-				method = "GET"
-			} else if !contextpath.HasTemplate(method) {
-				method = strings.ToUpper(method)
-			}
-			nc.HTTP = &HTTPConfig{URL: cfg.URL, Method: method, Headers: cfg.Headers, Body: cfg.Body}
-		} else {
-			cmd := r.ExecutionConfig.Command
-			if len(cmd) == 0 {
-				return nil, errors.New("execution_config.command must be non-empty")
-			}
-			for _, arg := range cmd {
-				if strings.TrimSpace(arg) == "" {
-					return nil, errors.New("execution_config.command arguments must be non-empty")
-				}
-			}
-			nc.Execution = &ExecutionConfig{Command: cmd, Stdin: r.ExecutionConfig.Stdin}
-		}
-		d, err := nodeTimeout(r.Timeout, limits)
-		if err != nil {
-			return nil, err
-		}
-		nc.Timeout = d
-
-	case NodeTypePoller:
-		hasHTTP := r.PollerHTTP != nil
-		hasRedis := r.PollerRedis != nil
-		hasRabbit := r.PollerRabbitMQ != nil
-		if (hasHTTP && (hasRedis || hasRabbit)) || (hasRedis && hasRabbit) || (!hasHTTP && !hasRedis && !hasRabbit) {
-			return nil, errors.New("poller node requires exactly one of http, redis, or rabbitmq")
-		}
-		switch {
-		case hasHTTP:
-			cfg := r.PollerHTTP
-			if strings.TrimSpace(cfg.URL) == "" {
-				return nil, errors.New("http.url is required")
-			}
-			// Templated URLs are validated at execution time after rendering;
-			// static URLs must already be absolute http(s).
-			if !contextpath.HasTemplate(cfg.URL) {
-				u, err := url.Parse(cfg.URL)
-				if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-					return nil, fmt.Errorf("http.url %q must be an absolute http(s) url", cfg.URL)
-				}
-			}
-			method := cfg.Method
-			if method == "" {
-				method = "GET"
-			} else if !contextpath.HasTemplate(method) {
-				method = strings.ToUpper(method)
-			}
-			delay, err := pollerDuration(cfg.Delay, "delay", 5*time.Second)
-			if err != nil {
-				return nil, fmt.Errorf("http.%w", err)
-			}
-			reqTimeout, err := pollerDuration(cfg.RequestTimeout, "request_timeout", 30*time.Second)
-			if err != nil {
-				return nil, fmt.Errorf("http.%w", err)
-			}
-			attempts := 10
-			if cfg.MaxAttempts != nil {
-				if *cfg.MaxAttempts <= 0 {
-					return nil, errors.New("http.max_attempts must be greater than zero")
-				}
-				attempts = *cfg.MaxAttempts
-			}
-			until, err := requiredUntil(cfg.Until)
-			if err != nil {
-				return nil, err
-			}
-			nc.PollerHTTP = &PollerHTTPConfig{URL: cfg.URL, Method: method, Headers: cfg.Headers, Body: cfg.Body, Delay: delay, RequestTimeout: reqTimeout, MaxAttempts: attempts, Until: until}
-
-		case hasRedis:
-			cfg := r.PollerRedis
-			switch strings.ToUpper(strings.TrimSpace(cfg.Method)) {
-			case "GET":
-				if cfg.Channel != nil {
-					return nil, errors.New("redis GET does not support channel")
-				}
-				if cfg.MaxWaitTime != nil {
-					return nil, errors.New("redis GET does not support max_wait_time")
-				}
-				if cfg.Key == nil || strings.TrimSpace(*cfg.Key) == "" {
-					return nil, errors.New("redis GET requires a key")
-				}
-				delay, err := pollerDuration(cfg.Delay, "delay", 5*time.Second)
-				if err != nil {
-					return nil, fmt.Errorf("redis.%w", err)
-				}
-				reqTimeout, err := pollerDuration(cfg.RequestTimeout, "request_timeout", 30*time.Second)
-				if err != nil {
-					return nil, fmt.Errorf("redis.%w", err)
-				}
-				attempts := 10
-				if cfg.MaxAttempts != nil {
-					if *cfg.MaxAttempts <= 0 {
-						return nil, errors.New("redis.max_attempts must be greater than zero")
-					}
-					attempts = *cfg.MaxAttempts
-				}
-				until, err := requiredUntil(cfg.Until)
-				if err != nil {
-					return nil, err
-				}
-				nc.PollerRedis = &PollerRedisConfig{Method: "GET", Key: *cfg.Key, Delay: delay, RequestTimeout: reqTimeout, MaxAttempts: attempts, Until: until}
-
-			case "SUB":
-				if cfg.Key != nil {
-					return nil, errors.New("redis SUB does not support key")
-				}
-				if cfg.Delay != nil {
-					return nil, errors.New("redis SUB does not support delay")
-				}
-				if cfg.RequestTimeout != nil {
-					return nil, errors.New("redis SUB does not support request_timeout")
-				}
-				if cfg.MaxAttempts != nil {
-					return nil, errors.New("redis SUB does not support max_attempts")
-				}
-				if cfg.Channel == nil || strings.TrimSpace(*cfg.Channel) == "" {
-					return nil, errors.New("redis SUB requires a channel")
-				}
-				wait, err := pollerDuration(cfg.MaxWaitTime, "max_wait_time", 5*time.Minute)
-				if err != nil {
-					return nil, fmt.Errorf("redis.%w", err)
-				}
-				until, err := requiredUntil(cfg.Until)
-				if err != nil {
-					return nil, err
-				}
-				nc.PollerRedis = &PollerRedisConfig{Method: "SUB", Channel: *cfg.Channel, MaxWaitTime: wait, Until: until}
-
-			default:
-				return nil, fmt.Errorf("redis method %q is not supported (allowed: GET, SUB)", cfg.Method)
-			}
-
-		case hasRabbit:
-			cfg := r.PollerRabbitMQ
-			if strings.TrimSpace(cfg.Queue) == "" {
-				return nil, errors.New("rabbitmq.queue is required")
-			}
-			wait, err := pollerDuration(cfg.MaxWaitTime, "max_wait_time", 5*time.Minute)
-			if err != nil {
-				return nil, fmt.Errorf("rabbitmq.%w", err)
-			}
-			until, err := requiredUntil(cfg.Until)
-			if err != nil {
-				return nil, err
-			}
-			nc.PollerRabbitMQ = &PollerRabbitMQConfig{Queue: cfg.Queue, MaxWaitTime: wait, Until: until}
-		}
-		// Pollers are active waits; an interrupted attempt restarts by
-		// default rather than failing the workflow.
-		if r.RetryOnRecovery == nil {
-			nc.RetryOnRecovery = true
-		}
-		nc.PredicateTimeout = limits.ConditionTimeout
-
-	case NodeTypeGroup:
-		if r.StartNodeID == nil || !ids.Valid(*r.StartNodeID) {
-			return nil, errors.New("group node requires a valid start_node_id")
-		}
-		if len(r.Nodes) == 0 {
-			return nil, errors.New("group node requires a non-empty nodes array")
-		}
-		keys, err := parseKeys(r.Keys)
-		if err != nil {
-			return nil, err
-		}
-		g := &GroupContent{StartNodeID: *r.StartNodeID, Keys: keys}
-		seen := make(map[string]bool, len(r.Nodes))
-		for _, rawChild := range r.Nodes {
-			var child rawNode
-			if err := json.Unmarshal(rawChild, &child); err != nil {
-				return nil, fmt.Errorf("parse group node: %w", err)
-			}
-			if child.ID == "" || !ids.Valid(child.ID) {
-				return nil, fmt.Errorf("group node child id %q is not a valid uuid", child.ID)
-			}
-			if seen[child.ID] {
-				return nil, fmt.Errorf("duplicate node id %q in group", child.ID)
-			}
-			seen[child.ID] = true
-			childNc, err := parseRawNode(&child, limits)
-			if err != nil {
-				return nil, err
-			}
-			g.Nodes = append(g.Nodes, childNc)
-		}
-		if !seen[g.StartNodeID] {
-			return nil, fmt.Errorf("group start_node_id %q does not match any node in the group", g.StartNodeID)
-		}
-		nc.Group = g
-
-	case NodeTypeParallelStart:
-		if r.CombiningScript != nil {
-			return nil, errors.New("parallel_start node does not support combining_script")
-		}
-		if r.NextNode != nil {
-			return nil, errors.New("parallel_start node cannot have next_node")
-		}
-		if r.OutputProperty != nil {
-			return nil, errors.New("parallel_start node cannot have output_property")
-		}
-		var rawBranches map[string]string
-		if len(r.Branches) > 0 {
-			if err := json.Unmarshal(r.Branches, &rawBranches); err != nil {
-				return nil, fmt.Errorf("parallel_start branches must be an object of branch name to node id: %w", err)
-			}
-		}
-		if len(rawBranches) < 2 {
-			return nil, errors.New("parallel_start node requires at least two branches")
-		}
-		if max := limits.effectiveParallelLimits().MaxBranchesPerParallel; len(rawBranches) > max {
-			return nil, fmt.Errorf("parallel_start node has %d branches, at most %d are allowed", len(rawBranches), max)
-		}
-		branches := make(map[string]string, len(rawBranches))
-		for name, target := range rawBranches {
-			if strings.TrimSpace(name) == "" {
-				return nil, errors.New("parallel_start branch names must be non-empty")
-			}
-			if !ids.Valid(target) {
-				return nil, fmt.Errorf("parallel_start branch %q target %q is not a valid uuid", name, target)
-			}
-			branches[name] = target
-		}
-		if r.ParallelEndNodeID == nil || !ids.Valid(*r.ParallelEndNodeID) {
-			return nil, errors.New("parallel_start node requires a valid parallel_end_node_id")
-		}
-		nc.ParallelBranches = branches
-		nc.ParallelEndNodeID = *r.ParallelEndNodeID
-		nc.Timeout = limits.ConditionTimeout
-
-	case NodeTypeParallelEnd:
-		if len(r.Branches) > 0 {
-			return nil, errors.New("parallel_end node does not support branches")
-		}
-		if r.ParallelEndNodeID != nil {
-			return nil, errors.New("parallel_end node does not support parallel_end_node_id")
-		}
-		if r.CombiningScript == nil || strings.TrimSpace(*r.CombiningScript) == "" {
-			return nil, errors.New("parallel_end node requires a non-empty combining_script")
-		}
-		nc.CombiningScript = *r.CombiningScript
-		nc.Timeout = limits.ConditionTimeout
-
-	case NodeTypeDelay:
-		if nc.StartDelaySet {
-			return nil, errors.New("delay node does not support start_delay")
-		}
-		if len(r.Delay) == 0 || string(r.Delay) == "null" {
-			return nil, errors.New("delay node requires a delay")
-		}
-		d, _, err := optionalCappedDuration(r.Delay, "delay", limits.MaxTimeout)
-		if err != nil {
-			return nil, err
-		}
-		nc.Delay = d
-		// A delay wait is idempotent; an interrupted attempt restarts by
-		// default rather than failing the workflow.
-		if r.RetryOnRecovery == nil {
-			nc.RetryOnRecovery = true
-		}
-		nc.Timeout = limits.ConditionTimeout
+	// branches/parallel_end_node_id/combining_script are parallel-only
+	// fields; they are validated per type below so parallel_start and
+	// parallel_end can carry them while every other type rejects them.
+	parser, ok := nodeTypeParser(nc.Type)
+	if !ok {
+		return nil, fmt.Errorf("node type %q is not supported (allowed: script, conditions, input, group, external_call, output, poller, parallel_start, parallel_end, delay)", nc.Type)
 	}
-	if _, ok := LookupCustomType(string(nc.Type)); !ok && nc.Type != NodeTypeInput && r.FormID != nil {
-		return nil, fmt.Errorf("node type %q does not support form_id", nc.Type)
+	if err := parser(nc, r, limits); err != nil {
+		return nil, err
 	}
-	// allowed_roles, allowed_users, record_actor, and public are the
-	// input node's authorization surface, and accept/storage are its
-	// delivery contract, so no other builtin type may carry them. The
-	// guard sits after the type switch because a referenced node
-	// definition resolves its type from the definition, not from the
-	// occurrence.
-	if nc.Type != NodeTypeInput && (len(r.AllowedRoles) > 0 || len(r.AllowedUsers) > 0 || r.RecordActor != nil || r.Public != nil) {
-		return nil, fmt.Errorf("node type %q does not support allowed_roles, allowed_users, record_actor, or public", nc.Type)
-	}
-	if nc.Type != NodeTypeInput && (len(r.Accept) > 0 || r.Storage != nil) {
-		return nil, fmt.Errorf("node type %q does not support accept or storage", nc.Type)
-	}
-	if _, ok := LookupCustomType(string(nc.Type)); !ok && len(r.Config) > 0 {
-		return nil, fmt.Errorf("node type %q does not support config", nc.Type)
-	}
-	// branches/parallel_end_node_id/combining_script are parallel-only:
-	// the parallel cases above accept their own fields and reject the
-	// sibling's, so anything reaching here on another builtin type is
-	// foreign.
-	if nc.Type != NodeTypeParallelStart && nc.Type != NodeTypeParallelEnd {
-		if len(r.Branches) > 0 {
-			return nil, fmt.Errorf("node type %q does not support branches", nc.Type)
-		}
-		if r.ParallelEndNodeID != nil {
-			return nil, fmt.Errorf("node type %q does not support parallel_end_node_id", nc.Type)
-		}
-		if r.CombiningScript != nil {
-			return nil, fmt.Errorf("node type %q does not support combining_script", nc.Type)
-		}
+	if err := rejectForeignFields(nc, r); err != nil {
+		return nil, err
 	}
 	return nc, nil
 }

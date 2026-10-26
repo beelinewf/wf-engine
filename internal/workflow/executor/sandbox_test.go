@@ -2,6 +2,7 @@ package executor_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -79,6 +80,45 @@ func TestRunScriptTimeout(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "timeout") {
 		t.Errorf("error = %v, want timeout mention", err)
+	}
+}
+
+func TestRunScriptTimeoutMatchesSentinel(t *testing.T) {
+	_, err := run(t, executor.ScriptOptions{
+		Source:  "while (true) {}",
+		Context: map[string]any{},
+		Timeout: 50 * time.Millisecond,
+	})
+	if err == nil {
+		t.Fatal("RunScript() error = nil, want timeout")
+	}
+	if !errors.Is(err, executor.ErrScriptTimeout) {
+		t.Errorf("errors.Is(err, ErrScriptTimeout) = false, err = %v", err)
+	}
+	if !strings.HasPrefix(err.Error(), "executor: script timeout:") {
+		t.Errorf("error = %q, want timeout-branch message", err)
+	}
+}
+
+func TestRunScriptContextCancelPreservesCause(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+	_, err := executor.RunScript(ctx, executor.ScriptOptions{
+		Source:  "while (true) {}",
+		Context: map[string]any{},
+		Timeout: 5 * time.Second,
+	})
+	if err == nil {
+		t.Fatal("RunScript() error = nil, want cancel")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("errors.Is(err, context.Canceled) = false, err = %v", err)
+	}
+	if errors.Is(err, executor.ErrScriptTimeout) {
+		t.Errorf("errors.Is(err, ErrScriptTimeout) = true, want cancellation to keep its cause, err = %v", err)
 	}
 }
 

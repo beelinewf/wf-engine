@@ -19,6 +19,12 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// defaultMaxBodyBytes caps the JSON bodies UpdateContext and Input read when
+// no explicit cap is configured. It matches the engine output and multipart
+// text defaults (1 MiB); large file uploads ride the multipart path with its
+// own limits.
+const defaultMaxBodyBytes = 1048576
+
 // InstanceHandler serves workflow instance routes.
 type InstanceHandler struct {
 	svc service.InstanceService
@@ -28,6 +34,9 @@ type InstanceHandler struct {
 	streamPoll      time.Duration
 	streamHeartbeat time.Duration
 	streamMax       time.Duration
+	// maxBodyBytes caps the JSON bodies UpdateContext and Input read; a
+	// breach answers 413 before the service runs.
+	maxBodyBytes int64
 }
 
 // NewInstanceHandler builds the handler.
@@ -37,7 +46,17 @@ func NewInstanceHandler(svc service.InstanceService) *InstanceHandler {
 		streamPoll:      statusStreamPollInterval,
 		streamHeartbeat: statusStreamHeartbeatInterval,
 		streamMax:       statusStreamMaxDuration,
+		maxBodyBytes:    defaultMaxBodyBytes,
 	}
+}
+
+// WithMaxBodyBytes overrides the JSON body cap. A non-positive max keeps the
+// default, so callers without configuration stay protected.
+func (h *InstanceHandler) WithMaxBodyBytes(max int64) *InstanceHandler {
+	if max > 0 {
+		h.maxBodyBytes = max
+	}
+	return h
 }
 
 // Create handles POST /v1/workflow/instance.
@@ -365,12 +384,16 @@ func (h *InstanceHandler) Context(c *gin.Context) {
 // @Param X-Context-Update-Reason header string false "Audit reason"
 // @Param request body object true "Full replacement context"
 // @Success 200 {object} InstanceContextResponse
-// @Failure 401,403,400,404,409,422,500 {object} Problem
+// @Failure 401,403,400,404,409,413,422,500 {object} Problem
 // @Security ApiKeyAuth
 // @Security BearerAuth
 // @Router /v1/workflow/instance/{id}/context [put]
 func (h *InstanceHandler) UpdateContext(c *gin.Context) {
-	body, err := io.ReadAll(c.Request.Body)
+	body, err := io.ReadAll(h.cappedBody(c))
+	if isBodyTooLarge(err) {
+		WriteProblem(c, http.StatusRequestEntityTooLarge, "request body too large")
+		return
+	}
 	if err != nil || len(body) == 0 || !json.Valid(body) {
 		WriteProblem(c, http.StatusBadRequest, "invalid request body")
 		return
@@ -507,7 +530,11 @@ func (h *InstanceHandler) Input(c *gin.Context) {
 			return c.Request.MultipartReader()
 		}
 	} else {
-		body, err := io.ReadAll(c.Request.Body)
+		body, err := io.ReadAll(h.cappedBody(c))
+		if isBodyTooLarge(err) {
+			WriteProblem(c, http.StatusRequestEntityTooLarge, "request body too large")
+			return
+		}
 		if err != nil {
 			WriteProblem(c, http.StatusBadRequest, "cannot read request body")
 			return
@@ -552,6 +579,24 @@ func inputMediaType(header string) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported content type %q: expected application/json or multipart/form-data", mediaType)
 	}
+}
+
+// cappedBody wraps the request body with the handler's size cap. Reads past
+// the cap fail with the http.MaxBytesReader overflow error, which callers map
+// to 413 via isBodyTooLarge. A non-positive cap falls back to the default so
+// a zero-value handler stays protected.
+func (h *InstanceHandler) cappedBody(c *gin.Context) io.ReadCloser {
+	max := h.maxBodyBytes
+	if max <= 0 {
+		max = defaultMaxBodyBytes
+	}
+	return http.MaxBytesReader(c.Writer, c.Request.Body, max)
+}
+
+// isBodyTooLarge reports whether err is the http.MaxBytesReader overflow.
+// net/http exposes no sentinel for it, so the stable stdlib message is matched.
+func isBodyTooLarge(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "request body too large")
 }
 
 // Pause handles POST /v1/workflow/instance/{id}/pause.
