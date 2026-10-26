@@ -34,7 +34,7 @@ func hookNum(t *testing.T, v any) float64 {
 func TestHookRunnerPreMutatesContext(t *testing.T) {
 	r := executor.NewHookRunner(nil)
 	nc := hookNode(&model.HookScript{Script: "context.p = context.a + 1;", Timeout: time.Second}, nil)
-	got, err := r.RunPre(context.Background(), nc, map[string]any{"a": 1})
+	got, err := r.RunPre(context.Background(), nc, map[string]any{"a": 1}, executor.Identity{})
 	if err != nil {
 		t.Fatalf("RunPre() error = %v", err)
 	}
@@ -49,7 +49,7 @@ func TestHookRunnerPreMutatesContext(t *testing.T) {
 func TestHookRunnerPreReturnValueIgnored(t *testing.T) {
 	r := executor.NewHookRunner(nil)
 	nc := hookNode(&model.HookScript{Script: "context.p = 1; return 'ignored';", Timeout: time.Second}, nil)
-	got, err := r.RunPre(context.Background(), nc, map[string]any{})
+	got, err := r.RunPre(context.Background(), nc, map[string]any{}, executor.Identity{})
 	if err != nil {
 		t.Fatalf("RunPre() error = %v", err)
 	}
@@ -61,7 +61,7 @@ func TestHookRunnerPreReturnValueIgnored(t *testing.T) {
 func TestHookRunnerPostReceivesFrozenOutput(t *testing.T) {
 	r := executor.NewHookRunner(nil)
 	nc := hookNode(nil, &model.HookScript{Script: "context.o = output.status; output.status = 999; context.s = output.status;", Timeout: time.Second})
-	got, err := r.RunPost(context.Background(), nc, map[string]any{}, map[string]any{"status": 200})
+	got, err := r.RunPost(context.Background(), nc, map[string]any{}, map[string]any{"status": 200}, executor.Identity{})
 	if err != nil {
 		t.Fatalf("RunPost() error = %v", err)
 	}
@@ -76,7 +76,7 @@ func TestHookRunnerPostReceivesFrozenOutput(t *testing.T) {
 func TestHookRunnerPostReturnValueIgnored(t *testing.T) {
 	r := executor.NewHookRunner(nil)
 	nc := hookNode(nil, &model.HookScript{Script: "context.q = 1; return {ignored: true};", Timeout: time.Second})
-	got, err := r.RunPost(context.Background(), nc, map[string]any{}, nil)
+	got, err := r.RunPost(context.Background(), nc, map[string]any{}, nil, executor.Identity{})
 	if err != nil {
 		t.Fatalf("RunPost() error = %v", err)
 	}
@@ -88,14 +88,14 @@ func TestHookRunnerPostReturnValueIgnored(t *testing.T) {
 func TestHookRunnerNilHookPassthrough(t *testing.T) {
 	r := executor.NewHookRunner(nil)
 	ctxMap := map[string]any{"a": 1}
-	pre, err := r.RunPre(context.Background(), hookNode(nil, nil), ctxMap)
+	pre, err := r.RunPre(context.Background(), hookNode(nil, nil), ctxMap, executor.Identity{})
 	if err != nil {
 		t.Fatalf("RunPre(nil hook) error = %v", err)
 	}
 	if pre["a"] != 1 {
 		t.Errorf("pre context = %v", pre)
 	}
-	post, err := r.RunPost(context.Background(), hookNode(nil, nil), ctxMap, nil)
+	post, err := r.RunPost(context.Background(), hookNode(nil, nil), ctxMap, nil, executor.Identity{})
 	if err != nil {
 		t.Fatalf("RunPost(nil hook) error = %v", err)
 	}
@@ -107,7 +107,7 @@ func TestHookRunnerNilHookPassthrough(t *testing.T) {
 func TestHookRunnerTimeout(t *testing.T) {
 	r := executor.NewHookRunner(nil)
 	nc := hookNode(&model.HookScript{Script: "while (true) {}", Timeout: 20 * time.Millisecond}, nil)
-	if _, err := r.RunPre(context.Background(), nc, map[string]any{}); !errors.Is(err, executor.ErrScriptTimeout) {
+	if _, err := r.RunPre(context.Background(), nc, map[string]any{}, executor.Identity{}); !errors.Is(err, executor.ErrScriptTimeout) {
 		t.Errorf("RunPre() error = %v, want ErrScriptTimeout", err)
 	}
 }
@@ -115,7 +115,7 @@ func TestHookRunnerTimeout(t *testing.T) {
 func TestHookRunnerScriptError(t *testing.T) {
 	r := executor.NewHookRunner(nil)
 	nc := hookNode(&model.HookScript{Script: "return missing.value;", Timeout: time.Second}, nil)
-	_, err := r.RunPre(context.Background(), nc, map[string]any{})
+	_, err := r.RunPre(context.Background(), nc, map[string]any{}, executor.Identity{})
 	if err == nil {
 		t.Fatal("RunPre() error = nil, want script error")
 	}
@@ -128,10 +128,57 @@ func TestHookRunnerFailureLeavesInputContextUntouched(t *testing.T) {
 	r := executor.NewHookRunner(nil)
 	ctxMap := map[string]any{"a": 1}
 	nc := hookNode(&model.HookScript{Script: "context.b = 2; throw new Error('boom');", Timeout: time.Second}, nil)
-	if _, err := r.RunPre(context.Background(), nc, ctxMap); err == nil {
+	if _, err := r.RunPre(context.Background(), nc, ctxMap, executor.Identity{}); err == nil {
 		t.Fatal("RunPre() error = nil, want script error")
 	}
 	if len(ctxMap) != 1 || ctxMap["a"] != 1 {
 		t.Errorf("input context mutated on failure: %v", ctxMap)
+	}
+}
+
+func TestHookRunnerPreSeesMeta(t *testing.T) {
+	r := executor.NewHookRunner(nil)
+	nc := hookNode(&model.HookScript{Script: `context.seen = meta.branch_id + "/" + meta.node_id;`, Timeout: time.Second}, nil)
+	got, err := r.RunPre(context.Background(), nc, map[string]any{}, executor.Identity{BranchID: "br-1", NodeID: "n1"})
+	if err != nil {
+		t.Fatalf("RunPre() error = %v", err)
+	}
+	if got["seen"] != "br-1/n1" {
+		t.Errorf("seen = %v, want br-1/n1", got["seen"])
+	}
+	if _, ok := got["meta"]; ok {
+		t.Errorf("meta leaked into context: %v", got)
+	}
+}
+
+func TestHookRunnerMetaIsFrozen(t *testing.T) {
+	r := executor.NewHookRunner(nil)
+	nc := hookNode(nil, &model.HookScript{Script: `meta.branch_id = "hacked"; context.s = meta.branch_id;`, Timeout: time.Second})
+	got, err := r.RunPost(context.Background(), nc, map[string]any{}, nil, executor.Identity{BranchID: "br-1"})
+	if err != nil {
+		t.Fatalf("RunPost() error = %v", err)
+	}
+	if got["s"] != "br-1" {
+		t.Errorf("context.s = %v, want br-1 (meta must be frozen, mutation dropped)", got["s"])
+	}
+	if _, ok := got["meta"]; ok {
+		t.Errorf("meta leaked into context: %v", got)
+	}
+}
+
+func TestRunScriptMetaFrozen(t *testing.T) {
+	res, err := run(t, executor.ScriptOptions{
+		Source:  `meta.branch_id = "hacked"; return meta.branch_id;`,
+		Context: map[string]any{},
+		Meta:    map[string]any{"branch_id": "br-1"},
+	})
+	if err != nil {
+		t.Fatalf("RunScript() error = %v", err)
+	}
+	if res.Value != "br-1" {
+		t.Errorf("meta.branch_id = %v, want br-1 (frozen)", res.Value)
+	}
+	if _, ok := res.Context["meta"]; ok {
+		t.Errorf("meta leaked into context: %v", res.Context)
 	}
 }

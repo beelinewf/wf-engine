@@ -32,6 +32,10 @@ type ScriptOptions struct {
 	// objects and recursively frozen, so predicates cannot mutate injected
 	// read-only values (e.g. the poller "response").
 	FrozenVars []string
+	// Meta, when non-nil, is injected as a deep-frozen "meta" global
+	// carrying the execution identity (see Identity.Meta). It wins over
+	// a same-named entry in Vars and is never exported back.
+	Meta map[string]any
 }
 
 // ScriptResult carries the post-run exported context and the return value.
@@ -68,6 +72,7 @@ const freezeVarSrc = `(function () {
 // RunScript executes ES5.1-style JavaScript in the Goja sandbox:
 //   - no eval / Function constructor;
 //   - context injected as the "context" global (deep-frozen when Frozen);
+//   - Meta, when non-nil, injected as the deep-frozen "meta" global;
 //   - registered Go functions exposed under the "go" root object;
 //   - hard timeout via runtime interrupt;
 //   - the context is re-exported after the run so mutations persist.
@@ -109,6 +114,18 @@ func RunScript(ctx context.Context, opts ScriptOptions) (*ScriptResult, error) {
 		if err := vm.Set("go", opts.Funcs.All()); err != nil {
 			return nil, fmt.Errorf("executor: set go funcs: %w", err)
 		}
+	}
+	if opts.Meta != nil {
+		vars := make(map[string]any, len(opts.Vars)+1)
+		for name, value := range opts.Vars {
+			vars[name] = value
+		}
+		vars["meta"] = opts.Meta
+		opts.Vars = vars
+		frozen := make([]string, 0, len(opts.FrozenVars)+1)
+		frozen = append(frozen, opts.FrozenVars...)
+		frozen = append(frozen, "meta")
+		opts.FrozenVars = frozen
 	}
 	for name, value := range opts.Vars {
 		if err := vm.Set(name, value); err != nil {

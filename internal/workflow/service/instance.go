@@ -2337,7 +2337,23 @@ func (s *instanceService) DeliverInput(ctx context.Context, req DeliverInput) (*
 	// accepted. Rejection persists Accepted=false; anonymous deliveries
 	// record the anonymous marker alongside it, so the audit trail still
 	// distinguishes them.
-	vr, err := s.validator.Validate(ctx, executor.Request{Node: inputNode, Context: ctxMap, Payload: req.Payload})
+	ident := executor.Identity{
+		WorkflowInstanceID: inst.ID,
+		NodeInstanceID:     attempt.ID,
+		BranchID:           tgt.branchID,
+		NodeID:             inputNode.ID,
+	}
+	if tgt.branch != nil {
+		ident.ParallelExecutionID = tgt.branch.ParallelExecutionID
+		ident.BranchName = tgt.branch.Name
+		ident.BranchIndex = tgt.branch.BranchIndex
+	}
+	vr, err := s.validator.Validate(ctx, executor.Request{
+		Node: inputNode, Context: ctxMap, Payload: req.Payload,
+		InstanceID: inst.ID, NodeInstanceID: attempt.ID,
+		BranchID: tgt.branchID, ParallelExecutionID: ident.ParallelExecutionID,
+		BranchName: ident.BranchName, BranchIndex: ident.BranchIndex,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("%w: input validation failed: %v", model.ErrInvalid, err)
 	}
@@ -2374,7 +2390,7 @@ func (s *instanceService) DeliverInput(ctx context.Context, req DeliverInput) (*
 
 	// The post hook sees the accepted payload as a frozen output global and
 	// may transform the context after the payload was written.
-	postCtx, err := s.hooks.RunPost(ctx, inputNode, newCtx, payload)
+	postCtx, err := s.hooks.RunPost(ctx, inputNode, newCtx, payload, ident)
 	if err != nil {
 		return s.failAcceptedInput(ctx, inst, tgt, req, model.NodeFailed, newCtx, err)
 	}
@@ -2386,7 +2402,7 @@ func (s *instanceService) DeliverInput(ctx context.Context, req DeliverInput) (*
 		return nil, err
 	}
 	if len(exited) > 0 {
-		finalCtx, herr := kernel.RunExitedGroupPosts(ctx, s.hooks, graph, exited, newCtx)
+		finalCtx, herr := kernel.RunExitedGroupPosts(ctx, s.hooks, graph, exited, newCtx, ident)
 		if herr != nil {
 			// The input attempt finished; the structural group hook failure
 			// fails the scope with the latest completed context.

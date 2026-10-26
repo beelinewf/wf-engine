@@ -168,6 +168,22 @@ func TestCommandExecutorStdin(t *testing.T) {
 	}
 }
 
+func TestCommandExecutorStdinSeesReservedRoots(t *testing.T) {
+	exe := writeScript(t, t.TempDir(), "relay", "cat\n")
+	ex := executor.NewExecutors(executor.Limits{ExecAllowlist: []string{exe}, MaxOutputBytes: 4096}, nil, executor.Dependencies{})[model.NodeTypeExternalCall]
+	res, err := ex.Execute(context.Background(), executor.Request{
+		Node:     execNode([]string{exe}, "{{ branch_id }}"),
+		Context:  map[string]any{"branch_id": "user-value"},
+		BranchID: "br-9",
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if strings.TrimSpace(res.Output.(*executor.CommandResult).Stdout) != "br-9" {
+		t.Errorf("stdout = %q, want reserved br-9", res.Output.(*executor.CommandResult).Stdout)
+	}
+}
+
 func TestCommandExecutorOutputCap(t *testing.T) {
 	exe := writeScript(t, t.TempDir(), "flood", "i=1; while [ \"$i\" -le 100 ]; do echo \"line $i\"; i=$((i+1)); done\n")
 	ex := executor.NewExecutors(executor.Limits{ExecAllowlist: []string{exe}, MaxOutputBytes: 64}, nil, executor.Dependencies{})[model.NodeTypeExternalCall]
