@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/beelinewf/wf-engine/internal/workflow/metrics"
 	"github.com/beelinewf/wf-engine/internal/workflow/model"
 	"github.com/beelinewf/wf-engine/internal/workflow/repository"
 	"github.com/beelinewf/wf-engine/internal/workflow/service"
@@ -50,6 +51,7 @@ type Scheduler struct {
 	instances service.InstanceService
 	log       *slog.Logger
 	workerID  string
+	metrics   *metrics.Recorder
 
 	inner           *cron.Cron
 	ctx             context.Context
@@ -58,6 +60,11 @@ type Scheduler struct {
 	entries         map[string]registeredEntry
 	mu              sync.Mutex
 	wg              sync.WaitGroup
+}
+
+// SetMetrics installs the optional metrics recorder. Nil disables recording.
+func (s *Scheduler) SetMetrics(rec *metrics.Recorder) {
+	s.metrics = rec
 }
 
 // New builds a scheduler; it is inert until Run is called. workerID
@@ -242,7 +249,7 @@ func (s *Scheduler) sync() error {
 			s.log.Warn("scheduler skipping unparsable row", "schedule", row.ID, "error", err)
 			continue
 		}
-		job := &fireJob{schedules: s.schedules, instances: s.instances, log: s.log, workerID: s.workerID, schedule: row}
+		job := &fireJob{schedules: s.schedules, instances: s.instances, log: s.log, workerID: s.workerID, schedule: row, metrics: s.metrics}
 		entryID, err := s.addAligned(spec, job)
 		if err != nil {
 			s.log.Warn("scheduler skipping row", "schedule", row.ID, "error", err)
@@ -275,6 +282,7 @@ type fireJob struct {
 	log       *slog.Logger
 	workerID  string
 	schedule  model.CronSchedule
+	metrics   *metrics.Recorder
 }
 
 // Run implements cron.Job. Every replica fires the same tick, but only the
@@ -289,10 +297,12 @@ func (j *fireJob) Run() {
 	claimed, err := j.schedules.ClaimFire(ctx, j.schedule.ID, fireAt, j.workerID)
 	if err != nil {
 		j.log.Warn("schedule tick claim failed", "schedule", j.schedule.ID, "error", err)
+		j.metrics.SchedulerFired("failed")
 		return
 	}
 	if !claimed {
 		j.log.Debug("schedule tick already claimed", "schedule", j.schedule.ID, "fire_at", fireAt)
+		j.metrics.SchedulerFired("skipped")
 		return
 	}
 	inst, err := j.instances.Create(ctx, service.CreateInstance{
@@ -302,8 +312,10 @@ func (j *fireJob) Run() {
 	})
 	if err != nil {
 		j.log.Warn("schedule tick failed", "schedule", j.schedule.ID, "error", err)
+		j.metrics.SchedulerFired("failed")
 		return
 	}
+	j.metrics.SchedulerFired("fired")
 	if err := j.schedules.RecordFireInstance(ctx, j.schedule.ID, fireAt, inst.ID); err != nil {
 		j.log.Warn("schedule tick record failed", "schedule", j.schedule.ID, "instance", inst.ID, "error", err)
 	}

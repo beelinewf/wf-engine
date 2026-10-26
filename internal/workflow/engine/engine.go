@@ -14,6 +14,7 @@ import (
 
 	"github.com/beelinewf/wf-engine/internal/workflow/executor"
 	"github.com/beelinewf/wf-engine/internal/workflow/kernel"
+	"github.com/beelinewf/wf-engine/internal/workflow/metrics"
 	"github.com/beelinewf/wf-engine/internal/workflow/model"
 	"github.com/beelinewf/wf-engine/internal/workflow/repository"
 	"github.com/beelinewf/wf-engine/pkg/contextdiff"
@@ -41,9 +42,15 @@ type Engine struct {
 	actor     string
 	lean      model.LeanOptions
 	now       func() time.Time
+	metrics   *metrics.Recorder
 
 	mu      sync.RWMutex
 	cancels map[string]context.CancelFunc
+}
+
+// SetMetrics installs the optional metrics recorder. Nil disables recording.
+func (e *Engine) SetMetrics(rec *metrics.Recorder) {
+	e.metrics = rec
 }
 
 // NewEngine builds the engine. actor is the audit actor for appended events.
@@ -511,6 +518,17 @@ func (e *Engine) recover(ctx context.Context, sc *execScope, g *workflowGraph, f
 	return e.executeStep(ctx, sc, g, frame, counters, nc, attempt, startCtx, ctxMap)
 }
 
+// nodeResult maps an executor outcome onto the bounded result label.
+func nodeResult(err error) string {
+	if err == nil {
+		return "success"
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, executor.ErrScriptTimeout) {
+		return "timeout"
+	}
+	return "error"
+}
+
 // executeStep runs the pre hook, the executor, and the post hook, persists
 // the attempt outcome, and commits the next cursor transition. Exited groups
 // run their post hooks innermost-first before the checkpoint.
@@ -530,7 +548,9 @@ func (e *Engine) executeStep(ctx context.Context, sc *execScope, g *workflowGrap
 		req.Vars = map[string]any{"input": v}
 	}
 
+	nodeStart := time.Now()
 	res, err := e.executors[nc.Type].Execute(ctx, req)
+	e.metrics.NodeExecution(string(nc.Type), nodeResult(err), time.Since(nodeStart))
 	if err != nil {
 		if ctx.Err() != nil {
 			return e.interrupted(ctx, sc, attempt)
@@ -976,12 +996,33 @@ func (e *Engine) checkpointAt(ctx context.Context, sc *execScope, frame *model.F
 	if err != nil {
 		return err
 	}
+	e.recordTerminal(ctx, sc, status, finished)
 	if status == model.WorkflowPaused && reason != model.WaitingReasonInput && sc.debug && !sc.pauseRequested {
 		// The checkpoint releases the lease, so append outside the
 		// cancelled Process scope to survive dispatcher shutdown.
 		_ = e.appendEvent(context.WithoutCancel(ctx), sc, "paused", map[string]any{"debug": true, "node_id": commitNodeID(commit)})
 	}
 	return nil
+}
+
+// recordTerminal counts one terminal parent checkpoint and its end-to-end
+// duration. Branch scopes never reach here; a failed branch is recorded
+// when its parent fails. The extra read runs once per instance lifetime.
+func (e *Engine) recordTerminal(ctx context.Context, sc *execScope, status model.WorkflowStatus, finished *time.Time) {
+	if status != model.WorkflowFinished && status != model.WorkflowFailed && status != model.WorkflowStopped {
+		return
+	}
+	var dur time.Duration
+	if inst, err := e.instances.GetByID(ctx, sc.instanceID); err == nil && inst != nil {
+		end := time.Now()
+		if finished != nil {
+			end = *finished
+		}
+		if dur = end.Sub(inst.CreatedAt); dur < 0 {
+			dur = 0
+		}
+	}
+	e.metrics.InstanceTerminal(string(status), dur)
 }
 
 // branchCheckpoint commits one branch transition: failures fail the branch

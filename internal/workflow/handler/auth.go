@@ -259,3 +259,18 @@ func authPresented(c *gin.Context, cfg AuthConfig) bool {
 	}
 	return false
 }
+
+// RequireAPIToken returns Gin middleware admitting only requests carrying
+// the configured X-Api-Token. It gates /metrics: Prometheus is a machine
+// principal with no role, so there is no RequirePermission check, no OIDC
+// Bearer path, and no identity resolution. An empty configured token never
+// matches, so auth-enabled without a token fails closed on every request.
+func RequireAPIToken(cfg AuthConfig) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !tokensEqual(c.GetHeader(APIKeyHeader), cfg.APIToken) {
+			WriteProblem(c, http.StatusUnauthorized, "missing or invalid API token")
+			return
+		}
+		c.Next()
+	}
+}

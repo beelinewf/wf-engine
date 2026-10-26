@@ -10,6 +10,10 @@ infra:
   http:
     host: "localhost:9999"
     swagger_enabled: true
+    # Prometheus exposition at GET /metrics on the same port.
+    # Operator override: BEELINEWF_INFRA_HTTP_METRICS_ENABLED.
+    # false leaves no route (404).
+    metrics_enabled: true
     # Cross-origin access for browser frontends deployed on another
     # origin. The default "*" allows any origin, which suits development;
     # for production, list the frontend origins (scheme://host[:port]) or

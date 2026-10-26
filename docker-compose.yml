@@ -240,6 +240,9 @@ services:
       BEELINEWF_INFRA_STORAGE_USE_SSL: "false"
       BEELINEWF_INFRA_STORAGE_ACCESS_KEY: rustfsadmin
       BEELINEWF_INFRA_STORAGE_SECRET_KEY: rustfsadmin
+    # Prometheus scrapes the existing API port: GET /metrics on :8080.
+    # With auth off (this file) it is public; with BEELINEWF_AUTH_ENABLED
+    # it needs X-Api-Token. No separate metrics port.
     ports:
       - "8080:8080"
     depends_on:
