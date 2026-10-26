@@ -88,12 +88,12 @@ const inputNodeSchemaJSON = `{
     "form_id": { "$ref": "#/$defs/nodeId", "description": "Id of the form in the forms library the frontend renders for this node. The engine never reads forms." },
     "allowed_roles": {
       "type": "array",
-      "description": "Roles allowed to deliver to this input node, checked against the caller's live token roles after the endpoint permission. Absent or empty is open to any caller. Not consulted when allowed_users is non-empty. Ignored on a public node.",
+      "description": "Roles allowed to deliver to this input node, checked against the caller's live token roles after the endpoint permission. Absent or empty is open to any caller. The two gates are a union: a listed role passes even when allowed_users is non-empty. Ignored on a public node.",
       "items": { "type": "string", "minLength": 1 }
     },
     "allowed_users": {
       "type": "array",
-      "description": "Users allowed to deliver to this input node, checked against the caller's resolved user id. When non-empty it is the only gate consulted: a listed user passes however their roles read, and allowed_roles is ignored. Absent or empty means no user restriction. Ignored on a public node.",
+      "description": "Users allowed to deliver to this input node, checked against the caller's resolved user id. A listed user passes however their roles read. The two gates are a union: a listed role passes even when this list is non-empty. Absent or empty means no user restriction. Ignored on a public node.",
       "items": {
         "type": "object",
         "properties": { "id": { "$ref": "#/$defs/nodeId", "description": "Users.id uuid of an allowed caller." } },

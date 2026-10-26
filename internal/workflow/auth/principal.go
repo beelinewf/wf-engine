@@ -137,11 +137,11 @@ func (p Principal) CanSatisfyRoles(allowed []string) bool {
 
 // MatchesUserID reports whether the principal's resolved user id appears in
 // the input node's user gate. It is a pure matcher with no open-gate or
-// service semantics: the service consults it exclusively whenever the node
-// lists users, so a listed user passes however their roles read and an
-// unlisted caller is refused without consulting the role list. A principal
-// with no resolved user id never matches, so the gate fails closed rather
-// than admitting an unknown caller.
+// service semantics: a listed user passes however their roles read, and a
+// principal with no resolved user id never matches, so the gate fails
+// closed rather than admitting an unknown caller. On a node carrying both
+// gates it is one half of the union — an unlisted caller still passes on a
+// listed role.
 func (p Principal) MatchesUserID(allowed []string) bool {
 	if p.UserID == "" {
 		return false

@@ -402,10 +402,10 @@ configured catalog.
 2. the input node's `allowed_users`, checked against the caller's user id;
 3. the input node's `allowed_roles`, intersected with the caller's roles.
 
-The user gate has strict priority: when the node lists users, only a listed
-user passes, however their roles read, and a caller holding a listed role
-but no listed user id is refused with **403** without consulting the role
-list. The role gate applies only when no user list is present. A node
+The two node gates are a union: when the node lists both users and roles, a
+listed user passes however their roles read, and a listed role passes
+however the user list reads. Only a caller matching neither list is refused
+with **403**. A node carrying one gate consults only that gate, and a node
 carrying neither gate is open to any `input:deliver` holder. A refusal
 writes no delivery row and records an `input_forbidden` audit event without
 the payload.
@@ -416,8 +416,8 @@ the payload.
   name: Approval
   channel: http
   output_property: approval
-  allowed_roles: [manager]   # optional; absent or empty is open; ignored when allowed_users is set
-  allowed_users: [{id: "…"}] # optional; when set, only listed users pass
+  allowed_roles: [manager]   # optional; absent or empty is open; a listed role passes even when allowed_users is set
+  allowed_users: [{id: "…"}] # optional; a listed user passes however their roles read
   record_actor: true         # optional; defaults to false
 ```
 

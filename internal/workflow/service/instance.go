@@ -169,9 +169,10 @@ type PendingInput struct {
 	Form *SnapshotForm
 	// AllowedRoles is the node's role gate, so a frontend can hide or
 	// explain a delivery the caller's roles would be refused for. It is
-	// empty when the node is open; it is consulted only when AllowedUsers
-	// is empty, and a public node reports it empty: the node ignores both
-	// gates, so an authored list must never hide its form.
+	// empty when the node is open; when AllowedUsers is also non-empty a
+	// listed role still admits the caller, and a public node reports it
+	// empty: the node ignores both gates, so an authored list must never
+	// hide its form.
 	AllowedRoles []string
 	// AllowedUsers is the node's user gate in the same [{"id": ...}] shape
 	// the definition carries. Like AllowedRoles it is reported empty on a
@@ -2289,8 +2290,8 @@ func (s *instanceService) DeliverInput(ctx context.Context, req DeliverInput) (*
 	// known, and before the channel match, so a source header cannot skip
 	// the gate. The endpoint permission and the node gate are independent:
 	// a caller may hold input:deliver and still be refused by a node that
-	// lists neither their user id nor, when no user list is present, one
-	// of their roles. An anonymous caller passes only on a public node and
+	// lists neither their user id nor one of their roles. An anonymous
+	// caller passes only on a public node and
 	// is marked anonymous in the audit trail; an invalid credential never
 	// degrades to anonymous, because the router authenticates first.
 	if err := s.authorizeDelivery(ctx, inst, inputNode, principal, anonymous); err != nil {
@@ -2551,11 +2552,15 @@ func (s *instanceService) deliveryActor(req DeliverInput, p auth.Principal) stri
 	return s.actor
 }
 
-// nodeGateReason names the node gate a refused delivery failed: the user
-// list when the node carries one, else the role list. A roles-only node
-// keeps the message it has always produced, and a node carrying both gates
-// names only the user list, since the role list is not consulted there.
+// nodeGateReason names the node gate a refused delivery failed. A node
+// carrying both gates names both, since either would have admitted the
+// caller; a single-gate node keeps the message it has always produced.
 func nodeGateReason(inputNode *model.NodeContent) string {
+	if len(inputNode.AllowedUsers) > 0 && len(inputNode.AllowedRoles) > 0 {
+		return "users [" + strings.Join(inputNode.AllowedUserIDs(), " ") +
+			"] or roles [" + strings.Join(inputNode.AllowedRoles, " ") +
+			"] are required to deliver to this input node"
+	}
 	if len(inputNode.AllowedUsers) > 0 {
 		return "users [" + strings.Join(inputNode.AllowedUserIDs(), " ") +
 			"] are required to deliver to this input node"
@@ -2603,19 +2608,31 @@ func (s *instanceService) authorizeDelivery(
 	if inputNode.Public {
 		return nil
 	}
-	// The user gate has strict priority: when the node lists users, only
-	// a listed user passes, however their roles read, and a caller holding
-	// a listed role but no listed user id is refused without consulting
-	// the role list. The role gate applies only when no user list is
-	// present, and a node carrying neither gate stays open.
-	if len(inputNode.AllowedUsers) > 0 {
+	// The two node gates are a union: when the node lists both users and
+	// roles, a listed user passes however their roles read and a listed
+	// role passes however the user list reads; only a caller matching
+	// neither is refused. A node carrying one gate consults only that
+	// gate — the branch matters because CanSatisfyRoles reads an empty
+	// list as open, which would admit everyone past a users-only node —
+	// and a node carrying neither gate stays open.
+	hasUsers := len(inputNode.AllowedUsers) > 0
+	hasRoles := len(inputNode.AllowedRoles) > 0
+	switch {
+	case hasUsers && hasRoles:
 		if p.MatchesUserID(inputNode.AllowedUserIDs()) {
 			return nil
 		}
-		return s.denyInput(ctx, inst, inputNode, p, nodeGateReason(inputNode))
-	}
-	if !p.CanSatisfyRoles(inputNode.AllowedRoles) {
-		return s.denyInput(ctx, inst, inputNode, p, nodeGateReason(inputNode))
+		if !p.CanSatisfyRoles(inputNode.AllowedRoles) {
+			return s.denyInput(ctx, inst, inputNode, p, nodeGateReason(inputNode))
+		}
+	case hasUsers:
+		if !p.MatchesUserID(inputNode.AllowedUserIDs()) {
+			return s.denyInput(ctx, inst, inputNode, p, nodeGateReason(inputNode))
+		}
+	case hasRoles:
+		if !p.CanSatisfyRoles(inputNode.AllowedRoles) {
+			return s.denyInput(ctx, inst, inputNode, p, nodeGateReason(inputNode))
+		}
 	}
 	return nil
 }

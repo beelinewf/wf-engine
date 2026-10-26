@@ -427,12 +427,15 @@ rather than in the handler:
    Absent or empty is open. A role in the token that is absent from the
    catalog is not in the intersection, so unknown roles deny by default.
 
-The user gate has strict priority over the role gate: when the node lists
-users, only a listed user passes, and the role list is not consulted. All
-are checked before the channel match, so a refusal is a clean 403 with no
-delivery row, and it records an `input_forbidden` audit event deliberately
-*without* the payload — the denial itself must not become a side channel
-that echoes a rejected secret.
+The two node gates are a union: when the node lists both users and roles,
+a listed user passes however their roles read and a listed role passes
+however the user list reads; only a caller matching neither is refused. A
+node carrying one gate consults only that gate, and a node carrying
+neither gate stays open. All are checked before the channel match, so a
+refusal is a clean 403 with no delivery row, and it records an
+`input_forbidden` audit event deliberately *without* the payload — the
+denial itself must not become a side channel that echoes a rejected
+secret.
 
 `allowed_roles`, `allowed_users`, and `record_actor` are properties of the
 node *definition*. An occurrence referencing a reusable definition may not
