@@ -688,12 +688,122 @@ func TestEnginePollerFlowWritesOutputThenNext(t *testing.T) {
 		t.Errorf("after = %v, want next_node output", ctx["after"])
 	}
 	// Reserved template roots must never leak into persisted context.
-	if _, ok := ctx["workflow_instance_id"]; ok {
-		t.Error("workflow_instance_id leaked into workflow context")
+	for _, k := range []string{"workflow_instance_id", "node_instance_id", "branch_id", "parallel_execution_id", "branch_name", "branch_index", "node_id", "meta"} {
+		if _, ok := ctx[k]; ok {
+			t.Errorf("%s leaked into workflow context", k)
+		}
 	}
-	if _, ok := ctx["node_instance_id"]; ok {
-		t.Error("node_instance_id leaked into workflow context")
+}
+
+func TestEngineBranchNotifySeesBranchID(t *testing.T) {
+	db := setupEngineDB(t)
+	ctx := context.Background()
+	var gotPath string
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	start, notify, ask, bscript, end, done := newEngineID(), newEngineID(), newEngineID(), newEngineID(), newEngineID(), newEngineID()
+	wfID := createWorkflow(t, db, start,
+		nodeJSON(start, "parallel_start", "fork", "", "", "", map[string]any{
+			"branches":             map[string]any{"a": notify, "b": bscript},
+			"parallel_end_node_id": end,
+		}),
+		nodeJSON(notify, "external_call", "notify", "", ask, "notified", map[string]any{
+			"http_config": map[string]any{
+				"url":    srv.URL + "/notify/{{ branch_id }}",
+				"method": "POST",
+				"body":   map[string]any{"branch_id": "{{ branch_id }}", "instance": "{{ workflow_instance_id }}", "node": "{{ node_id }}", "exec": "{{ parallel_execution_id }}", "name": "{{ branch_name }}"},
+			},
+		}),
+		nodeJSON(ask, "input", "ask", "", end, "", map[string]any{
+			"channel":         "http",
+			"output_property": "answer",
+		}),
+		nodeJSON(bscript, "script", "b", "context.b = 1;", end, "b", nil),
+		nodeJSON(end, "parallel_end", "join", "", done, "", map[string]any{
+			"combining_script": `context.x = 1;`,
+		}),
+		nodeJSON(done, "script", "done", "context.done = true", "", "done", nil),
+	)
+	instanceID := insertInstance(t, db, wfID, start, map[string]any{})
+	e, instances := testEngineWithExec(t, db, model.DefaultLimits(), executor.Limits{HTTPAllowlist: []string{"127.0.0.1"}})
+
+	claimed, err := instances.ClaimNext(ctx, "test-worker", time.Minute, 1)
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("ClaimNext() = %d, %v", len(claimed), err)
 	}
+	if err := e.Process(ctx, claimed[0]); err != nil {
+		t.Fatalf("Process() error = %v", err)
+	}
+
+	prepo := repository.NewParallelRepository(db)
+	var branchA model.ParallelBranch
+	for i := 0; i < 10; i++ {
+		bclaimed, err := prepo.ClaimNextBranches(ctx, "test-worker", time.Minute, 10)
+		if err != nil {
+			t.Fatalf("ClaimNextBranches() error = %v", err)
+		}
+		for _, b := range bclaimed {
+			if err := e.ProcessBranch(ctx, b); err != nil {
+				t.Fatalf("ProcessBranch() error = %v", err)
+			}
+			if b.Name == "a" {
+				branchA = b
+			}
+		}
+		got, err := prepo.GetBranch(ctx, branchA.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		branchA = *got
+		if branchA.Status == model.ParallelBranchWaiting && branchA.WaitingReason == model.WaitingReasonInput {
+			break
+		}
+	}
+	if branchA.Status != model.ParallelBranchWaiting || branchA.WaitingReason != model.WaitingReasonInput {
+		t.Fatalf("branch a = %s/%s, want waiting/input", branchA.Status, branchA.WaitingReason)
+	}
+
+	if gotPath != "/notify/"+branchA.ID {
+		t.Errorf("notify path = %q, want /notify/%s", gotPath, branchA.ID)
+	}
+	if gotBody["branch_id"] != branchA.ID {
+		t.Errorf("body.branch_id = %v, want %s", gotBody["branch_id"], branchA.ID)
+	}
+	if gotBody["instance"] != instanceID {
+		t.Errorf("body.instance = %v, want %s", gotBody["instance"], instanceID)
+	}
+	if gotBody["node"] != notify {
+		t.Errorf("body.node = %v, want %s", gotBody["node"], notify)
+	}
+	if gotBody["name"] != "a" {
+		t.Errorf("body.name = %v, want a", gotBody["name"])
+	}
+	exs, err := prepo.ListExecutions(ctx, instanceID)
+	if err != nil || len(exs) != 1 {
+		t.Fatalf("ListExecutions() = %d, %v", len(exs), err)
+	}
+	if gotBody["exec"] != exs[0].ID {
+		t.Errorf("body.exec = %v, want %s", gotBody["exec"], exs[0].ID)
+	}
+
+	var bctx map[string]any
+	if err := json.Unmarshal(branchA.Context, &bctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"workflow_instance_id", "node_instance_id", "branch_id", "parallel_execution_id", "branch_name", "branch_index", "node_id", "meta"} {
+		if _, ok := bctx[k]; ok {
+			t.Errorf("%s leaked into branch context", k)
+		}
+	}
+	// Loop closure: the notified branch_id is accepted by DeliverInput.
+	// Proven at the service layer by TestDeliverBranchInputWakesBranch;
+	// this package cannot import the service (import cycle).
 }
 
 func TestEnginePollerExhaustionFails(t *testing.T) {

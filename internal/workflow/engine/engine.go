@@ -189,7 +189,7 @@ func (e *Engine) enterGroup(ctx context.Context, sc *execScope, g *workflowGraph
 	if err != nil {
 		return e.fail(ctx, sc, err)
 	}
-	preCtx, err := e.hooks.RunPre(ctx, nc, ctxMap)
+	preCtx, err := e.hooks.RunPre(ctx, nc, ctxMap, sc.identity(nc.ID, ""))
 	if err != nil {
 		return e.failWithContext(ctx, sc, err, ctxMap, nil)
 	}
@@ -238,7 +238,7 @@ func (e *Engine) waitInput(ctx context.Context, sc *execScope, frame *model.Fram
 	if err != nil {
 		return e.fail(ctx, sc, err)
 	}
-	preCtx, err := e.hooks.RunPre(ctx, nc, ctxMap)
+	preCtx, err := e.hooks.RunPre(ctx, nc, ctxMap, sc.identity(nc.ID, ""))
 	if err != nil {
 		return e.failWithContext(ctx, sc, err, ctxMap, nil)
 	}
@@ -533,13 +533,13 @@ func nodeResult(err error) string {
 // the attempt outcome, and commits the next cursor transition. Exited groups
 // run their post hooks innermost-first before the checkpoint.
 func (e *Engine) executeStep(ctx context.Context, sc *execScope, g *workflowGraph, frame *model.Frame, counters model.Counters, nc *model.NodeContent, attempt *model.NodeInstance, startCtx map[string]any, ctxMap map[string]any) error {
-	preCtx, err := e.hooks.RunPre(ctx, nc, ctxMap)
+	preCtx, err := e.hooks.RunPre(ctx, nc, ctxMap, sc.identity(nc.ID, attempt.ID))
 	if err != nil {
 		return e.failNode(ctx, sc, attempt, startCtx, ctxMap, err)
 	}
 	ctxMap = preCtx
 
-	req := executor.Request{Node: nc, Context: ctxMap, IdempotencyKey: sc.idempotencyKey(attempt.ID), InstanceID: sc.instanceID, NodeInstanceID: attempt.ID}
+	req := executor.Request{Node: nc, Context: ctxMap, IdempotencyKey: sc.idempotencyKey(attempt.ID), InstanceID: sc.instanceID, NodeInstanceID: attempt.ID, BranchID: sc.branchID, ParallelExecutionID: sc.executionID, BranchName: sc.branchName, BranchIndex: sc.branchIndex}
 	if nc.InputData != nil {
 		v, err := contextpath.Get(ctxMap, *nc.InputData)
 		if err != nil {
@@ -597,7 +597,7 @@ func (e *Engine) executeStep(ctx context.Context, sc *execScope, g *workflowGrap
 		hookOutput = res.Output
 	}
 
-	postCtx, err := e.hooks.RunPost(ctx, nc, outCtx, hookOutput)
+	postCtx, err := e.hooks.RunPost(ctx, nc, outCtx, hookOutput, req.Identity())
 	if err != nil {
 		return e.failNode(ctx, sc, attempt, startCtx, outCtx, err)
 	}
@@ -637,7 +637,7 @@ func (e *Engine) executeStep(ctx context.Context, sc *execScope, g *workflowGrap
 	}
 	finalCtx := outCtx
 	if len(exited) > 0 {
-		finalCtx, err = kernel.RunExitedGroupPosts(ctx, e.hooks, g, exited, outCtx)
+		finalCtx, err = kernel.RunExitedGroupPosts(ctx, e.hooks, g, exited, outCtx, sc.identity(nc.ID, attempt.ID))
 		if err != nil {
 			// The child attempt is already finished; the failure is a
 			// structural hook failure. Preserve the latest context instead
@@ -746,7 +746,7 @@ func (e *Engine) routeFailure(ctx context.Context, sc *execScope, g *workflowGra
 	}
 	finalCtx := outCtx
 	if len(exited) > 0 {
-		finalCtx, err = kernel.RunExitedGroupPosts(ctx, e.hooks, g, exited, outCtx)
+		finalCtx, err = kernel.RunExitedGroupPosts(ctx, e.hooks, g, exited, outCtx, sc.identity(nc.ID, attempt.ID))
 		if err != nil {
 			return e.failWithContext(ctx, sc, err, finalCtx, &contextCommit{
 				start:        startCtx,

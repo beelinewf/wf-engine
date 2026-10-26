@@ -48,7 +48,9 @@ func (e *Engine) joinParallel(ctx context.Context, sc *execScope, g *workflowGra
 	if err != nil {
 		return e.failJoin(ctx, sc, ex.ID, err)
 	}
-	merged, interrupted, err := e.runJoinScript(ctx, branches, nc, ctxMap, counters)
+	ident := sc.identity(nc.ID, "")
+	ident.ParallelExecutionID = ex.ID
+	merged, interrupted, err := e.runJoinScript(ctx, branches, nc, ctxMap, counters, ident)
 	if err != nil {
 		return e.failJoin(ctx, sc, ex.ID, err)
 	}
@@ -62,7 +64,7 @@ func (e *Engine) joinParallel(ctx context.Context, sc *execScope, g *workflowGra
 	}
 	finalCtx := merged
 	if len(exited) > 0 {
-		finalCtx, err = kernel.RunExitedGroupPosts(ctx, e.hooks, g, exited, merged)
+		finalCtx, err = kernel.RunExitedGroupPosts(ctx, e.hooks, g, exited, merged, ident)
 		if err != nil {
 			return e.failJoin(ctx, sc, ex.ID, err)
 		}
@@ -161,7 +163,9 @@ func (e *Engine) joinNestedParallel(ctx context.Context, sc *execScope, g *workf
 	if err != nil {
 		return e.failJoin(ctx, sc, ex.ID, err)
 	}
-	merged, interrupted, err := e.runJoinScript(ctx, branches, nc, ctxMap, counters)
+	ident := sc.identity(nc.ID, "")
+	ident.ParallelExecutionID = ex.ID
+	merged, interrupted, err := e.runJoinScript(ctx, branches, nc, ctxMap, counters, ident)
 	if err != nil {
 		return e.failJoin(ctx, sc, ex.ID, err)
 	}
@@ -180,7 +184,7 @@ func (e *Engine) joinNestedParallel(ctx context.Context, sc *execScope, g *workf
 	}
 	finalCtx := merged
 	if len(exited) > 0 {
-		finalCtx, err = kernel.RunExitedGroupPosts(ctx, e.hooks, g, exited, merged)
+		finalCtx, err = kernel.RunExitedGroupPosts(ctx, e.hooks, g, exited, merged, ident)
 		if err != nil {
 			return e.failJoin(ctx, sc, ex.ID, err)
 		}
@@ -258,7 +262,7 @@ func (e *Engine) joinableExecution(ctx context.Context, sc *execScope, endNodeID
 // runJoinScript records the join visit and runs combining_script over the
 // frozen branch view. It reports interrupted when the context died before
 // anything committed, so the caller releases the claim for a re-drive.
-func (e *Engine) runJoinScript(ctx context.Context, branches []model.ParallelBranch, nc *model.NodeContent, ctxMap map[string]any, counters model.Counters) (map[string]any, bool, error) {
+func (e *Engine) runJoinScript(ctx context.Context, branches []model.ParallelBranch, nc *model.NodeContent, ctxMap map[string]any, counters model.Counters, ident executor.Identity) (map[string]any, bool, error) {
 	if err := counters.Record(nc.ID, e.limits); err != nil {
 		return nil, false, err
 	}
@@ -281,6 +285,7 @@ func (e *Engine) runJoinScript(ctx context.Context, branches []model.ParallelBra
 		Timeout:    e.limits.ConditionTimeout,
 		Vars:       map[string]any{"branch": view},
 		FrozenVars: []string{"branch"},
+		Meta:       ident.Meta(),
 	})
 	if err != nil {
 		if ctx.Err() != nil {

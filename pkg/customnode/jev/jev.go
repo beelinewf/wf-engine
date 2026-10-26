@@ -446,10 +446,7 @@ func (e *Executor) Execute(ctx context.Context, req executor.Request) (*executor
 	if !ok {
 		return nil, fmt.Errorf("jev: node custom config has unexpected type %T", req.Node.Custom)
 	}
-	tplCtx := req.Context
-	if tplCtx == nil {
-		tplCtx = map[string]any{}
-	}
+	tplCtx := req.TemplateData()
 	apiKey, err := renderAPIKey(cfg.APIKey, tplCtx)
 	if err != nil {
 		return fail(req, "jev", fmt.Errorf("api_key: %w", err))
