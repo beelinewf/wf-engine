@@ -77,7 +77,7 @@ func (s *workflowDefinitionService) Create(ctx context.Context, req CreateWorkfl
 	}
 	wc, err := model.ParseWorkflowContent(req.Content, s.limits)
 	if err != nil {
-		return model.WorkflowDefinition{}, fmt.Errorf("%w: %v", model.ErrInvalid, err)
+		return model.WorkflowDefinition{}, fmt.Errorf("%w: %w", model.ErrInvalid, err)
 	}
 	// Resolving the references validates that every node_definition_id
 	// exists and merges cleanly; the authored content is stored as-is.
@@ -245,11 +245,11 @@ func (s *workflowDefinitionService) Resolve(ctx context.Context, defID string) (
 		}
 		wc, err := model.ParseWorkflowContent(def.Content, s.limits)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %v", model.ErrInvalid, err)
+			return nil, fmt.Errorf("%w: %w", model.ErrInvalid, err)
 		}
 		wc, err = s.Materialize(ctx, wc)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %v", model.ErrInvalid, err)
+			return nil, fmt.Errorf("%w: %w", model.ErrInvalid, err)
 		}
 		return wc, nil
 	})

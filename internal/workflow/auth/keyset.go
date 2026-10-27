@@ -54,9 +54,20 @@ type ttlKeySet struct {
 	// that path independently: a rotation re-read is worth spending the
 	// first time, but not once per bad token.
 	rereadAt time.Time
-	// refreshing serializes a refetch so a burst of requests arriving on a
-	// stale cache produces one outbound fetch, not one each.
-	refreshing sync.Mutex
+	// callsMu guards call: at most one JWKS fetch is in flight, shared by
+	// concurrent refreshers (singleflight). The fetch itself runs outside
+	// any lock so a slow provider stalls waiters on a channel, not on a
+	// mutex, and a failed fetch is shared rather than retried per waiter.
+	callsMu sync.Mutex
+	call    *refreshCall
+}
+
+// refreshCall is one in-flight JWKS fetch shared by concurrent refreshers.
+type refreshCall struct {
+	done     chan struct{}
+	keys     []jose.JSONWebKey
+	ok       bool
+	rotation bool
 }
 
 // newTTLKeySet wraps the provider's JWKS in a lifetime bound. A ttl at or
@@ -159,13 +170,53 @@ func (k *ttlKeySet) stale() bool {
 // previous keys in place, so callers holding a still-valid token keep working
 // instead of the whole deployment losing authentication at once.
 func (k *ttlKeySet) refresh(ctx context.Context) {
-	k.refreshing.Lock()
-	defer k.refreshing.Unlock()
-	// Another goroutine may have refreshed while this one queued.
 	if !k.stale() {
 		return
 	}
-	k.replace(ctx, false)
+	k.doRefresh(ctx, false, k.stale)
+}
+
+// doRefresh runs one shared JWKS fetch, joining the in-flight call when
+// another refresher already started one. The fetch runs outside any lock.
+// recheck re-validates the need after acquiring the call lock, so a
+// refresher that queued behind a completed fetch does not start another.
+func (k *ttlKeySet) doRefresh(ctx context.Context, rotation bool, recheck func() bool) {
+	k.callsMu.Lock()
+	if k.call != nil {
+		cl := k.call
+		if rotation {
+			cl.rotation = true
+		}
+		k.callsMu.Unlock()
+		<-cl.done
+		return
+	}
+	if !recheck() {
+		k.callsMu.Unlock()
+		return
+	}
+	cl := &refreshCall{done: make(chan struct{}), rotation: rotation}
+	k.call = cl
+	k.callsMu.Unlock()
+
+	keys, ok := k.fetch(ctx)
+
+	k.mu.Lock()
+	if ok {
+		k.keys = keys
+		k.fetchedAt = k.now()
+		if cl.rotation {
+			k.rereadAt = k.fetchedAt
+		}
+	}
+	k.mu.Unlock()
+
+	k.callsMu.Lock()
+	k.call = nil
+	k.callsMu.Unlock()
+	cl.keys = keys
+	cl.ok = ok
+	close(cl.done)
 }
 
 // refreshForRotation re-reads the JWKS even though the TTL has not passed,
@@ -194,33 +245,16 @@ func (k *ttlKeySet) refreshForRotation(ctx context.Context, kid string) {
 	if known || spent {
 		return
 	}
-	k.refreshing.Lock()
-	defer k.refreshing.Unlock()
-	// Another goroutine may have re-read while this one queued, which also
-	// covers a burst of tokens naming the same unknown kid.
-	k.mu.RLock()
-	spent = !k.rereadAt.IsZero() && k.now().Sub(k.rereadAt) < k.ttl
-	k.mu.RUnlock()
-	if spent {
-		return
-	}
-	k.replace(ctx, true)
-}
-
-// replace fetches the JWKS and swaps in the result. The caller holds
-// refreshing, so only one fetch is in flight.
-func (k *ttlKeySet) replace(ctx context.Context, rotation bool) {
-	keys, ok := k.fetch(ctx)
-	if !ok {
-		return
-	}
-	k.mu.Lock()
-	defer k.mu.Unlock()
-	k.keys = keys
-	k.fetchedAt = k.now()
-	if rotation {
-		k.rereadAt = k.fetchedAt
-	}
+	k.doRefresh(ctx, true, func() bool {
+		k.mu.RLock()
+		defer k.mu.RUnlock()
+		for _, key := range k.keys {
+			if key.KeyID == kid {
+				return false
+			}
+		}
+		return k.rereadAt.IsZero() || k.now().Sub(k.rereadAt) >= k.ttl
+	})
 }
 
 // fetch reads and parses the JWKS document.

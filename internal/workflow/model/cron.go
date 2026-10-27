@@ -31,7 +31,7 @@ func ResolveCronSpec(crontab, timezone string) (string, string, error) {
 			return "", "", fmt.Errorf("%w: invalid timezone %q", ErrInvalid, zone)
 		}
 		if _, err := CronParser().Parse(crontab); err != nil {
-			return "", "", fmt.Errorf("%w: invalid crontab: %v", ErrInvalid, err)
+			return "", "", fmt.Errorf("%w: invalid crontab: %w", ErrInvalid, err)
 		}
 		return crontab, zone, nil
 	}
@@ -44,7 +44,7 @@ func ResolveCronSpec(crontab, timezone string) (string, string, error) {
 	}
 	spec := "CRON_TZ=" + tz + " " + crontab
 	if _, err := CronParser().Parse(spec); err != nil {
-		return "", "", fmt.Errorf("%w: invalid crontab: %v", ErrInvalid, err)
+		return "", "", fmt.Errorf("%w: invalid crontab: %w", ErrInvalid, err)
 	}
 	return spec, tz, nil
 }

@@ -2,6 +2,7 @@ package model
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -98,6 +99,22 @@ func sharedNodeDefs() map[string]any {
 	}
 }
 
+// setGroupChildRef points the group schema's nodes.items at the shared
+// childNode ref. It returns a descriptive error when the hand-authored
+// group document drifts from the expected shape.
+func setGroupChildRef(groupBody map[string]any) error {
+	props, ok := groupBody["properties"].(map[string]any)
+	if !ok {
+		return errors.New("model: group node schema has no properties object")
+	}
+	nodes, ok := props["nodes"].(map[string]any)
+	if !ok {
+		return errors.New("model: group node schema has no nodes object under properties")
+	}
+	nodes["items"] = map[string]any{"$ref": "#/$defs/childNode"}
+	return nil
+}
+
 // mustBuildBuiltinNodeSchemas decodes the hand-authored per-type schemas,
 // injects the shared $defs, expands the group children, and compile-checks
 // every result. A broken hand-authored schema is a programming bug, so it
@@ -133,7 +150,9 @@ func mustBuildBuiltinNodeSchemas() map[string]json.RawMessage {
 	// copy of it carrying $defs, which keeps the two from forming a cycle
 	// once groupNode sits among those same $defs.
 	groupBody := docs[string(NodeTypeGroup)]
-	groupBody["properties"].(map[string]any)["nodes"].(map[string]any)["items"] = map[string]any{"$ref": "#/$defs/childNode"}
+	if err := setGroupChildRef(groupBody); err != nil {
+		panic(err.Error())
+	}
 	groupDefs := sharedNodeDefs()
 
 	for nodeType, doc := range docs {

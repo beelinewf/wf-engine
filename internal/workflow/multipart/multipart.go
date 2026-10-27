@@ -119,7 +119,7 @@ func Build(ctx context.Context, mr *stdmultipart.Reader, node *model.NodeContent
 			break
 		}
 		if err != nil {
-			return res, fmt.Errorf("%w: cannot read multipart body: %v", model.ErrBadRequest, err)
+			return res, fmt.Errorf("%w: cannot read multipart body: %w", model.ErrBadRequest, err)
 		}
 		name, err := normalizeFieldName(part.FormName())
 		if err != nil {
@@ -238,7 +238,7 @@ func appendText(part *stdmultipart.Part, fields map[string]*fieldAcc, name strin
 	}
 	data, err := io.ReadAll(io.LimitReader(part, limits.MaxTextBytes+1))
 	if err != nil {
-		return fmt.Errorf("%w: cannot read multipart field %q: %v", model.ErrBadRequest, name, err)
+		return fmt.Errorf("%w: cannot read multipart field %q: %w", model.ErrBadRequest, name, err)
 	}
 	if int64(len(data)) > limits.MaxTextBytes {
 		return fmt.Errorf("%w: field %q exceeds %d bytes", model.ErrPayloadTooLarge, name, limits.MaxTextBytes)
@@ -262,7 +262,7 @@ func uploadFile(ctx context.Context, part *stdmultipart.Part, filename string, n
 	var ref FileRef
 	peek, err := readPeek(part)
 	if err != nil {
-		return ref, "", 0, fmt.Errorf("%w: cannot read multipart file %q: %v", model.ErrBadRequest, filename, err)
+		return ref, "", 0, fmt.Errorf("%w: cannot read multipart file %q: %w", model.ErrBadRequest, filename, err)
 	}
 	effective := effectiveMIMEType(peek, part.Header.Get("Content-Type"))
 	if !mimeAllowed(node.Storage.AllowedMIMETypes, effective) {

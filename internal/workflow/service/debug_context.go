@@ -61,13 +61,13 @@ func (s *instanceService) DebugContext(ctx context.Context, instanceID, nodeID s
 	}
 
 	var nodeInst *model.NodeInstance
-	nc, err := graph.Node(target)
+	nc, err := graph.FindNode(target)
 	if err != nil {
 		occ, gerr := s.instances.GetNodeInstance(ctx, instanceID, target)
 		if gerr != nil {
 			return nil, fmt.Errorf("%w: node %q does not exist in instance %s", model.ErrNotFound, target, instanceID)
 		}
-		nc, err = graph.Node(occ.NodeID)
+		nc, err = graph.FindNode(occ.NodeID)
 		if err != nil {
 			return nil, fmt.Errorf("%w: node %q does not exist in instance %s", model.ErrNotFound, target, instanceID)
 		}

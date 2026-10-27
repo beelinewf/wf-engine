@@ -9,6 +9,7 @@ import (
 	"github.com/beelinewf/wf-engine/internal/workflow/defcache"
 	"github.com/beelinewf/wf-engine/internal/workflow/metrics"
 	"github.com/beelinewf/wf-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/pump"
 	"github.com/beelinewf/wf-engine/internal/workflow/repository"
 	"github.com/panjf2000/ants/v2"
 )
@@ -89,7 +90,7 @@ func NewDispatcher(ctx context.Context, repo repository.StatusUpdateRepository, 
 	if opts.PoolSize <= 0 {
 		opts.PoolSize = 20
 	}
-	pool, err := ants.NewPool(opts.PoolSize, ants.WithNonblocking(false))
+	pool, err := ants.NewPool(opts.PoolSize, ants.WithNonblocking(true))
 	if err != nil {
 		return nil, err
 	}
@@ -124,31 +125,16 @@ func (d *Dispatcher) claimLoop() {
 			return
 		case <-ticker.C:
 		}
-		claimed, err := d.repo.ClaimNextStatusUpdates(d.ctx, d.workerID, d.lease, d.batchSize)
-		if err != nil {
-			if d.ctx.Err() == nil {
-				slog.Warn("status update claim failed", "worker", d.workerID, "error", err)
-			}
-			continue
-		}
-		for _, ev := range claimed {
-			ev := ev
-			d.wg.Add(1)
-			err := d.pool.Submit(func() {
-				defer d.wg.Done()
-				if err := d.deliver(ev); err != nil && d.ctx.Err() == nil {
+		pump.Batch(d.ctx, &d.wg, d.pool, d.workerID, "status update",
+			func(ctx context.Context) ([]repository.PendingStatusUpdate, error) {
+				return d.repo.ClaimNextStatusUpdates(ctx, d.workerID, d.lease, d.batchSize)
+			},
+			func(ctx context.Context, ev repository.PendingStatusUpdate) {
+				if err := d.deliver(ev); err != nil && ctx.Err() == nil {
 					slog.Warn("status update delivery failed", "worker", d.workerID, "event", ev.ID, "error", err)
 				}
-			})
-			if err != nil {
-				d.wg.Done()
-				// Pool closed (shutdown): deliver inline rather than
-				// dropping the claim.
-				if err := d.deliver(ev); err != nil && d.ctx.Err() == nil {
-					slog.Warn("status update inline delivery failed", "worker", d.workerID, "event", ev.ID, "error", err)
-				}
-			}
-		}
+			},
+			nil)
 	}
 }
 

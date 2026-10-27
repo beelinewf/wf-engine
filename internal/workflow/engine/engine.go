@@ -598,6 +598,49 @@ func resolveNext(g *workflowGraph, nc *model.NodeContent, ctxMap map[string]any,
 	return next, outCtx, hookOutput, nil
 }
 
+// contextAfterPolicy selects how persistContextAfter handles an
+// unserializable end context in full mode. Success paths fail: persisting a
+// fallback would hide corruption in a finished attempt. Failure paths fall
+// back to the pre-transition context, which derives from stored JSON and is
+// JSON-clean by construction.
+type contextAfterPolicy int
+
+const (
+	failOnUnserializable contextAfterPolicy = iota
+	fallbackToStart
+)
+
+// persistContextAfter stamps the context-after snapshot (lean diff or full
+// copy) onto the attempt. In lean mode a diff failure is returned under
+// both policies; in full mode an unserializable end context either fails
+// or falls back to startCtx per policy.
+func persistContextAfter(attempt *model.NodeInstance, startCtx, endCtx map[string]any, contextMode string, policy contextAfterPolicy) error {
+	if contextMode == "lean" {
+		diff, err := contextdiff.DiffMaps(startCtx, endCtx)
+		if err != nil {
+			return err
+		}
+		attempt.ContextBefore = json.RawMessage("null")
+		attempt.ContextAfter = diff.JSON()
+		return nil
+	}
+	ctxAfter, err := marshal(endCtx)
+	if err != nil {
+		if policy == failOnUnserializable {
+			return err
+		}
+		// endCtx itself is unserializable (a rejected executor value was
+		// already merged in): fall back to the pre-transition context.
+		// Never guess-persist.
+		ctxAfter, err = marshal(startCtx)
+		if err != nil {
+			return err
+		}
+	}
+	attempt.ContextAfter = ctxAfter
+	return nil
+}
+
 // finishAttempt stamps a successful outcome onto the attempt: serialized
 // output plus the context-after snapshot (lean diff or full copy). The
 // caller persists the row and emits the finished event; a returned error
@@ -609,19 +652,8 @@ func finishAttempt(attempt *model.NodeInstance, output any, startCtx, outCtx map
 		return err
 	}
 	attempt.Output = encoded
-	if contextMode == "lean" {
-		diff, err := contextdiff.DiffMaps(startCtx, outCtx)
-		if err != nil {
-			return err
-		}
-		attempt.ContextBefore = json.RawMessage("null")
-		attempt.ContextAfter = diff.JSON()
-	} else {
-		ctxAfter, err := marshal(outCtx)
-		if err != nil {
-			return err
-		}
-		attempt.ContextAfter = ctxAfter
+	if err := persistContextAfter(attempt, startCtx, outCtx, contextMode, failOnUnserializable); err != nil {
+		return err
 	}
 	attempt.FinishedAt = &now
 	attempt.UpdatedAt = now
@@ -707,19 +739,8 @@ func (e *Engine) routeFailure(ctx context.Context, sc *execScope, g *workflowGra
 	} else {
 		attempt.Output = json.RawMessage("null")
 	}
-	if sc.contextMode == "lean" {
-		diff, err := contextdiff.DiffMaps(startCtx, outCtx)
-		if err != nil {
-			return e.failNode(ctx, sc, attempt, startCtx, outCtx, err)
-		}
-		attempt.ContextBefore = json.RawMessage("null")
-		attempt.ContextAfter = diff.JSON()
-	} else {
-		ctxAfter, err := marshal(outCtx)
-		if err != nil {
-			return e.failNode(ctx, sc, attempt, startCtx, outCtx, err)
-		}
-		attempt.ContextAfter = ctxAfter
+	if err := persistContextAfter(attempt, startCtx, outCtx, sc.contextMode, fallbackToStart); err != nil {
+		return e.failNode(ctx, sc, attempt, startCtx, outCtx, err)
 	}
 	attempt.FinishedAt = &now
 	attempt.UpdatedAt = now
@@ -748,26 +769,8 @@ func (e *Engine) failNode(ctx context.Context, sc *execScope, attempt *model.Nod
 	now := e.now()
 	attempt.Status = model.NodeFailed
 	attempt.Error = cause.Error()
-	if sc.contextMode == "lean" {
-		diff, err := contextdiff.DiffMaps(startCtx, ctxMap)
-		if err != nil {
-			return err
-		}
-		attempt.ContextBefore = json.RawMessage("null")
-		attempt.ContextAfter = diff.JSON()
-	} else {
-		ctxAfter, err := marshal(ctxMap)
-		if err != nil {
-			// ctxMap itself is unserializable (a rejected executor
-			// value was already merged in): fall back to the
-			// pre-transition context, which derives from stored JSON
-			// and is JSON-clean by construction. Never guess-persist.
-			ctxAfter, err = marshal(startCtx)
-			if err != nil {
-				return err
-			}
-		}
-		attempt.ContextAfter = ctxAfter
+	if err := persistContextAfter(attempt, startCtx, ctxMap, sc.contextMode, fallbackToStart); err != nil {
+		return err
 	}
 	attempt.FinishedAt = &now
 	attempt.UpdatedAt = now
@@ -895,19 +898,38 @@ func (e *Engine) checkpointAt(ctx context.Context, sc *execScope, frame *model.F
 	if sc.isBranch() {
 		return e.branchCheckpoint(ctx, sc, frame, counters, ctxMap, status, reason, errMsg, runAt)
 	}
-	var history *model.NodeContextHistory
-	var err error
-	if sc.contextMode == "lean" {
-		history, err = e.historyForCommit(ctx, sc, commit, ctxMap)
-		if err != nil {
-			return err
-		}
-	}
-	ctxRaw, err := marshal(ctxMap)
+	cp, err := e.buildParentCheckpoint(ctx, sc, frame, counters, ctxMap, status, reason, errMsg, finished, commit, runAt)
 	if err != nil {
 		return err
 	}
-	cp := repository.Checkpoint{
+	if err := e.checkpointWithRetry(ctx, sc, &cp); err != nil {
+		return err
+	}
+	e.recordTerminal(ctx, sc, status, finished)
+	if status == model.WorkflowPaused && reason != model.WaitingReasonInput && sc.debug && !sc.pauseRequested {
+		// The checkpoint releases the lease, so append outside the
+		// cancelled Process scope to survive dispatcher shutdown.
+		_ = e.appendEvent(context.WithoutCancel(ctx), sc, "paused", map[string]any{"debug": true, "node_id": commitNodeID(commit)})
+	}
+	return nil
+}
+
+// buildParentCheckpoint assembles the parent checkpoint row: lean history,
+// marshalled context, and the fenced write fields. It performs no writes.
+func (e *Engine) buildParentCheckpoint(ctx context.Context, sc *execScope, frame *model.Frame, counters model.Counters, ctxMap map[string]any, status model.WorkflowStatus, reason model.WaitingReason, errMsg string, finished *time.Time, commit *contextCommit, runAt *time.Time) (repository.Checkpoint, error) {
+	var history *model.NodeContextHistory
+	if sc.contextMode == "lean" {
+		h, err := e.historyForCommit(ctx, sc, commit, ctxMap)
+		if err != nil {
+			return repository.Checkpoint{}, err
+		}
+		history = h
+	}
+	ctxRaw, err := marshal(ctxMap)
+	if err != nil {
+		return repository.Checkpoint{}, err
+	}
+	return repository.Checkpoint{
 		InstanceID:           sc.instanceID,
 		WorkerID:             sc.leasedBy,
 		Revision:             sc.revision,
@@ -924,8 +946,15 @@ func (e *Engine) checkpointAt(ctx context.Context, sc *execScope, frame *model.F
 		FinishedAt:           finished,
 		RunAt:                runAt,
 		History:              history,
-	}
-	err = e.instances.Checkpoint(ctx, cp)
+	}, nil
+}
+
+// checkpointWithRetry commits the parent checkpoint under the worker's lease,
+// re-issuing on revision conflict against the fresh row (no re-execution).
+// Lease loss and exhausted conflicts are absorbed (nil) so the worker never
+// wedges while holding a lease; other errors are returned.
+func (e *Engine) checkpointWithRetry(ctx context.Context, sc *execScope, cp *repository.Checkpoint) error {
+	err := e.instances.Checkpoint(ctx, *cp)
 	if errors.Is(err, repository.ErrLeaseLost) {
 		// Stop won the race; the worker is fenced and aborts silently.
 		return nil
@@ -956,7 +985,7 @@ func (e *Engine) checkpointAt(ctx context.Context, sc *execScope, frame *model.F
 		if cp.Status == model.WorkflowWaiting || cp.Status == model.WorkflowPaused {
 			cp.Status = e.nextStatus(sc)
 		}
-		err = e.instances.Checkpoint(ctx, cp)
+		err = e.instances.Checkpoint(ctx, *cp)
 		if errors.Is(err, repository.ErrLeaseLost) {
 			return nil
 		}
@@ -970,16 +999,7 @@ func (e *Engine) checkpointAt(ctx context.Context, sc *execScope, frame *model.F
 			"instance", sc.instanceID, "attempts", maxCheckpointAttempts, "revision", sc.revision)
 		return nil
 	}
-	if err != nil {
-		return err
-	}
-	e.recordTerminal(ctx, sc, status, finished)
-	if status == model.WorkflowPaused && reason != model.WaitingReasonInput && sc.debug && !sc.pauseRequested {
-		// The checkpoint releases the lease, so append outside the
-		// cancelled Process scope to survive dispatcher shutdown.
-		_ = e.appendEvent(context.WithoutCancel(ctx), sc, "paused", map[string]any{"debug": true, "node_id": commitNodeID(commit)})
-	}
-	return nil
+	return err
 }
 
 // recordTerminal counts one terminal parent checkpoint and its end-to-end
@@ -1251,11 +1271,7 @@ func newAttempt(instanceID, branchID string, nc *model.NodeContent, now time.Tim
 }
 
 func newID() string {
-	id, err := ids.New()
-	if err != nil {
-		panic(err)
-	}
-	return id.String()
+	return ids.MustString()
 }
 
 // marshal encodes v for persistence. It returns an error instead of a

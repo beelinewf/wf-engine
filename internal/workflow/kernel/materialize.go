@@ -42,7 +42,7 @@ func (m *Materializer) Materialize(ctx context.Context, wc *model.WorkflowConten
 		StatusUpdate: wc.StatusUpdate,
 	}
 	if err := model.ValidateWorkflowContent(materialized, m.limits.Parallel); err != nil {
-		return nil, fmt.Errorf("%w: %v", model.ErrInvalid, err)
+		return nil, fmt.Errorf("%w: %w", model.ErrInvalid, err)
 	}
 	return materialized, nil
 }
@@ -51,11 +51,11 @@ func (m *Materializer) materializeNode(ctx context.Context, n *model.NodeContent
 	if n.NodeDefinitionID != "" {
 		def, err := m.nodeRepo.GetByID(ctx, n.NodeDefinitionID)
 		if err != nil {
-			return nil, fmt.Errorf("%w: node definition %s: %v", model.ErrInvalid, n.NodeDefinitionID, err)
+			return nil, fmt.Errorf("%w: node definition %s: %w", model.ErrInvalid, n.NodeDefinitionID, err)
 		}
 		dc, err := model.ParseNodeContent(def.Content, m.limits)
 		if err != nil {
-			return nil, fmt.Errorf("%w: node definition %s content is invalid: %v", model.ErrInvalid, n.NodeDefinitionID, err)
+			return nil, fmt.Errorf("%w: node definition %s content is invalid: %w", model.ErrInvalid, n.NodeDefinitionID, err)
 		}
 		if NodeCarriesKeys(dc) {
 			return nil, fmt.Errorf("%w: node definition %s cannot carry workflow or group keys", model.ErrInvalid, n.NodeDefinitionID)

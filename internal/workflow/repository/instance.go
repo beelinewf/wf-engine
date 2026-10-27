@@ -93,7 +93,9 @@ type InputCompletion struct {
 
 // ContextUpdate is an atomic replacement of a paused instance's context: the
 // context column, revision, and a context_updated audit event change together
-// under a status = paused guard.
+// under a status = paused guard. Concurrent replacements last-win: there is
+// no revision precondition, so two overlapping PUTs serialize and the later
+// commit silently overwrites the earlier one.
 type ContextUpdate struct {
 	InstanceID string
 	Context    json.RawMessage
@@ -151,11 +153,7 @@ type MigrateUpdate struct {
 var errDeliveryExists = errors.New("repository: input delivery already exists")
 
 func newRepoID() string {
-	id, err := ids.NewString()
-	if err != nil {
-		panic(err)
-	}
-	return id
+	return ids.MustString()
 }
 
 // inputReceivedData builds the audit payload of an input_received event: the

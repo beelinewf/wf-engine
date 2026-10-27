@@ -327,11 +327,14 @@ func (e *PollerExecutor) redisSub(ctx context.Context, req Request, cfg *model.P
 	go func() { subDone <- e.redis.Subscribe(waitCtx, channel, handler) }()
 	select {
 	case r := <-results:
+		cancel()
+		<-subDone
 		if r.err != nil {
 			return nil, &NodeError{Node: req.Node, Reason: "poller-until", Err: r.err}
 		}
 		return &Result{Output: r.resp}, nil
 	case <-waitCtx.Done():
+		<-subDone
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
@@ -421,6 +424,7 @@ func (e *PollerExecutor) pollRabbit(ctx context.Context, req Request) (*Result, 
 		}
 		return &Result{Output: r.resp}, nil
 	case <-waitCtx.Done():
+		<-consumeDone
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}

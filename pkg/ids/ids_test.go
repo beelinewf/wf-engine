@@ -77,3 +77,10 @@ func TestValid(t *testing.T) {
 		t.Error("Valid(\"\") = true, want false")
 	}
 }
+
+func TestMustStringReturnsValidUUID(t *testing.T) {
+	s := ids.MustString()
+	if !ids.Valid(s) {
+		t.Errorf("MustString() = %q, want valid canonical uuid", s)
+	}
+}

@@ -507,3 +507,38 @@ func TestRefreshLoopSweepsOldClaims(t *testing.T) {
 		return len(repo.fires) == 0
 	}, "sweep of stale claim")
 }
+
+// slowListRepo delays List so lock-held loads are observable: concurrent
+// Refresh calls must load in parallel, not serialize on the scheduler lock.
+type slowListRepo struct {
+	*fakeScheduleRepo
+	delay time.Duration
+}
+
+func (r *slowListRepo) List(ctx context.Context, q repository.ScheduleListQuery) ([]model.CronSchedule, int64, error) {
+	time.Sleep(r.delay)
+	return r.fakeScheduleRepo.List(ctx, q)
+}
+
+func TestConcurrentRefreshLoadsInParallel(t *testing.T) {
+	repo := &slowListRepo{fakeScheduleRepo: newFakeScheduleRepo(), delay: 200 * time.Millisecond}
+	inst := &fakeInstanceSvc{}
+	s := scheduler.New(context.Background(), repo, inst, "test-worker", scheduler.SchedulerOptions{})
+	if err := s.Run(); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	defer shutdown(t, s)
+	var wg sync.WaitGroup
+	start := time.Now()
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s.Refresh()
+		}()
+	}
+	wg.Wait()
+	if elapsed := time.Since(start); elapsed > 350*time.Millisecond {
+		t.Errorf("2 concurrent Refresh took %v, want ~200ms (parallel loads, not serialized)", elapsed)
+	}
+}

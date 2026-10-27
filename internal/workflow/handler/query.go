@@ -14,9 +14,11 @@ import (
 )
 
 const (
-	maxPerPage     = 200
-	defaultPerPage = 50
-	maxIDFilters   = 100
+	maxPerPage       = 200
+	defaultPerPage   = 50
+	maxIDFilters     = 100
+	maxPage          = 10000
+	maxStatusFilters = 100
 )
 
 // ListKind selects the order/type allowlist for a definition list endpoint.
@@ -51,8 +53,8 @@ func parsePagination(c *gin.Context) (int, int, error) {
 	perPage := defaultPerPage
 	if v := c.Query("page"); v != "" {
 		n, err := strconv.Atoi(v)
-		if err != nil || n < 1 {
-			return 0, 0, fmt.Errorf("query: page must be an integer >= 1, got %q", v)
+		if err != nil || n < 1 || n > maxPage {
+			return 0, 0, fmt.Errorf("query: page must be an integer in [1,%d], got %q", maxPage, v)
 		}
 		page = n
 	}
@@ -200,6 +202,9 @@ func ParseInstanceListQuery(c *gin.Context) (*InstanceListQuery, error) {
 	}
 	statusesRaw, ok := c.GetQueryArray("status")
 	if ok {
+		if len(statusesRaw) > maxStatusFilters {
+			return nil, fmt.Errorf("query: at most %d status filters allowed", maxStatusFilters)
+		}
 		for _, s := range statusesRaw {
 			if !model.ValidWorkflowStatus(model.WorkflowStatus(s)) {
 				return nil, fmt.Errorf("query: status %q is not a valid workflow status", s)

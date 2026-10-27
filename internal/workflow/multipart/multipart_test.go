@@ -679,3 +679,23 @@ func TestBuildRequiresNodeStorage(t *testing.T) {
 		t.Fatal("result is nil, want a non-nil result even on failure")
 	}
 }
+
+type failingBody struct{ err error }
+
+func (f *failingBody) Read([]byte) (int, error) { return 0, f.err }
+
+func TestBuildPreservesBodyReadCauseChain(t *testing.T) {
+	cause := fmt.Errorf("boom: %w", io.ErrUnexpectedEOF)
+	mr := stdmultipart.NewReader(&failingBody{err: cause}, "boundary")
+	node := testNode(t, multipartNode)
+	_, err := multipart.Build(context.Background(), mr, node, newFakeStore(), multipart.DefaultLimits())
+	if err == nil {
+		t.Fatal("Build() error = nil, want body read failure")
+	}
+	if !errors.Is(err, model.ErrBadRequest) {
+		t.Errorf("errors.Is(err, ErrBadRequest) = false, want true (%v)", err)
+	}
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Errorf("errors.Is(err, cause) = false, want cause chain preserved (%v)", err)
+	}
+}

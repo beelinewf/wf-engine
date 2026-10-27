@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -219,7 +218,7 @@ func TestDatabaseOptions(t *testing.T) {
 	}
 
 	t.Setenv("BEELINEWF_INFRA_POSTGRESQL_DSN", "default-dsn")
-	loaded, err := configuration.Load(configuration.WithConfigFile(filepath.Join(t.TempDir(), "does-not-exist.yaml")))
+	loaded, err := configuration.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -243,7 +242,7 @@ func TestDatabasePoolCeiling(t *testing.T) {
 	dsn := testdb.RequireDSN(t, "app")
 
 	t.Setenv("BEELINEWF_INFRA_POSTGRESQL_DSN", dsn)
-	cfg, err := configuration.Load(configuration.WithConfigFile(filepath.Join(t.TempDir(), "does-not-exist.yaml")))
+	cfg, err := configuration.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -279,7 +278,7 @@ func TestStatusDispatcherOptions(t *testing.T) {
 	}
 
 	t.Setenv("BEELINEWF_INFRA_POSTGRESQL_DSN", "default-dsn")
-	loaded, err := configuration.Load(configuration.WithConfigFile(filepath.Join(t.TempDir(), "does-not-exist.yaml")))
+	loaded, err := configuration.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -309,7 +308,7 @@ func TestEngineDispatcherOptions(t *testing.T) {
 	}
 
 	t.Setenv("BEELINEWF_INFRA_POSTGRESQL_DSN", "default-dsn")
-	loaded, err := configuration.Load(configuration.WithConfigFile(filepath.Join(t.TempDir(), "does-not-exist.yaml")))
+	loaded, err := configuration.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -341,7 +340,7 @@ func TestNewHTTPServer(t *testing.T) {
 	}
 
 	t.Setenv("BEELINEWF_INFRA_POSTGRESQL_DSN", "default-dsn")
-	loaded, err := configuration.Load(configuration.WithConfigFile(filepath.Join(t.TempDir(), "does-not-exist.yaml")))
+	loaded, err := configuration.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}

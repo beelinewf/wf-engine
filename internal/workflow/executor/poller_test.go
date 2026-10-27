@@ -1050,3 +1050,81 @@ func TestNewExecutorsPollerWithRedisDependency(t *testing.T) {
 		t.Errorf("body = %v, want ok true", res.Output.(*executor.PollerResponse).Body)
 	}
 }
+
+// slowExitRedisSub delays Subscribe exit after ctx cancellation so a missing
+// drain is observable: Execute must wait for the consumer before returning.
+type slowExitRedisSub struct {
+	fakeRedisPoller
+	exited chan struct{}
+}
+
+func (f *slowExitRedisSub) Subscribe(ctx context.Context, channel string, handler func(ctx context.Context, channel string, payload []byte) error) error {
+	defer close(f.exited)
+	err := f.fakeRedisPoller.Subscribe(ctx, channel, handler)
+	time.Sleep(100 * time.Millisecond)
+	return err
+}
+
+func TestRedisPollerSUBMatchDrainsSubscription(t *testing.T) {
+	fake := &slowExitRedisSub{fakeRedisPoller: fakeRedisPoller{msgs: []string{`{"status":"completed"}`}}, exited: make(chan struct{})}
+	ex := newPollerExecutor(t)
+	ex.SetRedisClient(fake)
+	cfg := &model.PollerRedisConfig{
+		Method: "SUB", Channel: "c", MaxWaitTime: 5 * time.Second,
+		Until: "return response.body.status === 'completed';",
+	}
+	if _, err := ex.Execute(context.Background(), executor.Request{Node: pollerRedisGETNode(cfg), Context: map[string]any{}}); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	select {
+	case <-fake.exited:
+	default:
+		t.Error("Subscribe still running after Execute returned on match; want drained")
+	}
+}
+
+func TestRedisPollerSUBTimeoutDrainsSubscription(t *testing.T) {
+	fake := &slowExitRedisSub{fakeRedisPoller: fakeRedisPoller{}, exited: make(chan struct{})}
+	ex := newPollerExecutor(t)
+	ex.SetRedisClient(fake)
+	cfg := &model.PollerRedisConfig{
+		Method: "SUB", Channel: "c", MaxWaitTime: 50 * time.Millisecond,
+		Until: "return true;",
+	}
+	if _, err := ex.Execute(context.Background(), executor.Request{Node: pollerRedisGETNode(cfg), Context: map[string]any{}}); err == nil {
+		t.Fatal("Execute() error = nil, want timeout")
+	}
+	select {
+	case <-fake.exited:
+	default:
+		t.Error("Subscribe still running after Execute timeout; want drained")
+	}
+}
+
+// slowExitRabbitConsume delays ConsumeQueue exit after ctx cancellation.
+type slowExitRabbitConsume struct {
+	fakeRabbitPoller
+	exited chan struct{}
+}
+
+func (f *slowExitRabbitConsume) ConsumeQueue(ctx context.Context, queue, consumerTag string, handler func(msg transport.RabbitPollerMessage) (transport.RabbitPollerSettlement, error)) error {
+	defer close(f.exited)
+	err := f.fakeRabbitPoller.ConsumeQueue(ctx, queue, consumerTag, handler)
+	time.Sleep(100 * time.Millisecond)
+	return err
+}
+
+func TestRabbitPollerTimeoutDrainsConsumer(t *testing.T) {
+	fake := &slowExitRabbitConsume{fakeRabbitPoller: fakeRabbitPoller{}, exited: make(chan struct{})}
+	ex := newPollerExecutor(t)
+	ex.SetRabbitClient(fake)
+	cfg := &model.PollerRabbitMQConfig{Queue: "q", MaxWaitTime: 50 * time.Millisecond, Until: "return true;"}
+	if _, err := ex.Execute(context.Background(), executor.Request{Node: pollerRabbitNode(cfg), Context: map[string]any{}}); err == nil {
+		t.Fatal("Execute() error = nil, want timeout")
+	}
+	select {
+	case <-fake.exited:
+	default:
+		t.Error("ConsumeQueue still running after Execute timeout; want drained")
+	}
+}

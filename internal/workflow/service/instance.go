@@ -594,7 +594,7 @@ func (s *instanceService) Create(ctx context.Context, req CreateInstance) (model
 	}
 	wc, err := model.ParseWorkflowContent(def.Content, s.limits)
 	if err != nil {
-		return model.WorkflowInstance{}, fmt.Errorf("%w: %v", model.ErrInvalid, err)
+		return model.WorkflowInstance{}, fmt.Errorf("%w: %w", model.ErrInvalid, err)
 	}
 	contextRaw := req.Context
 	if len(contextRaw) == 0 || string(contextRaw) == "null" {
@@ -606,23 +606,14 @@ func (s *instanceService) Create(ctx context.Context, req CreateInstance) (model
 	}
 	// Snapshot BEELINEWF_* process env under the reserved env root so every
 	// existing {{ }} render site resolves {{ env.BEELINEWF_X }} with zero
-	// template-engine changes. Snapshot wins per key: callers cannot
-	// shadow env-provided credentials with request-body values. The
-	// caller-supplied base is stripped of denied names first, so a request
-	// body cannot smuggle a denied var past a snapshot that excluded it.
-	obj["env"] = envsnapshot.Merge(envsnapshot.StripDenied(obj["env"]), envsnapshot.Snapshot(envsnapshot.Prefix))
-	var secretSnapshot map[string]string
-	if s.secrets != nil {
-		secretSnapshot, err = s.secrets.GetAll(ctx)
-		if err != nil {
-			return model.WorkflowInstance{}, err
-		}
+	// template-engine changes.
+	if err := s.snapshotEnvSecrets(ctx, obj); err != nil {
+		return model.WorkflowInstance{}, err
 	}
-	mergeSecretSnapshot(obj, secretSnapshot)
 	if rebased, err := json.Marshal(obj); err == nil {
 		contextRaw = rebased
 	} else {
-		return model.WorkflowInstance{}, fmt.Errorf("%w: %v", model.ErrInvalid, err)
+		return model.WorkflowInstance{}, fmt.Errorf("%w: %w", model.ErrInvalid, err)
 	}
 
 	frameRaw, err := model.NewFrame(wc.StartNodeID).JSON()
@@ -633,12 +624,7 @@ func (s *instanceService) Create(ctx context.Context, req CreateInstance) (model
 	// A request carrying its own actor records that user; every other
 	// caller (a service call, a test, the broker) records the system user.
 	actor := s.actorOrDefault(req.Actor)
-	contextMode := model.ContextModeFull
-	if wc.ContextMode != nil {
-		contextMode = *wc.ContextMode
-	} else if s.leanOptions.LeanContextDefault {
-		contextMode = model.ContextModeLean
-	}
+	contextMode := s.resolveContextMode(wc)
 	w := model.WorkflowInstance{
 		ID:                   mustNewID(),
 		WorkflowDefinitionID: def.ID,
@@ -677,7 +663,7 @@ func (s *instanceService) Create(ctx context.Context, req CreateInstance) (model
 			for _, id := range formIDs {
 				f, err := s.forms.GetByID(ctx, id)
 				if err != nil {
-					return model.WorkflowInstance{}, fmt.Errorf("%w: snapshot form %q: %v", model.ErrInvalid, id, err)
+					return model.WorkflowInstance{}, fmt.Errorf("%w: snapshot form %q: %w", model.ErrInvalid, id, err)
 				}
 				if len(f.Schema) == 0 {
 					return model.WorkflowInstance{}, fmt.Errorf("%w: snapshot form %q has no schema", model.ErrInvalid, id)
@@ -699,9 +685,7 @@ func (s *instanceService) Create(ctx context.Context, req CreateInstance) (model
 		// Anchor it at create so later UpdateContext baselines and
 		// post-rollback anchors replay from the true initial object instead
 		// of an empty map.
-		anchor := leanAnchorRow(contextRaw)
-		anchor.WorkflowInstanceID = w.ID
-		if err := s.instances.AppendHistory(ctx, *anchor); err != nil {
+		if err := s.appendLeanAnchor(ctx, w.ID, contextRaw); err != nil {
 			return model.WorkflowInstance{}, err
 		}
 	}
@@ -856,7 +840,7 @@ func pendingInput(wc *model.WorkflowContent, inst *model.WorkflowInstance, curre
 		return nil
 	}
 	graph := &contentGraph{wc: wc}
-	node, err := graph.Node(currentNodeID)
+	node, err := graph.FindNode(currentNodeID)
 	if err != nil {
 		return nil
 	}
@@ -908,11 +892,49 @@ func leanMode(inst *model.WorkflowInstance) bool {
 	return inst != nil && inst.ContextMode == model.ContextModeLean
 }
 
+// resolveContextMode picks the instance context mode: the definition
+// override wins, then the global lean default, then full.
+func (s *instanceService) resolveContextMode(wc *model.WorkflowContent) string {
+	if wc.ContextMode != nil {
+		return *wc.ContextMode
+	}
+	if s.leanOptions.LeanContextDefault {
+		return model.ContextModeLean
+	}
+	return model.ContextModeFull
+}
+
+// snapshotEnvSecrets overlays fresh env and secret snapshots onto obj with
+// Create precedence: the snapshot wins per key so callers cannot shadow
+// env-provided credentials, and the caller base is stripped of denied names
+// first so a request body cannot smuggle a denied var past the snapshot.
+func (s *instanceService) snapshotEnvSecrets(ctx context.Context, obj map[string]any) error {
+	obj["env"] = envsnapshot.Merge(envsnapshot.StripDenied(obj["env"]), envsnapshot.Snapshot(envsnapshot.Prefix))
+	var secretSnapshot map[string]string
+	if s.secrets != nil {
+		var err error
+		secretSnapshot, err = s.secrets.GetAll(ctx)
+		if err != nil {
+			return err
+		}
+	}
+	mergeSecretSnapshot(obj, secretSnapshot)
+	return nil
+}
+
+// appendLeanAnchor records contextRaw as the new lean replay baseline for
+// the instance.
+func (s *instanceService) appendLeanAnchor(ctx context.Context, instanceID string, contextRaw json.RawMessage) error {
+	anchor := leanAnchorRow(contextRaw)
+	anchor.WorkflowInstanceID = instanceID
+	return s.instances.AppendHistory(ctx, *anchor)
+}
+
 // mapHistoryError maps history replay failures to 409 conflict semantics:
 // a gap or depth overflow fails closed, never with a silent wrong restore.
 func mapHistoryError(err error) error {
 	if errors.Is(err, repository.ErrHistoryGap) || errors.Is(err, repository.ErrHistoryTooDeep) {
-		return fmt.Errorf("%w: %v", model.ErrConflict, err)
+		return fmt.Errorf("%w: %w", model.ErrConflict, err)
 	}
 	return err
 }
@@ -1213,7 +1235,7 @@ func (s *instanceService) UpdateContext(ctx context.Context, req UpdateContext) 
 	mergeSecretSnapshot(obj, storedSecrets)
 	rebased, err := json.Marshal(obj)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", model.ErrInvalid, err)
+		return nil, fmt.Errorf("%w: %w", model.ErrInvalid, err)
 	}
 	req.Context = rebased
 	principal := s.requestPrincipal(req.Principal)
@@ -1238,9 +1260,7 @@ func (s *instanceService) UpdateContext(ctx context.Context, req UpdateContext) 
 	// Lean mode appends the replaced context as a new anchor baseline so
 	// later replays start from it. The prefix stays intact: no supersede.
 	if leanMode(inst) {
-		anchor := leanAnchorRow(req.Context)
-		anchor.WorkflowInstanceID = inst.ID
-		if err := s.instances.AppendHistory(ctx, *anchor); err != nil {
+		if err := s.appendLeanAnchor(ctx, inst.ID, req.Context); err != nil {
 			return nil, err
 		}
 		updated, err := s.instances.GetByID(ctx, req.InstanceID)
@@ -1269,20 +1289,20 @@ func (s *instanceService) NodeDebug(ctx context.Context, instanceID, nodeID stri
 	}
 	wc, err := model.ParseWorkflowContent(wf.Content, s.limits)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", model.ErrInvalid, err)
+		return nil, fmt.Errorf("%w: %w", model.ErrInvalid, err)
 	}
 	graph := &contentGraph{wc: wc}
 
 	// nodeID is the graph node id; an occurrence id is resolved to its graph
 	// node as a fallback.
 	var nodeInst *model.NodeInstance
-	nc, err := graph.Node(nodeID)
+	nc, err := graph.FindNode(nodeID)
 	if err != nil {
 		occ, gerr := s.instances.GetNodeInstance(ctx, instanceID, nodeID)
 		if gerr != nil {
 			return nil, fmt.Errorf("%w: node %q does not exist in instance %s", model.ErrNotFound, nodeID, instanceID)
 		}
-		nc, err = graph.Node(occ.NodeID)
+		nc, err = graph.FindNode(occ.NodeID)
 		if err != nil {
 			return nil, fmt.Errorf("%w: node %q does not exist in instance %s", model.ErrNotFound, nodeID, instanceID)
 		}
@@ -1391,25 +1411,25 @@ func (s *instanceService) leanNodeDebugContexts(ctx context.Context, inst *model
 		}
 		if row.IsAnchor {
 			if _, verr := validateRestoredObject(row.Snapshot); verr != nil {
-				return nil, nil, fmt.Errorf("%w: %v", model.ErrConflict, verr)
+				return nil, nil, fmt.Errorf("%w: %w", model.ErrConflict, verr)
 			}
 			return before, row.Snapshot, nil
 		}
 		targetDiff, derr := contextdiff.ParseDiff(row.Diff)
 		if derr != nil {
-			return nil, nil, fmt.Errorf("%w: %v", model.ErrConflict, derr)
+			return nil, nil, fmt.Errorf("%w: %w", model.ErrConflict, derr)
 		}
 		beforeMap, merr := unmarshalJSON(before)
 		if merr != nil {
-			return nil, nil, fmt.Errorf("%w: %v", model.ErrConflict, merr)
+			return nil, nil, fmt.Errorf("%w: %w", model.ErrConflict, merr)
 		}
 		afterMap, aerr := contextdiff.Apply(beforeMap, targetDiff)
 		if aerr != nil {
-			return nil, nil, fmt.Errorf("%w: %v", model.ErrConflict, aerr)
+			return nil, nil, fmt.Errorf("%w: %w", model.ErrConflict, aerr)
 		}
 		after, merr := json.Marshal(afterMap)
 		if merr != nil {
-			return nil, nil, fmt.Errorf("%w: %v", model.ErrConflict, merr)
+			return nil, nil, fmt.Errorf("%w: %w", model.ErrConflict, merr)
 		}
 		return before, after, nil
 	}
@@ -1679,7 +1699,7 @@ func (s *instanceService) Rollback(ctx context.Context, req RollbackRequest) (*R
 	if err != nil {
 		return nil, err
 	}
-	target, err := findNode(wc.Nodes, occ.NodeID)
+	target, err := (&contentGraph{wc: wc}).FindNode(occ.NodeID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: occurrence node %q is not in the workflow definition", model.ErrInvalid, occ.NodeID)
 	}
@@ -1716,9 +1736,9 @@ func (s *instanceService) Rollback(ctx context.Context, req RollbackRequest) (*R
 			return nil, fmt.Errorf("%w: input occurrence %q is not finished", model.ErrConflict, req.TargetOccurrenceID)
 		}
 	}
-	stack, err := groupStack(wc, occ.NodeID)
+	stack, err := (&contentGraph{wc: wc}).GroupStack(occ.NodeID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", model.ErrInvalid, err)
+		return nil, fmt.Errorf("%w: %w", model.ErrInvalid, err)
 	}
 	restoreCtx, restoreCursor, rerr := s.resolveRollbackContext(ctx, inst, occ, req.TargetOccurrenceID)
 	if rerr != nil {
@@ -1779,9 +1799,7 @@ func (s *instanceService) Rollback(ctx context.Context, req RollbackRequest) (*R
 		if serr := s.instances.SupersedeAfter(ctx, inst.ID, *restoreCursor); serr != nil {
 			return nil, mapHistoryError(serr)
 		}
-		anchor := leanAnchorRow(restoreCtx)
-		anchor.WorkflowInstanceID = inst.ID
-		if aerr := s.instances.AppendHistory(ctx, *anchor); aerr != nil {
+		if aerr := s.appendLeanAnchor(ctx, inst.ID, restoreCtx); aerr != nil {
 			return nil, aerr
 		}
 	}
@@ -1841,15 +1859,15 @@ func (s *instanceService) Migrate(ctx context.Context, req MigrateRequest) (*Mig
 	if err != nil {
 		return nil, err
 	}
-	if _, err := findNode(wc.Nodes, req.StartNodeID); err != nil {
+	if _, err := (&contentGraph{wc: wc}).FindNode(req.StartNodeID); err != nil {
 		return nil, fmt.Errorf("%w: start node %q is not in the target definition", model.ErrInvalid, req.StartNodeID)
 	}
 	if _, interior := model.ParallelInterior(wc)[req.StartNodeID]; interior {
 		return nil, fmt.Errorf("%w: start node %q is inside a parallel region", model.ErrInvalid, req.StartNodeID)
 	}
-	stack, err := groupStack(wc, req.StartNodeID)
+	stack, err := (&contentGraph{wc: wc}).GroupStack(req.StartNodeID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", model.ErrInvalid, err)
+		return nil, fmt.Errorf("%w: %w", model.ErrInvalid, err)
 	}
 
 	carried, err := unmarshalJSON(inst.Context)
@@ -1865,18 +1883,12 @@ func (s *instanceService) Migrate(ctx context.Context, req MigrateRequest) (*Mig
 	}
 	// Fresh snapshots apply last with Create precedence, so a patch key
 	// can neither smuggle a credential value nor pin a stale one.
-	carried["env"] = envsnapshot.Merge(envsnapshot.StripDenied(carried["env"]), envsnapshot.Snapshot(envsnapshot.Prefix))
-	var secretSnapshot map[string]string
-	if s.secrets != nil {
-		secretSnapshot, err = s.secrets.GetAll(ctx)
-		if err != nil {
-			return nil, err
-		}
+	if err := s.snapshotEnvSecrets(ctx, carried); err != nil {
+		return nil, err
 	}
-	mergeSecretSnapshot(carried, secretSnapshot)
 	contextRaw, err := json.Marshal(carried)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", model.ErrInvalid, err)
+		return nil, fmt.Errorf("%w: %w", model.ErrInvalid, err)
 	}
 
 	frameRaw, err := model.Frame{CurrentNodeID: req.StartNodeID, GroupStack: stack}.JSON()
@@ -1885,12 +1897,7 @@ func (s *instanceService) Migrate(ctx context.Context, req MigrateRequest) (*Mig
 	}
 	now := nowUTC()
 	actor := s.requestActor(req.Principal, req.Actor)
-	contextMode := model.ContextModeFull
-	if wc.ContextMode != nil {
-		contextMode = *wc.ContextMode
-	} else if s.leanOptions.LeanContextDefault {
-		contextMode = model.ContextModeLean
-	}
+	contextMode := s.resolveContextMode(wc)
 	status := model.WorkflowWaiting
 	if req.StartPaused {
 		status = model.WorkflowPaused
@@ -1939,9 +1946,7 @@ func (s *instanceService) Migrate(ctx context.Context, req MigrateRequest) (*Mig
 		return nil, err
 	}
 	if contextMode == model.ContextModeLean {
-		anchor := leanAnchorRow(contextRaw)
-		anchor.WorkflowInstanceID = w.ID
-		if err := s.instances.AppendHistory(ctx, *anchor); err != nil {
+		if err := s.appendLeanAnchor(ctx, w.ID, contextRaw); err != nil {
 			return nil, err
 		}
 	}
@@ -2006,51 +2011,9 @@ func (s *instanceService) resolveRollbackContext(ctx context.Context, inst *mode
 		return nil, nil, err
 	}
 	if _, verr := validateRestoredObject(restored); verr != nil {
-		return nil, nil, fmt.Errorf("%w: %v", model.ErrConflict, verr)
+		return nil, nil, fmt.Errorf("%w: %w", model.ErrConflict, verr)
 	}
 	return restored, &cursor, nil
-}
-
-// findNode resolves a graph node id anywhere in the materialized tree.
-func findNode(nodes []*model.NodeContent, id string) (*model.NodeContent, error) {
-	for _, n := range nodes {
-		if n.ID == id {
-			return n, nil
-		}
-		if n.Group != nil {
-			if found, err := findNode(n.Group.Nodes, id); err == nil {
-				return found, nil
-			}
-		}
-	}
-	return nil, fmt.Errorf("service: unknown node %q in workflow graph", id)
-}
-
-// groupStack recomputes the ancestor group chain of a graph node by walking
-// the materialized definition from its start node. The stack holds the
-// enclosing groups outermost-first; a top-level node yields an empty stack.
-func groupStack(wc *model.WorkflowContent, id string) ([]string, error) {
-	if id == wc.StartNodeID {
-		if _, err := findNode(wc.Nodes, id); err != nil {
-			return nil, err
-		}
-		return nil, nil
-	}
-	var walk func(nodes []*model.NodeContent, ancestors []string) ([]string, error)
-	walk = func(nodes []*model.NodeContent, ancestors []string) ([]string, error) {
-		for _, n := range nodes {
-			if n.ID == id {
-				return ancestors, nil
-			}
-			if n.Group != nil {
-				if stack, err := walk(n.Group.Nodes, append(ancestors, n.ID)); err == nil {
-					return stack, nil
-				}
-			}
-		}
-		return nil, fmt.Errorf("service: unknown node %q in workflow graph", id)
-	}
-	return walk(wc.Nodes, nil)
 }
 
 // contentGraph loads and materializes the executable graph of the
@@ -2099,7 +2062,7 @@ func (s *instanceService) replayDelivery(
 	if occ.BranchID != req.BranchID {
 		return nil, fmt.Errorf("%w: Idempotency-Key %q was already used for a different branch", model.ErrConflict, req.IdempotencyKey)
 	}
-	nc, err := graph.Node(occ.NodeID)
+	nc, err := graph.FindNode(occ.NodeID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: delivery %s targets an unknown node %q", model.ErrForbidden, existing.ID, occ.NodeID)
 	}
@@ -2139,7 +2102,7 @@ func (s *instanceService) resolveInputTarget(ctx context.Context, inst *model.Wo
 		if err != nil {
 			return nil, err
 		}
-		node, err := graph.Node(frame.CurrentNodeID)
+		node, err := graph.FindNode(frame.CurrentNodeID)
 		if err != nil {
 			return nil, err
 		}
@@ -2162,7 +2125,7 @@ func (s *instanceService) resolveInputTarget(ctx context.Context, inst *model.Wo
 	if err != nil {
 		return nil, err
 	}
-	node, err := graph.Node(frame.CurrentNodeID)
+	node, err := graph.FindNode(frame.CurrentNodeID)
 	if err != nil {
 		return nil, err
 	}
@@ -2348,7 +2311,7 @@ func (s *instanceService) buildDeliveryPayload(ctx context.Context, inputNode *m
 	}
 	mr, err := req.MultipartSource()
 	if err != nil {
-		return "", nil, fmt.Errorf("%w: cannot read multipart body: %v", model.ErrBadRequest, err)
+		return "", nil, fmt.Errorf("%w: cannot read multipart body: %w", model.ErrBadRequest, err)
 	}
 	if mr == nil {
 		return "", nil, fmt.Errorf("%w: multipart delivery needs a body source", model.ErrBadRequest)
@@ -2406,7 +2369,7 @@ func (s *instanceService) validateAndMerge(ctx context.Context, res *deliveryRes
 		BranchName: ident.BranchName, BranchIndex: ident.BranchIndex,
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("%w: input validation failed: %v", model.ErrInvalid, err)
+		return nil, nil, fmt.Errorf("%w: input validation failed: %w", model.ErrInvalid, err)
 	}
 	if !vr.Valid {
 		rejected, rerr := s.instances.DeliverInput(ctx, repository.InputCompletion{
@@ -2427,7 +2390,7 @@ func (s *instanceService) validateAndMerge(ctx context.Context, res *deliveryRes
 
 	var payload any
 	if err := json.Unmarshal(req.Payload, &payload); err != nil {
-		return nil, nil, fmt.Errorf("%w: input body must be valid JSON: %v", model.ErrInvalid, err)
+		return nil, nil, fmt.Errorf("%w: input body must be valid JSON: %w", model.ErrInvalid, err)
 	}
 	newCtx, err := cloneContext(ctxMap)
 	if err != nil {
@@ -2888,30 +2851,46 @@ type contentGraph struct {
 	wc *model.WorkflowContent
 }
 
-func (g *contentGraph) Node(id string) (*model.NodeContent, error) {
-	var walk func(nodes []*model.NodeContent) *model.NodeContent
-	walk = func(nodes []*model.NodeContent) *model.NodeContent {
-		for _, n := range nodes {
-			if n.ID == id {
-				return n
-			}
-			if n.Group != nil {
-				if found := walk(n.Group.Nodes); found != nil {
-					return found
-				}
-			}
-		}
-		return nil
-	}
-	n := walk(g.wc.Nodes)
+func (g *contentGraph) FindNode(id string) (*model.NodeContent, error) {
+	n, _ := g.findNodeAndStack(g.wc.Nodes, id, nil)
 	if n == nil {
 		return nil, fmt.Errorf("service: unknown node %q in workflow graph", id)
 	}
 	return n, nil
 }
 
+// Node implements kernel.ExitedGroupLookup.
+func (g *contentGraph) Node(id string) (*model.NodeContent, error) {
+	return g.FindNode(id)
+}
+
+func (g *contentGraph) GroupStack(id string) ([]string, error) {
+	n, stack := g.findNodeAndStack(g.wc.Nodes, id, nil)
+	if n == nil {
+		return nil, fmt.Errorf("service: unknown node %q in workflow graph", id)
+	}
+	return stack, nil
+}
+
+// findNodeAndStack walks the materialized tree once, returning the node and
+// its ancestor group chain outermost-first. A nil node means unknown id;
+// callers map that to the shared unknown-node error.
+func (g *contentGraph) findNodeAndStack(nodes []*model.NodeContent, id string, ancestors []string) (*model.NodeContent, []string) {
+	for _, n := range nodes {
+		if n.ID == id {
+			return n, ancestors
+		}
+		if n.Group != nil {
+			if found, stack := g.findNodeAndStack(n.Group.Nodes, id, append(ancestors, n.ID)); found != nil {
+				return found, stack
+			}
+		}
+	}
+	return nil, nil
+}
+
 func (g *contentGraph) TypeOf(id string) (model.NodeType, error) {
-	n, err := g.Node(id)
+	n, err := g.FindNode(id)
 	if err != nil {
 		return "", err
 	}
@@ -2919,7 +2898,7 @@ func (g *contentGraph) TypeOf(id string) (model.NodeType, error) {
 }
 
 func (g *contentGraph) NextOf(id string) (string, error) {
-	n, err := g.Node(id)
+	n, err := g.FindNode(id)
 	if err != nil {
 		return "", err
 	}
@@ -2927,7 +2906,7 @@ func (g *contentGraph) NextOf(id string) (string, error) {
 }
 
 func (g *contentGraph) StartOf(id string) (string, error) {
-	n, err := g.Node(id)
+	n, err := g.FindNode(id)
 	if err != nil {
 		return "", err
 	}

@@ -14,7 +14,7 @@ import (
 
 const testDSN = "host=localhost user=gorm password=gorm dbname=gorm port=9921 sslmode=disable"
 
-// missingPath returns a config file path that never exists (env-only mode).
+// missingPath returns a config file path that never exists.
 func missingPath(t *testing.T) string {
 	t.Helper()
 	return filepath.Join(t.TempDir(), "does-not-exist.yaml")
@@ -39,7 +39,7 @@ func TestLoadEnvOnly(t *testing.T) {
 	setenv(t, "BEELINEWF_INFRA_HTTP_HOST", "localhost:9999")
 	setenv(t, "BEELINEWF_INFRA_HTTP_SWAGGER_ENABLED", "false")
 
-	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	cfg, err := configuration.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -154,7 +154,7 @@ infra:
 func TestLoadDefaultsApplied(t *testing.T) {
 	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
 
-	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	cfg, err := configuration.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -196,7 +196,7 @@ func TestLoadRejectsNonPositiveMaxBodyBytes(t *testing.T) {
 		t.Run(value, func(t *testing.T) {
 			setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
 			setenv(t, "BEELINEWF_INFRA_HTTP_MAX_BODY_BYTES", value)
-			if _, err := configuration.Load(configuration.WithConfigFile(missingPath(t))); err == nil {
+			if _, err := configuration.Load(); err == nil {
 				t.Fatalf("Load() error = nil, want error for max_body_bytes=%s", value)
 			}
 		})
@@ -206,7 +206,7 @@ func TestLoadRejectsNonPositiveMaxBodyBytes(t *testing.T) {
 func TestLoadServerTimeoutDefaults(t *testing.T) {
 	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
 
-	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	cfg, err := configuration.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -255,7 +255,7 @@ func TestLoadRejectsNonPositiveServerTimeouts(t *testing.T) {
 			t.Run(tc.env+"="+value, func(t *testing.T) {
 				setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
 				setenv(t, tc.env, value)
-				_, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+				_, err := configuration.Load()
 				if err == nil {
 					t.Fatalf("Load() error = nil, want error for %s=%s", tc.name, value)
 				} else if !strings.Contains(err.Error(), tc.name) {
@@ -269,7 +269,7 @@ func TestLoadRejectsNonPositiveServerTimeouts(t *testing.T) {
 func TestLoadDispatcherTuningDefaults(t *testing.T) {
 	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
 
-	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	cfg, err := configuration.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -290,7 +290,7 @@ func TestLoadDispatcherTuningFromEnv(t *testing.T) {
 	setenv(t, "BEELINEWF_ENGINE_POLL_INTERVAL", "50ms")
 	setenv(t, "BEELINEWF_ENGINE_HEARTBEAT_INTERVAL", "9s")
 
-	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	cfg, err := configuration.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -320,7 +320,7 @@ func TestLoadRejectsNonPositiveDispatcherTuning(t *testing.T) {
 			t.Run(tc.env+"="+value, func(t *testing.T) {
 				setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
 				setenv(t, tc.env, value)
-				if _, err := configuration.Load(configuration.WithConfigFile(missingPath(t))); err == nil {
+				if _, err := configuration.Load(); err == nil {
 					t.Errorf("%s = %q: error = nil, want a rejection", tc.env, value)
 				} else if !strings.Contains(err.Error(), tc.name) {
 					t.Errorf("%s = %q: error = %q, want mention of %s", tc.env, value, err, tc.name)
@@ -331,7 +331,7 @@ func TestLoadRejectsNonPositiveDispatcherTuning(t *testing.T) {
 }
 
 func TestLoadRejectsMissingDSN(t *testing.T) {
-	_, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	_, err := configuration.Load()
 	if err == nil {
 		t.Fatal("Load() error = nil, want validation error for missing dsn")
 	}
@@ -344,7 +344,7 @@ func TestLoadRejectsInvalidPoolSize(t *testing.T) {
 	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
 	setenv(t, "BEELINEWF_WORKER_POOL_SIZE", "0")
 
-	_, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	_, err := configuration.Load()
 	if err == nil {
 		t.Fatal("Load() error = nil, want validation error for pool size 0")
 	}
@@ -354,7 +354,7 @@ func TestLoadRejectsInvalidDuration(t *testing.T) {
 	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
 	setenv(t, "BEELINEWF_ENGINE_POLL_INTERVAL", "not-a-duration")
 
-	_, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	_, err := configuration.Load()
 	if err == nil {
 		t.Fatal("Load() error = nil, want error for invalid duration")
 	}
@@ -371,7 +371,7 @@ func TestLoadRejectsInvalidConfigFile(t *testing.T) {
 
 func TestLoadEngineDefaults(t *testing.T) {
 	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
-	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	cfg, err := configuration.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -425,7 +425,7 @@ func TestLoadEngineSettingsFromEnv(t *testing.T) {
 	setenv(t, "BEELINEWF_ENGINE_HTTP_ALLOWLIST", "*")
 	setenv(t, "BEELINEWF_ENGINE_EXEC_ALLOWLIST", "echo")
 
-	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	cfg, err := configuration.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -460,7 +460,7 @@ func TestLoadEngineAllowlistsFromEnvCommaSeparated(t *testing.T) {
 	setenv(t, "BEELINEWF_ENGINE_HTTP_ALLOWLIST", "api.example.com,jsonplaceholder.typicode.com")
 	setenv(t, "BEELINEWF_ENGINE_EXEC_ALLOWLIST", "echo,ls")
 
-	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	cfg, err := configuration.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -477,7 +477,7 @@ func TestLoadEnvDenyOverridesFromEnvCommaSeparated(t *testing.T) {
 	setenv(t, "BEELINEWF_ENGINE_ENV_DENY_EXTRA", "BEELINEWF_OPENROUTER*,BEELINEWF_FOO")
 	setenv(t, "BEELINEWF_ENGINE_ENV_ALLOW_EXCEPTIONS", "BEELINEWF_OPENROUTER_MODEL")
 
-	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	cfg, err := configuration.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -492,12 +492,12 @@ func TestLoadEnvDenyOverridesFromEnvCommaSeparated(t *testing.T) {
 func TestLoadRejectsInvalidEnvDenyGlob(t *testing.T) {
 	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
 	setenv(t, "BEELINEWF_ENGINE_ENV_DENY_EXTRA", "BEELINEWF_[")
-	if _, err := configuration.Load(configuration.WithConfigFile(missingPath(t))); err == nil {
+	if _, err := configuration.Load(); err == nil {
 		t.Fatal("Load() error = nil, want error for malformed glob")
 	}
 	setenv(t, "BEELINEWF_ENGINE_ENV_DENY_EXTRA", "")
 	setenv(t, "BEELINEWF_ENGINE_ENV_ALLOW_EXCEPTIONS", "BEELINEWF_*[")
-	if _, err := configuration.Load(configuration.WithConfigFile(missingPath(t))); err == nil {
+	if _, err := configuration.Load(); err == nil {
 		t.Fatal("Load() error = nil, want error for malformed allow glob")
 	}
 }
@@ -506,7 +506,7 @@ func TestLoadRejectsMaxBelowDefault(t *testing.T) {
 	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
 	setenv(t, "BEELINEWF_ENGINE_DEFAULT_NODE_TIMEOUT", "10m")
 	setenv(t, "BEELINEWF_ENGINE_MAX_NODE_TIMEOUT", "5m")
-	if _, err := configuration.Load(configuration.WithConfigFile(missingPath(t))); err == nil {
+	if _, err := configuration.Load(); err == nil {
 		t.Fatal("Load() error = nil, want error when max < default")
 	}
 }
@@ -514,7 +514,7 @@ func TestLoadRejectsMaxBelowDefault(t *testing.T) {
 func TestLoadBrokerDefaults(t *testing.T) {
 	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
 
-	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	cfg, err := configuration.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -543,7 +543,7 @@ func TestLoadBrokersFromEnv(t *testing.T) {
 	setenv(t, "BEELINEWF_INFRA_RABBITMQ_OUTPUT_QUEUE", "workflow.output")
 	setenv(t, "BEELINEWF_INFRA_RABBITMQ_STATUS_QUEUE", "workflow.status")
 
-	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	cfg, err := configuration.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -614,7 +614,7 @@ func TestLoadRejectsNonUUIDSystemUserID(t *testing.T) {
 	for _, id := range []string{"system", "not-a-uuid", "  ", "00000000-0000-7000-8000-00000000000", "00000000000070008000000000000001"} {
 		setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
 		setenv(t, "BEELINEWF_SYSTEM_USER_ID", id)
-		_, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+		_, err := configuration.Load()
 		if err == nil {
 			t.Errorf("system.user_id = %q: error = nil, want a rejection", id)
 			continue
@@ -629,7 +629,7 @@ func TestLoadRejectsNonUUIDSystemUserID(t *testing.T) {
 func TestLoadAcceptsUUIDSystemUserID(t *testing.T) {
 	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
 	setenv(t, "BEELINEWF_SYSTEM_USER_ID", "00000000-0000-7000-8000-000000000001")
-	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	cfg, err := configuration.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -643,7 +643,7 @@ func TestLoadAcceptsUUIDSystemUserID(t *testing.T) {
 func TestShippedConfigUsesAUUIDSystemUserByDefault(t *testing.T) {
 	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
 	setenv(t, "BEELINEWF_SYSTEM_USER_ID", "")
-	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	cfg, err := configuration.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -719,7 +719,7 @@ func TestLoadRolePermissionsFromEnvJSON(t *testing.T) {
 	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
 	setenv(t, "BEELINEWF_AUTH_ROLE_PERMISSIONS", `{"admin":["definitions:read","roles:read"],"finance":["instances:read"]}`)
 
-	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	cfg, err := configuration.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -755,7 +755,7 @@ func TestLoadRolePermissionsInvalidJSONFails(t *testing.T) {
 	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
 	setenv(t, "BEELINEWF_AUTH_ROLE_PERMISSIONS", `not-json`)
 
-	_, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	_, err := configuration.Load()
 	if err == nil {
 		t.Fatal("Load() error = nil, want fail-fast on invalid JSON")
 	}
@@ -787,7 +787,7 @@ auth:
 func TestLoadSchedulerDefaults(t *testing.T) {
 	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
 
-	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	cfg, err := configuration.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -804,7 +804,7 @@ func TestLoadSchedulerFromEnv(t *testing.T) {
 	setenv(t, "BEELINEWF_SCHEDULER_ENABLED", "false")
 	setenv(t, "BEELINEWF_SCHEDULER_REFRESH_INTERVAL", "10s")
 
-	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	cfg, err := configuration.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -820,7 +820,7 @@ func TestLoadRejectsInvalidSchedulerRefreshInterval(t *testing.T) {
 	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
 	setenv(t, "BEELINEWF_SCHEDULER_REFRESH_INTERVAL", "0s")
 
-	if _, err := configuration.Load(configuration.WithConfigFile(missingPath(t))); err == nil {
+	if _, err := configuration.Load(); err == nil {
 		t.Fatal("Load() error = nil, want validation error for refresh_interval 0")
 	}
 }
@@ -828,7 +828,7 @@ func TestLoadRejectsInvalidSchedulerRefreshInterval(t *testing.T) {
 func TestLoadConsumerRetryDefaults(t *testing.T) {
 	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
 
-	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	cfg, err := configuration.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -890,7 +890,7 @@ engine:
 func TestLoadHTTPBulkheadDefaults(t *testing.T) {
 	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
 
-	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	cfg, err := configuration.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -985,7 +985,7 @@ func TestShippedConfigHTTPBulkheadCaps(t *testing.T) {
 func TestLoadPostgreSQLPoolDefaults(t *testing.T) {
 	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
 
-	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	cfg, err := configuration.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -1112,7 +1112,7 @@ func TestLoadAuthDisabledForcesOIDCOff(t *testing.T) {
 	setenv(t, "BEELINEWF_AUTH_ENABLED", "false")
 	setenv(t, "BEELINEWF_AUTH_OIDC_ENABLED", "true")
 
-	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	cfg, err := configuration.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v, want OIDC ignored when auth is disabled", err)
 	}
@@ -1127,7 +1127,7 @@ func TestLoadAuthDisabledForcesOIDCOff(t *testing.T) {
 func TestLoadCORSAllowsAllOriginsByDefault(t *testing.T) {
 	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
 
-	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	cfg, err := configuration.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -1162,7 +1162,7 @@ func TestLoadCORSFromEnv(t *testing.T) {
 	setenv(t, "BEELINEWF_INFRA_HTTP_CORS_ALLOW_CREDENTIALS", "true")
 	setenv(t, "BEELINEWF_INFRA_HTTP_CORS_MAX_AGE", "1h")
 
-	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	cfg, err := configuration.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -1264,7 +1264,7 @@ func TestLoadRejectsCORSWildcardWithCredentials(t *testing.T) {
 	setenv(t, "BEELINEWF_INFRA_HTTP_CORS_ALLOWED_ORIGINS", "*")
 	setenv(t, "BEELINEWF_INFRA_HTTP_CORS_ALLOW_CREDENTIALS", "true")
 
-	_, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	_, err := configuration.Load()
 	if err == nil {
 		t.Fatal("Load() error = nil, want rejection of \"*\" with credentials")
 	}
@@ -1291,7 +1291,7 @@ func TestLoadRejectsMalformedCORSOrigin(t *testing.T) {
 			setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
 			setenv(t, "BEELINEWF_INFRA_HTTP_CORS_ALLOWED_ORIGINS", tc.origin)
 
-			_, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+			_, err := configuration.Load()
 			if err == nil {
 				t.Fatalf("Load() error = nil, want rejection of origin %q", tc.origin)
 			}
@@ -1307,7 +1307,7 @@ func TestLoadRejectsNegativeCORSMaxAge(t *testing.T) {
 	setenv(t, "BEELINEWF_INFRA_HTTP_CORS_ALLOWED_ORIGINS", "https://app.example.com")
 	setenv(t, "BEELINEWF_INFRA_HTTP_CORS_MAX_AGE", "-1s")
 
-	_, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	_, err := configuration.Load()
 	if err == nil {
 		t.Fatal("Load() error = nil, want rejection of negative max_age")
 	}
@@ -1322,7 +1322,7 @@ func TestLoadRejectsNegativeCORSMaxAge(t *testing.T) {
 func TestLoadStorageDefaultsToDisabled(t *testing.T) {
 	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
 
-	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	cfg, err := configuration.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -1360,7 +1360,7 @@ func TestLoadRejectsPartialStorage(t *testing.T) {
 			for k, v := range env {
 				setenv(t, k, v)
 			}
-			_, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+			_, err := configuration.Load()
 			if err == nil {
 				t.Fatal("Load() error = nil, want the partial storage rejected")
 			}
@@ -1381,7 +1381,7 @@ func TestLoadStorageFromEnv(t *testing.T) {
 	setenv(t, "BEELINEWF_INFRA_STORAGE_ACCESS_KEY", "ak")
 	setenv(t, "BEELINEWF_INFRA_STORAGE_SECRET_KEY", "sk")
 
-	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	cfg, err := configuration.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -1401,7 +1401,7 @@ func TestLoadStorageFromEnv(t *testing.T) {
 func TestLoadMultipartLimitsDefaults(t *testing.T) {
 	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
 
-	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	cfg, err := configuration.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -1422,7 +1422,7 @@ func TestLoadRejectsNonPositiveMultipartLimits(t *testing.T) {
 		t.Run(key, func(t *testing.T) {
 			setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
 			setenv(t, key, "0")
-			_, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+			_, err := configuration.Load()
 			if err == nil {
 				t.Fatalf("Load() error = nil, want rejection of %s=0", key)
 			}
@@ -1460,7 +1460,7 @@ func TestShippedConfigsCarryStorageAndMultipart(t *testing.T) {
 
 func TestMetricsEnabledDefaultsTrue(t *testing.T) {
 	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
-	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	cfg, err := configuration.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -1472,11 +1472,18 @@ func TestMetricsEnabledDefaultsTrue(t *testing.T) {
 func TestMetricsEnabledEnvOverride(t *testing.T) {
 	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
 	setenv(t, "BEELINEWF_INFRA_HTTP_METRICS_ENABLED", "false")
-	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	cfg, err := configuration.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
 	if cfg.Infra.HTTP.MetricsEnabled {
 		t.Error("metrics_enabled = true, want false from environment")
+	}
+}
+
+func TestLoadExplicitMissingPathFails(t *testing.T) {
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+	if _, err := configuration.Load(configuration.WithConfigFile(missingPath(t))); err == nil {
+		t.Error("Load(explicit missing path) error = nil, want fail-fast error")
 	}
 }

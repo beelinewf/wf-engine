@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/beelinewf/wf-engine/internal/workflow/model"
@@ -68,6 +69,18 @@ func StatusForError(err error) int {
 }
 
 // WriteError writes a problem response derived from a domain error.
+// 5xx responses carry a generic detail; the full error is logged
+// server-side so DB/driver internals never reach clients.
 func WriteError(c *gin.Context, err error) {
-	WriteProblem(c, StatusForError(err), err.Error())
+	status := StatusForError(err)
+	if status < http.StatusInternalServerError {
+		WriteProblem(c, status, err.Error())
+		return
+	}
+	path := ""
+	if c.Request != nil {
+		path = c.Request.URL.Path
+	}
+	slog.Error("request failed", "status", status, "path", path, "error", err)
+	WriteProblem(c, status, http.StatusText(status))
 }

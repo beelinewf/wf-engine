@@ -65,7 +65,7 @@ func (s *nodeDefinitionService) Create(ctx context.Context, req CreateNodeDefini
 	}
 	nc, err := model.ParseNodeContent(req.Content, s.limits)
 	if err != nil {
-		return model.NodeDefinition{}, fmt.Errorf("%w: %v", model.ErrInvalid, err)
+		return model.NodeDefinition{}, fmt.Errorf("%w: %w", model.ErrInvalid, err)
 	}
 	if kernel.NodeCarriesKeys(nc) {
 		return model.NodeDefinition{}, fmt.Errorf("%w: node definitions cannot carry workflow or group keys", model.ErrInvalid)
@@ -149,11 +149,7 @@ func (s *nodeDefinitionService) Types() []model.NodeTypeInfo {
 
 // mustNewID generates a UUIDv7 id; generation cannot fail at runtime.
 func mustNewID() string {
-	id, err := ids.NewString()
-	if err != nil {
-		panic(fmt.Sprintf("generate uuid: %v", err))
-	}
-	return id
+	return ids.MustString()
 }
 
 func nowUTC() time.Time { return time.Now().UTC() }
