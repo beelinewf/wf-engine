@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/beelinewf/wf-engine/internal/workflow/auth"
 	"github.com/beelinewf/wf-engine/internal/workflow/model"
 	"github.com/beelinewf/wf-engine/internal/workflow/repository"
 )
@@ -243,6 +244,45 @@ func TestUpdateContextRejectsUntrustedStoredSecretSnapshot(t *testing.T) {
 		})
 		if !errors.Is(err, model.ErrConflict) {
 			t.Fatalf("context %s: UpdateContext() error = %v, want conflict", contextRaw, err)
+		}
+		if fake.replaceCalls != 0 {
+			t.Fatalf("context %s: ReplaceContext() called %d times", contextRaw, fake.replaceCalls)
+		}
+	}
+}
+
+func TestUpdateContextHidesCorruptStoredStateFromNonOwner(t *testing.T) {
+	owner := "11111111-1111-7111-8111-111111111111"
+	other := "22222222-2222-7222-8222-222222222222"
+	for _, contextRaw := range []json.RawMessage{
+		json.RawMessage(`{"secret":`),
+		json.RawMessage(`{"secret":"plain-value"}`),
+		json.RawMessage(`{"secret":{"API_KEY":{"nested":"plain-value"}}}`),
+	} {
+		newSvc := func() (*instanceService, *contextUpdateRepo) {
+			fake := &contextUpdateRepo{instance: &model.WorkflowInstance{ID: "instance-1", Context: contextRaw, CreatedBy: owner}}
+			return &instanceService{instances: fake, actor: "system"}, fake
+		}
+		svc, fake := newSvc()
+		_, err := svc.UpdateContext(context.Background(), UpdateContext{
+			InstanceID: "instance-1",
+			Context:    json.RawMessage(`{"next":1}`),
+			Principal:  &auth.Principal{UserID: other},
+		})
+		if !errors.Is(err, model.ErrNotFound) {
+			t.Fatalf("context %s: non-owner error = %v, want not found", contextRaw, err)
+		}
+		if fake.replaceCalls != 0 {
+			t.Fatalf("context %s: ReplaceContext() called %d times", contextRaw, fake.replaceCalls)
+		}
+		svc, fake = newSvc()
+		_, err = svc.UpdateContext(context.Background(), UpdateContext{
+			InstanceID: "instance-1",
+			Context:    json.RawMessage(`{"next":1}`),
+			Principal:  &auth.Principal{UserID: owner},
+		})
+		if !errors.Is(err, model.ErrConflict) {
+			t.Fatalf("context %s: owner error = %v, want conflict", contextRaw, err)
 		}
 		if fake.replaceCalls != 0 {
 			t.Fatalf("context %s: ReplaceContext() called %d times", contextRaw, fake.replaceCalls)

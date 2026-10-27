@@ -1221,7 +1221,16 @@ func (s *instanceService) UpdateContext(ctx context.Context, req UpdateContext) 
 	var storedEnv any
 	storedSecrets := map[string]string{}
 	cur, curErr := s.instances.GetByID(ctx, req.InstanceID)
-	if curErr == nil && cur != nil {
+	if curErr != nil && !errors.Is(curErr, repository.ErrInstanceNotFound) {
+		return nil, curErr
+	}
+	// Authorize before validating stored state: a 409 on a corrupt row would
+	// confirm its existence to a caller not entitled to know it.
+	principal := s.requestPrincipal(req.Principal)
+	if err := authorizeInstance(cur, principal); err != nil {
+		return nil, err
+	}
+	if cur != nil {
 		curObj, ok := decodeContextObject(cur.Context)
 		if !ok {
 			return nil, fmt.Errorf("%w: stored context is invalid", model.ErrConflict)
@@ -1232,8 +1241,6 @@ func (s *instanceService) UpdateContext(ctx context.Context, req UpdateContext) 
 			return nil, fmt.Errorf("%w: stored secret snapshot is invalid", model.ErrConflict)
 		}
 		storedEnv = curObj["env"]
-	} else if curErr != nil && !errors.Is(curErr, repository.ErrInstanceNotFound) {
-		return nil, curErr
 	}
 	obj["env"] = envsnapshot.Merge(envsnapshot.StripDenied(obj["env"]), toStringMap(storedEnv))
 	mergeSecretSnapshot(obj, storedSecrets)
@@ -1242,10 +1249,6 @@ func (s *instanceService) UpdateContext(ctx context.Context, req UpdateContext) 
 		return nil, fmt.Errorf("%w: %w", model.ErrInvalid, err)
 	}
 	req.Context = rebased
-	principal := s.requestPrincipal(req.Principal)
-	if err := authorizeInstance(cur, principal); err != nil {
-		return nil, err
-	}
 	inst, err := s.instances.ReplaceContext(ctx, repository.ContextUpdate{
 		InstanceID: req.InstanceID,
 		Context:    req.Context,
