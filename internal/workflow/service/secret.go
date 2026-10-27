@@ -15,6 +15,7 @@ var secretKeyPattern = regexp.MustCompile(`^[A-Za-z0-9_]{1,128}$`)
 // SecretService is the use-case boundary for secret management.
 type SecretService interface {
 	Create(ctx context.Context, key, value string) (repository.Secret, error)
+	Update(ctx context.Context, key, value string) (repository.Secret, error)
 	Get(ctx context.Context, key string) (repository.Secret, error)
 	List(ctx context.Context, page, perPage int) ([]repository.Secret, int64, error)
 	Delete(ctx context.Context, key string) error
@@ -38,6 +39,17 @@ func (s *secretService) Create(ctx context.Context, key, value string) (reposito
 		return repository.Secret{}, fmt.Errorf("%w: secret value must be 1-8192 characters", model.ErrInvalid)
 	}
 	return s.repo.Create(ctx, key, value)
+}
+
+func (s *secretService) Update(ctx context.Context, key, value string) (repository.Secret, error) {
+	if !secretKeyPattern.MatchString(key) {
+		return repository.Secret{}, fmt.Errorf("%w: secret key must match ^[A-Za-z0-9_]{1,128}$", model.ErrInvalid)
+	}
+	valueLen := utf8.RuneCountInString(value)
+	if valueLen < 1 || valueLen > 8192 {
+		return repository.Secret{}, fmt.Errorf("%w: secret value must be 1-8192 characters", model.ErrInvalid)
+	}
+	return s.repo.Update(ctx, key, value)
 }
 
 func (s *secretService) Get(ctx context.Context, key string) (repository.Secret, error) {

@@ -14,6 +14,7 @@ import (
 // only and must not be exposed by HTTP handlers.
 type SecretRepository interface {
 	Create(ctx context.Context, key, value string) (Secret, error)
+	Update(ctx context.Context, key, value string) (Secret, error)
 	GetByKey(ctx context.Context, key string) (Secret, error)
 	List(ctx context.Context, page, perPage int) ([]Secret, int64, error)
 	Delete(ctx context.Context, key string) error
@@ -39,7 +40,7 @@ func NewSecretRepository(db *gorm.DB) SecretRepository {
 
 func (r *gormSecretRepository) Create(ctx context.Context, key, value string) (Secret, error) {
 	now := time.Now().UTC()
-	row := SecretModel{Key: key, Value: value, CreatedAt: now, UpdatedAt: now}
+	row := SecretModel{Key: key, Value: encryptSecretValue(value), CreatedAt: now, UpdatedAt: now}
 	if err := r.db.WithContext(ctx).Create(&row).Error; err != nil {
 		if isUniqueViolation(err) {
 			return Secret{}, fmt.Errorf("%w: secret %q already exists", model.ErrConflict, key)
@@ -47,6 +48,19 @@ func (r *gormSecretRepository) Create(ctx context.Context, key, value string) (S
 		return Secret{}, fmt.Errorf("secret create: %w", err)
 	}
 	return secretFromModel(row), nil
+}
+
+func (r *gormSecretRepository) Update(ctx context.Context, key, value string) (Secret, error) {
+	res := r.db.WithContext(ctx).Model(&SecretModel{}).
+		Where("key = ?", key).
+		Updates(map[string]any{"value": encryptSecretValue(value), "updated_at": time.Now().UTC()})
+	if res.Error != nil {
+		return Secret{}, fmt.Errorf("secret update: %w", res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return Secret{}, fmt.Errorf("%w: secret %s", model.ErrNotFound, key)
+	}
+	return r.GetByKey(ctx, key)
 }
 
 func (r *gormSecretRepository) GetByKey(ctx context.Context, key string) (Secret, error) {
@@ -106,7 +120,11 @@ func (r *gormSecretRepository) GetAll(ctx context.Context) (map[string]string, e
 	}
 	values := make(map[string]string, len(rows))
 	for _, row := range rows {
-		values[row.Key] = row.Value
+		value, err := decryptSecretValue(row.Value)
+		if err != nil {
+			return nil, fmt.Errorf("secret snapshot: %w", err)
+		}
+		values[row.Key] = value
 	}
 	return values, nil
 }

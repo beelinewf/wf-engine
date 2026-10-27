@@ -176,6 +176,13 @@ services:
       BEELINEWF_INFRA_RABBITMQ_INPUT_QUEUE: beelinewf.input
       BEELINEWF_INFRA_RABBITMQ_OUTPUT_QUEUE: beelinewf.output
       BEELINEWF_INFRA_RABBITMQ_STATUS_QUEUE: beelinewf.status
+      # Secret at-rest encryption key (base64 of 32 bytes). Mandatory with
+      # no code default: the app refuses to boot without it. This is a
+      # local-development key only; generate your own for anything beyond
+      # local use (openssl rand -base64 32) and never reuse it across
+      # environments. Every replica must share the same key, and losing
+      # it makes stored secret values unreadable.
+      BEELINEWF_SECRET_ENCRYPTION_KEY: "QE04hdCgFSg9JZCZVFO0RlvtH+g661rvjDLLrxbTp5g="
       BEELINEWF_AUTH_ENABLED: "false"
       # Only consulted when BEELINEWF_AUTH_ENABLED is true; with authentication
       # off the token is ignored and every route is open, exactly as before.
@@ -207,7 +214,7 @@ services:
       BEELINEWF_WORKER_POOL_SIZE: "50"
       # BEELINEWF_* is snapshotted per instance under {{ env.* }}, except the
       # denied credentials: BEELINEWF_API_TOKEN, BEELINEWF_AUTH_*, BEELINEWF_SYSTEM_*,
-      # BEELINEWF_INFRA_*, and any BEELINEWF_*_DSN (the DSNs set just above). A denied name resolves
+      # BEELINEWF_INFRA_*, BEELINEWF_SECRET_ENCRYPTION_KEY, and any BEELINEWF_*_DSN (the DSNs set just above). A denied name resolves
       # as "path not found". Extend or narrow with the patterns below, e.g.
       # BEELINEWF_ENGINE_ENV_DENY_EXTRA: "BEELINEWF_OPENROUTER_KEY".
       BEELINEWF_ENGINE_DEFAULT_NODE_TIMEOUT: 30s

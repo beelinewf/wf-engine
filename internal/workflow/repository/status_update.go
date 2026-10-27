@@ -219,6 +219,14 @@ func redactStatusUpdateError(contextRaw []byte, errMsg string) string {
 	if errMsg == "" {
 		return ""
 	}
+	// Callers pass either a domain context (plaintext) or a stored row
+	// (secret root sealed); normalize to plaintext before scrubbing.
+	contextRaw = decryptContextSecrets(contextRaw)
+	if contextHasSealedSecrets(contextRaw) {
+		// The key cannot open the stored values, so value matching below
+		// would be a no-op against exactly the errors that embed secrets.
+		return statusUpdateSecretMask
+	}
 	if len(contextRaw) == 0 {
 		return statusUpdateSecretMask
 	}

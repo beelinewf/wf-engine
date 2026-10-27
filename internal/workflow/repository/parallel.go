@@ -216,7 +216,7 @@ func (r *parallelRepo) Fork(ctx context.Context, f ForkParallel) (*model.Paralle
 		if f.ParentBranchID != nil {
 			res := tx.Exec(branchCheckpointSQL,
 				string(model.ParallelBranchWaiting), string(model.WaitingReasonParallel),
-				frame, counters, jsonCol(f.Context, "{}"), "",
+				frame, counters, jsonCol(encryptContextSecrets(f.Context), "{}"), "",
 				nil,
 				*f.ParentBranchID, f.Revision, f.WorkerID,
 			)
@@ -233,7 +233,7 @@ func (r *parallelRepo) Fork(ctx context.Context, f ForkParallel) (*model.Paralle
 			}
 			res := tx.Exec(forkParentSQL,
 				string(parentStatus), string(model.WaitingReasonParallel),
-				frame, counters, jsonCol(f.Context, "{}"),
+				frame, counters, jsonCol(encryptContextSecrets(f.Context), "{}"),
 				f.InstanceID, f.Revision, f.WorkerID,
 			)
 			if res.Error != nil {
@@ -413,7 +413,7 @@ func (r *parallelRepo) CheckpointBranch(ctx context.Context, c BranchCheckpoint)
 		return err
 	}
 	res := r.db.WithContext(ctx).Exec(branchCheckpointSQL,
-		string(c.Status), string(c.WaitingReason), frame, counters, jsonCol(c.Context, "{}"), c.Error,
+		string(c.Status), string(c.WaitingReason), frame, counters, jsonCol(encryptContextSecrets(c.Context), "{}"), c.Error,
 		c.RunAt,
 		c.BranchID, c.Revision, c.WorkerID,
 	)
@@ -494,7 +494,7 @@ func (r *parallelRepo) CompleteBranch(ctx context.Context, c BranchCompletion) (
 			"status":       string(model.ParallelBranchCompleted),
 			"frame":        frame,
 			"counters":     counters,
-			"context":      jsonCol(c.Context, "{}"),
+			"context":      jsonCol(encryptContextSecrets(c.Context), "{}"),
 			"leased_by":    "",
 			"lease_expiry": nil,
 			"revision":     gorm.Expr("revision + 1"),
@@ -839,7 +839,7 @@ func (r *parallelRepo) JoinBranchParallel(ctx context.Context, j JoinBranchCheck
 		}
 		c := j.BranchCheckpoint
 		res := tx.Exec(branchCheckpointSQL,
-			string(c.Status), string(c.WaitingReason), frame, counters, jsonCol(c.Context, "{}"), c.Error,
+			string(c.Status), string(c.WaitingReason), frame, counters, jsonCol(encryptContextSecrets(c.Context), "{}"), c.Error,
 			c.RunAt,
 			c.BranchID, c.Revision, c.WorkerID,
 		)

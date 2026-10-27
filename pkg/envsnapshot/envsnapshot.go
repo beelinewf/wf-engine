@@ -27,6 +27,11 @@ var defaultDenied = []string{
 	"BEELINEWF_SYSTEM_*",
 	"BEELINEWF_INFRA_*",
 	"BEELINEWF_*_DSN",
+	// The at-rest master key itself: it arrives through the process
+	// environment, so without this entry every instance snapshot would
+	// hand it to any template that asks.
+	"BEELINEWF_SECRET_ENCRYPTION_KEY",
+	"BEELINEWF_SECRETS_ENCRYPTION_KEY",
 }
 
 // overrideConfig holds the operator-supplied patterns installed by

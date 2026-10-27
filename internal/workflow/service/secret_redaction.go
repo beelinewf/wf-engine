@@ -173,6 +173,25 @@ func redactInstanceListItems(items []model.WorkflowInstance, contexts map[string
 	}
 }
 
+// redactParallelBranchErrors scrubs secret values from the branch errors
+// served on status, mirroring redactInstanceListItems. An untrusted snapshot
+// masks the whole error; empty errors stay empty. Stored rows are untouched.
+func redactParallelBranchErrors(views []ParallelExecutionView, contextRaw json.RawMessage) {
+	secrets, trusted := secretValuesFromContext(contextRaw)
+	for i := range views {
+		for j := range views[i].Branches {
+			if views[i].Branches[j].Error == "" {
+				continue
+			}
+			if trusted {
+				views[i].Branches[j].Error = redactText(views[i].Branches[j].Error, secrets)
+			} else {
+				views[i].Branches[j].Error = SecretMask
+			}
+		}
+	}
+}
+
 func redactText(value string, secrets map[string]string) string {
 	for _, plaintext := range secrets {
 		if plaintext != "" {

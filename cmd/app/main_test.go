@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +20,14 @@ import (
 	"github.com/beelinewf/wf-engine/pkg/database"
 	"github.com/sirupsen/logrus"
 )
+
+// TestMain supplies the mandatory secret encryption key (base64 of
+// bytes 0..31, test-only): configuration.Load rejects a missing key,
+// and the Load callers in this package are not about the key itself.
+func TestMain(m *testing.M) {
+	_ = os.Setenv("BEELINEWF_SECRET_ENCRYPTION_KEY", "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=")
+	os.Exit(m.Run())
+}
 
 func TestNewLogger(t *testing.T) {
 	logger, err := NewLogger("debug")
@@ -168,6 +177,7 @@ func bootstrapSchema(t *testing.T, dsn string) {
 		&repository.CronScheduleModel{},
 		&repository.ScheduleFireModel{},
 		&repository.WorkflowInstanceModel{},
+		&repository.NodeContextHistoryModel{},
 		&repository.NodeInstanceModel{},
 		&repository.WorkflowInstanceEventModel{},
 		&repository.InputDeliveryModel{},
@@ -199,6 +209,9 @@ func TestRunShutsDownGracefully(t *testing.T) {
 			Pool: configuration.WorkerPool{Size: 4},
 		},
 		Scheduler: configuration.Scheduler{Enabled: true},
+		// Mandatory at-rest key (base64 of bytes 0..31, test-only): run
+		// refuses to boot without one, exactly like a Load-built config.
+		Secrets: configuration.Secrets{EncryptionKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="},
 	}
 	logger, err := NewLogger("info")
 	if err != nil {

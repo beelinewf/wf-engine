@@ -21,6 +21,7 @@ func TestSnapshotExcludesDenied(t *testing.T) {
 	t.Setenv("BEELINEWF_INFRA_POSTGRESQL_DSN", "postgres://x")
 	t.Setenv("BEELINEWF_INFRA_HTTP_HOST", "0.0.0.0:8080")
 	t.Setenv("BEELINEWF_API_TOKEN", "tok")
+	t.Setenv("BEELINEWF_SECRET_ENCRYPTION_KEY", "a2V5")
 	t.Setenv("BEELINEWF_AUTH_ENABLED", "true")
 	t.Setenv("BEELINEWF_SYSTEM_USER_ID", "u1")
 	t.Setenv("BEELINEWF_S3_ENDPOINT", "play.min.io:9000")
@@ -29,6 +30,7 @@ func TestSnapshotExcludesDenied(t *testing.T) {
 		"BEELINEWF_INFRA_POSTGRESQL_DSN",
 		"BEELINEWF_INFRA_HTTP_HOST",
 		"BEELINEWF_API_TOKEN",
+		"BEELINEWF_SECRET_ENCRYPTION_KEY",
 		"BEELINEWF_AUTH_ENABLED",
 		"BEELINEWF_SYSTEM_USER_ID",
 	} {

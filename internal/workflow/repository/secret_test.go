@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/beelinewf/wf-engine/internal/workflow/model"
 	"github.com/beelinewf/wf-engine/internal/workflow/repository"
@@ -46,6 +47,43 @@ func TestSecretDuplicateCreateConflict(t *testing.T) {
 	}
 	if _, err := repo.Create(ctx, "API_KEY", "second"); !errors.Is(err, model.ErrConflict) {
 		t.Fatalf("duplicate Create() error = %v, want ErrConflict", err)
+	}
+}
+
+func TestSecretUpdateRoundTrip(t *testing.T) {
+	db := setupTestDB(t)
+	ctx := context.Background()
+	repo := repository.NewSecretRepository(db)
+
+	created, err := repo.Create(ctx, "API_KEY", "first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := repo.Update(ctx, "API_KEY", "second")
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	// Postgres stores timestamps at microsecond precision, so compare
+	// the re-read row against the truncated in-memory value.
+	if updated.Key != "API_KEY" || !updated.CreatedAt.Equal(created.CreatedAt.Truncate(time.Microsecond)) {
+		t.Fatalf("Update() = %+v, want same key and created_at %v", updated, created.CreatedAt)
+	}
+	got, err := repo.GetAll(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["API_KEY"] != "second" {
+		t.Fatalf("GetAll() after Update = %#v, want second", got)
+	}
+}
+
+func TestSecretUpdateMissingNotFound(t *testing.T) {
+	db := setupTestDB(t)
+	ctx := context.Background()
+	repo := repository.NewSecretRepository(db)
+
+	if _, err := repo.Update(ctx, "MISSING", "value"); !errors.Is(err, model.ErrNotFound) {
+		t.Fatalf("Update() error = %v, want ErrNotFound", err)
 	}
 }
 

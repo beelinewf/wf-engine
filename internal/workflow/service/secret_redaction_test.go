@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/beelinewf/wf-engine/internal/workflow/auth"
 	"github.com/beelinewf/wf-engine/internal/workflow/model"
 	"github.com/beelinewf/wf-engine/internal/workflow/repository"
 )
@@ -134,6 +135,60 @@ func TestRedactInstanceListErrorsFailsClosedOnMissingContext(t *testing.T) {
 	}
 }
 
+func TestRedactParallelBranchErrors(t *testing.T) {
+	views := []ParallelExecutionView{
+		{ID: "ex-1", Branches: []ParallelBranchView{
+			{ID: "b-1", Error: "dial https://api.example.test with plain-value failed"},
+			{ID: "b-2", Error: "clean failure"},
+			{ID: "b-3"},
+		}},
+		{ID: "ex-2", Branches: []ParallelBranchView{
+			{ID: "b-4", Error: "echo plain-value on stdin"},
+		}},
+	}
+	redactParallelBranchErrors(views, json.RawMessage(`{"secret":{"API_KEY":"plain-value"}}`))
+	for _, branch := range []ParallelBranchView{views[0].Branches[0], views[1].Branches[0]} {
+		if strings.Contains(branch.Error, "plain-value") || !strings.Contains(branch.Error, SecretMask) {
+			t.Fatalf("branch %s leaked plaintext: %q", branch.ID, branch.Error)
+		}
+	}
+	if views[0].Branches[1].Error != "clean failure" {
+		t.Fatalf("clean branch error = %q", views[0].Branches[1].Error)
+	}
+	if views[0].Branches[2].Error != "" {
+		t.Fatalf("empty branch error = %q", views[0].Branches[2].Error)
+	}
+}
+
+func TestRedactParallelBranchErrorsFailsClosedOnUntrustedSnapshot(t *testing.T) {
+	for _, contextRaw := range []json.RawMessage{
+		nil,
+		json.RawMessage(`{"secret":`),
+		json.RawMessage(`null`),
+		json.RawMessage(`{"secret":"plain-value"}`),
+		json.RawMessage(`{"secret":{"API_KEY":{"nested":"plain-value"}}}`),
+	} {
+		views := []ParallelExecutionView{{ID: "ex-1", Branches: []ParallelBranchView{
+			{ID: "b-1", Error: "request failed"},
+		}}}
+		redactParallelBranchErrors(views, contextRaw)
+		if views[0].Branches[0].Error != SecretMask {
+			t.Fatalf("context %s left error unmasked: %q", contextRaw, views[0].Branches[0].Error)
+		}
+	}
+}
+
+func TestRedactParallelBranchErrorsWithoutSecrets(t *testing.T) {
+	views := []ParallelExecutionView{{ID: "ex-1", Branches: []ParallelBranchView{
+		{ID: "b-1", Error: "request failed"},
+	}}}
+	redactParallelBranchErrors(views, json.RawMessage(`{"result":1}`))
+	if views[0].Branches[0].Error != "request failed" {
+		t.Fatalf("secretless error = %q", views[0].Branches[0].Error)
+	}
+	redactParallelBranchErrors(nil, json.RawMessage(`{"secret":{"API_KEY":"plain-value"}}`))
+}
+
 func TestRedactNodeDebugSecrets(t *testing.T) {
 	d := &NodeDebugDetail{
 		ContextBefore: json.RawMessage(`{"secret":{"API_KEY":"plain-value"}}`),
@@ -189,6 +244,45 @@ func TestUpdateContextRejectsUntrustedStoredSecretSnapshot(t *testing.T) {
 		})
 		if !errors.Is(err, model.ErrConflict) {
 			t.Fatalf("context %s: UpdateContext() error = %v, want conflict", contextRaw, err)
+		}
+		if fake.replaceCalls != 0 {
+			t.Fatalf("context %s: ReplaceContext() called %d times", contextRaw, fake.replaceCalls)
+		}
+	}
+}
+
+func TestUpdateContextHidesCorruptStoredStateFromNonOwner(t *testing.T) {
+	owner := "11111111-1111-7111-8111-111111111111"
+	other := "22222222-2222-7222-8222-222222222222"
+	for _, contextRaw := range []json.RawMessage{
+		json.RawMessage(`{"secret":`),
+		json.RawMessage(`{"secret":"plain-value"}`),
+		json.RawMessage(`{"secret":{"API_KEY":{"nested":"plain-value"}}}`),
+	} {
+		newSvc := func() (*instanceService, *contextUpdateRepo) {
+			fake := &contextUpdateRepo{instance: &model.WorkflowInstance{ID: "instance-1", Context: contextRaw, CreatedBy: owner}}
+			return &instanceService{instances: fake, actor: "system"}, fake
+		}
+		svc, fake := newSvc()
+		_, err := svc.UpdateContext(context.Background(), UpdateContext{
+			InstanceID: "instance-1",
+			Context:    json.RawMessage(`{"next":1}`),
+			Principal:  &auth.Principal{UserID: other},
+		})
+		if !errors.Is(err, model.ErrNotFound) {
+			t.Fatalf("context %s: non-owner error = %v, want not found", contextRaw, err)
+		}
+		if fake.replaceCalls != 0 {
+			t.Fatalf("context %s: ReplaceContext() called %d times", contextRaw, fake.replaceCalls)
+		}
+		svc, fake = newSvc()
+		_, err = svc.UpdateContext(context.Background(), UpdateContext{
+			InstanceID: "instance-1",
+			Context:    json.RawMessage(`{"next":1}`),
+			Principal:  &auth.Principal{UserID: owner},
+		})
+		if !errors.Is(err, model.ErrConflict) {
+			t.Fatalf("context %s: owner error = %v, want conflict", contextRaw, err)
 		}
 		if fake.replaceCalls != 0 {
 			t.Fatalf("context %s: ReplaceContext() called %d times", contextRaw, fake.replaceCalls)

@@ -263,6 +263,31 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [Secrets]
+      operationId: updateSecret
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      summary: Replace a secret value; running instance snapshots remain unchanged
+      parameters:
+        - $ref: "#/components/parameters/SecretKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateSecretRequest" }
+      responses:
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "200":
+          description: Updated secret
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Secret" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
     delete:
       tags: [Secrets]
       operationId: deleteSecret
@@ -1244,7 +1269,7 @@ components:
       type: apiKey
       in: header
       name: X-Api-Token
-      description: API token authentication. Required when auth is enabled; sent as X-Api-Token header. Authenticates as the service principal, which bypasses every authorization gate.
+      description: API token authentication. Required when auth is enabled; sent as X-Api-Token header. Authenticates as the service principal, which bypasses every authorization gate. Failed presentations are throttled per client IP (auth.rate_limit): past the configured threshold further attempts answer 429 with a Retry-After until the block expires.
     BearerAuth:
       type: http
       scheme: bearer
@@ -1578,6 +1603,14 @@ components:
         key:
           type: string
           pattern: "^[A-Za-z0-9_]{1,128}$"
+        value:
+          type: string
+          minLength: 1
+          maxLength: 8192
+    UpdateSecretRequest:
+      type: object
+      required: [value]
+      properties:
         value:
           type: string
           minLength: 1

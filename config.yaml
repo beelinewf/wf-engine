@@ -225,6 +225,33 @@ auth:
   enabled: false
   api_token: ""
 
+  # API-token failure throttle (F7). Failed X-Api-Token presentations are
+  # counted per client IP: after max_attempts within window, further
+  # attempts from that IP answer 429 with a Retry-After header for
+  # block_duration. Successes never count, and OIDC Bearer [REDACTED]
+  # never count (they are signed, not guessable), so legitimate callers
+  # are unaffected. On by default; with auth disabled the middleware
+  # never runs and these keys are inert.
+  #
+  # The throttle is per-replica in-memory state: each replica counts on
+  # its own, so add a proxy-level throttle as well when replicas sit
+  # behind one. trusted_proxies lists the IPs or CIDRs whose
+  # X-Forwarded-For / X-Real-Ip headers may identify the client; empty
+  # trusts no proxy and keys by the direct peer, so a spoofed header
+  # can never rotate the attacker's identity. List the reverse proxy
+  # here when one terminates client connections.
+  #
+  # Equivalent env vars: BEELINEWF_AUTH_RATE_LIMIT_ENABLED,
+  # BEELINEWF_AUTH_RATE_LIMIT_MAX_ATTEMPTS, BEELINEWF_AUTH_RATE_LIMIT_WINDOW,
+  # BEELINEWF_AUTH_RATE_LIMIT_BLOCK_DURATION,
+  # BEELINEWF_AUTH_RATE_LIMIT_TRUSTED_PROXIES (comma-separated).
+  rate_limit:
+    enabled: true
+    max_attempts: 20
+    window: 1m
+    block_duration: 1m
+    trusted_proxies: []
+
   # OIDC resource-server settings. Any compliant provider works; the
   # frontend reads the login contract (issuer, client_id, endpoints, roles
   # claim) from GET /v1/auth/config, so nothing here is provider-specific.
@@ -305,6 +332,14 @@ auth:
 
 # The configured system user is the audit actor for engine and service
 # side effects.
+# Secret at-rest encryption. The key seals secret values in the database
+# (secrets table and the secret root of persisted workflow contexts). It is
+# mandatory with no default: the app refuses to boot without it. Supply it
+# through BEELINEWF_SECRET_ENCRYPTION_KEY (base64 of 32 bytes,
+# `openssl rand -base64 32`); the empty value below only documents the key.
+secrets:
+  encryption_key: ""
+
 system:
   user_id: "00000000-0000-7000-8000-000000000001"
   name: "system"

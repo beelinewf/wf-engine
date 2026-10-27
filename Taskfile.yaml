@@ -96,6 +96,9 @@ tasks:
         # reads the same variable. config.e2e-oidc.yaml deliberately leaves
         # the key out.
         export BEELINEWF_API_TOKEN="e2e-service-token"
+        # Same single-source pattern for the mandatory at-rest key
+        # (test-only value: base64 of bytes 0..31).
+        export BEELINEWF_SECRET_ENCRYPTION_KEY="AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
         # Throwaway database for this run. Recreating it keeps a previous
         # run's definitions and instances from changing what the checks see.
         e2e_provision_db beelinewf_e2e
@@ -120,6 +123,9 @@ tasks:
       - |
         set -euo pipefail
         . scripts/e2e-bootstrap.sh
+        # Mandatory at-rest key (test-only value: base64 of bytes 0..31);
+        # config.e2e.yaml deliberately leaves it out like the API token.
+        export BEELINEWF_SECRET_ENCRYPTION_KEY="AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
         e2e_provision_db beelinewf_e2e_plain
         WORK_DIR=$(mktemp -d)
         trap 'rm -rf "$WORK_DIR"' EXIT
