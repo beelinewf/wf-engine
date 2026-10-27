@@ -55,13 +55,48 @@ import (
 )
 
 const (
-	shutdownTimeout = 10 * time.Second
+	// shutdownBudget is the single worst-case grace for the whole
+	// shutdown sequence. The HTTP drain and every deferred stage share
+	// one clock, so sequential stages split the budget instead of each
+	// taking a full timeout.
+	shutdownBudget = 25 * time.Second
+	// defaultTerminationGrace is the orchestrator grace the budget must
+	// fit: Kubernetes sends SIGKILL after terminationGracePeriodSeconds
+	// (30s unless the manifest overrides it).
+	defaultTerminationGrace = 30 * time.Second
 	// statusLoaderCacheSize bounds the memoized status_update configs
 	// served to the delivery dispatcher.
 	statusLoaderCacheSize = 1024
 	// snapshotTimeout bounds one metrics snapshot query.
 	snapshotTimeout = 5 * time.Second
 )
+
+// sharedShutdown starts one shutdown clock on first use and hands every
+// stage a context on that clock. The first stage to shut down starts the
+// budget; later stages get whatever remains.
+type sharedShutdown struct {
+	budget time.Duration
+	once   sync.Once
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func newSharedShutdown(budget time.Duration) *sharedShutdown {
+	return &sharedShutdown{budget: budget}
+}
+
+func (s *sharedShutdown) context() context.Context {
+	s.once.Do(func() {
+		s.ctx, s.cancel = context.WithTimeout(context.Background(), s.budget)
+	})
+	return s.ctx
+}
+
+func (s *sharedShutdown) stop() {
+	if s.cancel != nil {
+		s.cancel()
+	}
+}
 
 var errMetricsSnapshot = errors.New("metrics snapshot not implemented")
 
@@ -149,9 +184,9 @@ func checkAuthWiring(verifier auth.Verifier, authSvc service.AuthService, actor 
 
 // databaseOptions builds the production pool settings from the loaded
 // configuration. It starts from database.DefaultOptions so the pool ceiling
-// is never left at the database/sql zero values (unbounded); the DSN and
-// the four pool knobs come from config, which Load already defaulted and
-// validated.
+// is never left at the database/sql zero values (unbounded); the DSN, the
+// four pool knobs, and the connect timeout come from config, which Load
+// already defaulted and validated.
 func databaseOptions(cfg *configuration.Config) database.Options {
 	opts := database.DefaultOptions()
 	opts.DSN = cfg.Infra.PostgreSQL.DSN
@@ -159,6 +194,7 @@ func databaseOptions(cfg *configuration.Config) database.Options {
 	opts.MaxIdleConns = cfg.Infra.PostgreSQL.MaxIdleConns
 	opts.ConnMaxLifetime = cfg.Infra.PostgreSQL.ConnMaxLifetime
 	opts.ConnMaxIdleTime = cfg.Infra.PostgreSQL.ConnMaxIdleTime
+	opts.ConnectTimeout = cfg.Infra.PostgreSQL.ConnectTimeout
 	return opts
 }
 
@@ -242,6 +278,10 @@ func run(ctx context.Context, cfg *configuration.Config, logger *logrus.Logger) 
 		return fmt.Errorf("database pool: %w", err)
 	}
 	defer func() { _ = sqlDB.Close() }()
+	// The shared shutdown clock is released last: this defer is
+	// registered before every stage defer, so it runs after them.
+	shutdown := newSharedShutdown(shutdownBudget)
+	defer shutdown.stop()
 	logger.Info("database connected")
 
 	actor := cfg.System.UserID
@@ -496,8 +536,7 @@ func run(ctx context.Context, cfg *configuration.Config, logger *logrus.Logger) 
 		logger.Info("rabbitmq input consumer started")
 	}
 	defer func() {
-		stopCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-		defer cancel()
+		stopCtx := shutdown.context()
 		done := make(chan struct{})
 		go func() {
 			consumers.Wait()
@@ -516,9 +555,7 @@ func run(ctx context.Context, cfg *configuration.Config, logger *logrus.Logger) 
 	}
 	dispatcher.Run()
 	defer func() {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-		defer cancel()
-		if err := dispatcher.Shutdown(shutdownCtx); err != nil {
+		if err := dispatcher.Shutdown(shutdown.context()); err != nil {
 			logger.Warnf("dispatcher shutdown: %v", err)
 		}
 	}()
@@ -614,9 +651,7 @@ func run(ctx context.Context, cfg *configuration.Config, logger *logrus.Logger) 
 	statusDispatcher.SetMetrics(recorder)
 	statusDispatcher.Run()
 	defer func() {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-		defer cancel()
-		if err := statusDispatcher.Shutdown(shutdownCtx); err != nil {
+		if err := statusDispatcher.Shutdown(shutdown.context()); err != nil {
 			logger.Warnf("status dispatcher shutdown: %v", err)
 		}
 	}()
@@ -638,9 +673,7 @@ func run(ctx context.Context, cfg *configuration.Config, logger *logrus.Logger) 
 			return fmt.Errorf("scheduler: %w", err)
 		}
 		defer func() {
-			shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-			defer cancel()
-			if err := cronScheduler.Shutdown(shutdownCtx); err != nil {
+			if err := cronScheduler.Shutdown(shutdown.context()); err != nil {
 				logger.Warnf("scheduler shutdown: %v", err)
 			}
 		}()
@@ -682,9 +715,7 @@ func run(ctx context.Context, cfg *configuration.Config, logger *logrus.Logger) 
 
 	select {
 	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-		defer cancel()
-		if err := srv.Shutdown(shutdownCtx); err != nil {
+		if err := srv.Shutdown(shutdown.context()); err != nil {
 			return fmt.Errorf("http shutdown: %w", err)
 		}
 		logger.Info("http server stopped")

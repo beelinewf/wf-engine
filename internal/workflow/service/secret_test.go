@@ -22,12 +22,14 @@ func (f *fakeSecretRepo) Create(_ context.Context, key, value string) (repositor
 	f.secrets[key] = value
 	return repository.Secret{Key: key}, nil
 }
+
 func (f *fakeSecretRepo) GetByKey(_ context.Context, key string) (repository.Secret, error) {
 	if _, ok := f.secrets[key]; !ok {
 		return repository.Secret{}, model.ErrNotFound
 	}
 	return repository.Secret{Key: key}, nil
 }
+
 func (f *fakeSecretRepo) List(_ context.Context, _, _ int) ([]repository.Secret, int64, error) {
 	items := make([]repository.Secret, 0, len(f.secrets))
 	for key := range f.secrets {
@@ -35,6 +37,7 @@ func (f *fakeSecretRepo) List(_ context.Context, _, _ int) ([]repository.Secret,
 	}
 	return items, int64(len(items)), nil
 }
+
 func (f *fakeSecretRepo) Delete(_ context.Context, key string) error {
 	if _, ok := f.secrets[key]; !ok {
 		return model.ErrNotFound
@@ -42,6 +45,7 @@ func (f *fakeSecretRepo) Delete(_ context.Context, key string) error {
 	delete(f.secrets, key)
 	return nil
 }
+
 func (f *fakeSecretRepo) GetAll(_ context.Context) (map[string]string, error) {
 	values := make(map[string]string, len(f.secrets))
 	for key, value := range f.secrets {

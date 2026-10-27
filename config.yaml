@@ -59,11 +59,15 @@ infra:
     # BEELINEWF_INFRA_POSTGRESQL_MAX_OPEN_CONNS,
     # BEELINEWF_INFRA_POSTGRESQL_MAX_IDLE_CONNS,
     # BEELINEWF_INFRA_POSTGRESQL_CONN_MAX_LIFETIME,
-    # BEELINEWF_INFRA_POSTGRESQL_CONN_MAX_IDLE_TIME.
+    # BEELINEWF_INFRA_POSTGRESQL_CONN_MAX_IDLE_TIME,
+    # BEELINEWF_INFRA_POSTGRESQL_CONNECT_TIMEOUT.
     max_open_conns: 25
     max_idle_conns: 25
     conn_max_lifetime: 5m
     conn_max_idle_time: 5m
+    # Startup ping budget. A DSN that accepts TCP but never answers (a
+    # blackhole host) fails the boot after this instead of hanging it.
+    connect_timeout: 15s
   # Optional Redis (pub/sub input, output, and status channels). Set the DSN
   # (e.g. redis://localhost:6379/0) to enable.
   redis:
@@ -254,6 +258,9 @@ auth:
     # lowering it below 1m is clamped, because re-reading more often is the
     # provider-amplification problem the bound exists to prevent.
     cache_ttl: 5m
+    # Startup discovery budget. A provider that answers too slowly fails
+    # the boot after this instead of hanging it.
+    discovery_timeout: 10s
 
   # Equivalent env var: BEELINEWF_AUTH_ROLE_PERMISSIONS (JSON object). A set
   # value overrides this file section; blank falls back to it.

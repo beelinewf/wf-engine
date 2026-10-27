@@ -63,7 +63,7 @@ Run the validation block from [README.md](README.md) before opening a pull
 request:
 
 ```bash
-gofmt -l .
+go run mvdan.cc/gofumpt@v0.12.0 -l .
 go vet ./...
 go test ./... -count=1
 go test -race ./... -count=1
@@ -72,9 +72,9 @@ atlas migrate validate --config file://migrations/atlas.hcl --env gorm \
   --var dev_url="postgres://gorm:gorm@localhost:9921/gorm?sslmode=disable"
 ```
 
-`gofmt -l .` must print nothing and `go vet ./...` must be clean. Run the
-Atlas command only if migrations changed, and `task swagger` only if API
-annotations changed.
+The gofumpt check must print nothing (`task fmt` fixes) and `go vet ./...`
+must be clean. Run the Atlas command only if migrations changed, and
+`task swagger` only if API annotations changed.
 
 ## Opening a pull request
 
@@ -83,7 +83,7 @@ annotations changed.
 3. Sign the CLA as described above when the bot prompts you.
 4. Wait for CI and the CLA check to pass.
 
-Good first checks on any pull request: `gofmt -l .` prints nothing,
+Good first checks on any pull request: the gofumpt check prints nothing,
 `go vet ./...` is clean, and `task test` passes.
 
 ## Security

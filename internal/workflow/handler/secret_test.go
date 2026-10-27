@@ -34,13 +34,16 @@ func (f *fakeSecretSvc) Create(_ context.Context, key, _ string) (repository.Sec
 	f.created = repository.Secret{Key: key, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
 	return f.created, nil
 }
+
 func (f *fakeSecretSvc) Get(_ context.Context, key string) (repository.Secret, error) {
 	f.lastGetKey = key
 	return f.get, f.getErr
 }
+
 func (f *fakeSecretSvc) List(_ context.Context, _, _ int) ([]repository.Secret, int64, error) {
 	return f.items, f.total, f.listErr
 }
+
 func (f *fakeSecretSvc) Delete(_ context.Context, key string) error {
 	f.lastDelKey = key
 	return f.deleteErr

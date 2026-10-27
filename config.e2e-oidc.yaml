@@ -37,6 +37,7 @@ auth:
     username_claim: "name"
     clock_skew: 1m
     cache_ttl: 1m
+    discovery_timeout: 10s
 
   # Deliberately not the shipped catalog: the script needs a "manager" role
   # to satisfy the node gate, and "finance" to prove the endpoint gate passes

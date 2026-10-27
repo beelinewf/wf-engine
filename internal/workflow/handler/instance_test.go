@@ -72,9 +72,11 @@ func (f *fakeInstanceSvc) Create(_ context.Context, req service.CreateInstance) 
 	f.createReq = &req
 	return f.createInst, f.createErr
 }
+
 func (f *fakeInstanceSvc) GetStatus(_ context.Context, _ string, _ auth.Principal) (*model.WorkflowInstance, error) {
 	return f.statusInst, f.statusErr
 }
+
 func (f *fakeInstanceSvc) GetStatusDetail(_ context.Context, _ string, _ auth.Principal) (*service.StatusDetail, error) {
 	f.detailCalls++
 	if f.detailFunc != nil {
@@ -82,43 +84,54 @@ func (f *fakeInstanceSvc) GetStatusDetail(_ context.Context, _ string, _ auth.Pr
 	}
 	return f.detail, f.statusErr
 }
+
 func (f *fakeInstanceSvc) GetContext(_ context.Context, _ string, _ auth.Principal) (*model.WorkflowInstance, error) {
 	return f.contextInst, f.statusErr
 }
+
 func (f *fakeInstanceSvc) UpdateContext(_ context.Context, req service.UpdateContext) (*model.WorkflowInstance, error) {
 	f.updateCtxReq = &req
 	return f.updateCtxRes, f.updateCtxErr
 }
+
 func (f *fakeInstanceSvc) DeliverInput(_ context.Context, req service.DeliverInput) (*model.InputDelivery, error) {
 	f.deliverReq = &req
 	return f.delivery, f.deliveryErr
 }
+
 func (f *fakeInstanceSvc) NodeDebug(_ context.Context, _, _ string, _ int, _ auth.Principal) (*service.NodeDebugDetail, error) {
 	return f.nodeDebug, f.nodeDebugErr
 }
+
 func (f *fakeInstanceSvc) DebugContext(_ context.Context, _, _ string, _ int, _ auth.Principal) (*service.DebugContextDetail, error) {
 	return f.debugContext, f.debugContextErr
 }
+
 func (f *fakeInstanceSvc) Pause(_ context.Context, req service.ControlRequest) (*service.ControlResult, error) {
 	f.controls = append(f.controls, "pause:"+req.InstanceID+":"+req.Actor)
 	return f.pauseRes, f.pauseErr
 }
+
 func (f *fakeInstanceSvc) Resume(_ context.Context, req service.ControlRequest) (*service.ControlResult, error) {
 	f.controls = append(f.controls, "resume:"+req.InstanceID+":"+req.Actor)
 	return f.resumeRes, f.resumeErr
 }
+
 func (f *fakeInstanceSvc) Stop(_ context.Context, req service.ControlRequest) (*service.ControlResult, error) {
 	f.controls = append(f.controls, "stop:"+req.InstanceID+":"+req.Actor)
 	return f.stopRes, f.stopErr
 }
+
 func (f *fakeInstanceSvc) Rollback(_ context.Context, req service.RollbackRequest) (*service.RollbackResult, error) {
 	f.rollbackReq = &req
 	return f.rollbackRes, f.rollbackErr
 }
+
 func (f *fakeInstanceSvc) Migrate(_ context.Context, req service.MigrateRequest) (*service.MigrateResult, error) {
 	f.migrateReq = &req
 	return f.migrateRes, f.migrateErr
 }
+
 func (f *fakeInstanceSvc) List(_ context.Context, q repository.InstanceListQuery, _ auth.Principal) ([]model.WorkflowInstance, int64, error) {
 	f.listQuery = q
 	return f.listItems, f.listTotal, f.listErr

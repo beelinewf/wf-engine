@@ -1,6 +1,7 @@
 package database_test
 
 import (
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -23,6 +24,40 @@ func TestNewRejectsUnreachableDatabase(t *testing.T) {
 	_, err := database.New(database.Options{DSN: "host=127.0.0.1 user=x password=x dbname=x port=1 sslmode=disable"})
 	if err == nil {
 		t.Fatal("New() error = nil, want error for unreachable database")
+	}
+}
+
+func TestDefaultOptionsConnectTimeout(t *testing.T) {
+	if got := database.DefaultOptions().ConnectTimeout; got != 15*time.Second {
+		t.Errorf("DefaultOptions().ConnectTimeout = %v, want 15s", got)
+	}
+}
+
+// TestNewRespectsConnectTimeout pins the boot hang fix: a server that
+// accepts TCP but never answers the Postgres handshake must fail fast
+// instead of hanging the boot.
+func TestNewRespectsConnectTimeout(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen() error = %v", err)
+	}
+	defer func() { _ = ln.Close() }()
+	// Never Accept: the kernel completes the TCP handshake into the
+	// backlog, so the dial succeeds but the Postgres startup exchange
+	// never completes.
+	dsn := "host=127.0.0.1 user=x password=x dbname=x port=" +
+		strings.TrimPrefix(ln.Addr().String(), "127.0.0.1:") + " sslmode=disable"
+
+	opts := database.DefaultOptions()
+	opts.DSN = dsn
+	opts.ConnectTimeout = 200 * time.Millisecond
+	start := time.Now()
+	_, err = database.New(opts)
+	if err == nil {
+		t.Fatal("New() error = nil, want timeout against a silent server")
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("New() took %v, want failure within the connect timeout", elapsed)
 	}
 }
 

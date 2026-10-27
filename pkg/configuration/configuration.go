@@ -100,6 +100,10 @@ type PostgreSQL struct {
 	MaxIdleConns    int           `mapstructure:"max_idle_conns"`
 	ConnMaxLifetime time.Duration `mapstructure:"conn_max_lifetime"`
 	ConnMaxIdleTime time.Duration `mapstructure:"conn_max_idle_time"`
+	// ConnectTimeout bounds the initial ping at startup, so a
+	// blackhole DSN fails the boot fast instead of hanging it.
+	// Default 15s.
+	ConnectTimeout time.Duration `mapstructure:"connect_timeout"`
 }
 
 // Redis holds the optional Redis connection. An empty DSN disables the
@@ -291,6 +295,10 @@ type OIDC struct {
 	// CacheTTL is how long a fetched discovery document and JWKS stay
 	// fresh before they are refetched. Default 5m.
 	CacheTTL time.Duration `mapstructure:"cache_ttl"`
+	// DiscoveryTimeout bounds the provider discovery fetch at startup,
+	// so a blackhole issuer fails the boot fast instead of hanging it.
+	// Zero means no timeout. Default 10s.
+	DiscoveryTimeout time.Duration `mapstructure:"discovery_timeout"`
 }
 
 // Option customizes Load behavior.
@@ -335,6 +343,7 @@ func Load(opts ...Option) (*Config, error) {
 	for _, key := range []string{
 		"enabled", "issuer", "client_id", "audience",
 		"roles_claim", "username_claim", "clock_skew", "cache_ttl",
+		"discovery_timeout",
 	} {
 		_ = v.BindEnv("auth.oidc."+key, "BEELINEWF_AUTH_OIDC_"+strings.ToUpper(key))
 	}
@@ -445,11 +454,13 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("auth.oidc.username_claim", "name")
 	v.SetDefault("auth.oidc.clock_skew", "1m")
 	v.SetDefault("auth.oidc.cache_ttl", "5m")
+	v.SetDefault("auth.oidc.discovery_timeout", "10s")
 	v.SetDefault("infra.postgresql.dsn", "")
 	v.SetDefault("infra.postgresql.max_open_conns", 25)
 	v.SetDefault("infra.postgresql.max_idle_conns", 25)
 	v.SetDefault("infra.postgresql.conn_max_lifetime", "5m")
 	v.SetDefault("infra.postgresql.conn_max_idle_time", "5m")
+	v.SetDefault("infra.postgresql.connect_timeout", "15s")
 	v.SetDefault("infra.http.host", "localhost:8080")
 	v.SetDefault("infra.http.swagger_enabled", true)
 	v.SetDefault("infra.http.metrics_enabled", true)
@@ -538,6 +549,9 @@ func (c *Config) validate() error {
 	}
 	if c.Infra.PostgreSQL.ConnMaxIdleTime < 0 {
 		return errors.New("configuration: infra.postgresql.conn_max_idle_time must be >= 0")
+	}
+	if c.Infra.PostgreSQL.ConnectTimeout <= 0 {
+		return errors.New("configuration: infra.postgresql.connect_timeout must be > 0")
 	}
 	if c.Infra.HTTP.MaxBodyBytes <= 0 {
 		return errors.New("configuration: infra.http.max_body_bytes must be > 0")
@@ -681,6 +695,9 @@ func (c *Config) validate() error {
 		}
 		if c.Auth.OIDC.CacheTTL <= 0 {
 			return errors.New("configuration: auth.oidc.cache_ttl must be > 0")
+		}
+		if c.Auth.OIDC.DiscoveryTimeout <= 0 {
+			return errors.New("configuration: auth.oidc.discovery_timeout must be > 0")
 		}
 	}
 	for role := range c.Auth.RolePermissions {

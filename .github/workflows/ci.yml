@@ -34,8 +34,8 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
-      - name: gofmt
-        run: test -z "$(gofmt -l .)"
+      - name: gofumpt
+        run: test -z "$(go run mvdan.cc/gofumpt@v0.12.0 -l .)"
       - name: go vet
         run: go vet ./...
       - name: No DB skips outside testdb helper

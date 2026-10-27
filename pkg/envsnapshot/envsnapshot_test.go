@@ -1,6 +1,9 @@
 package envsnapshot
 
-import "testing"
+import (
+	"sync"
+	"testing"
+)
 
 func TestSnapshotFiltersPrefix(t *testing.T) {
 	t.Setenv("BEELINEWF_S3_ENDPOINT", "play.min.io:9000")
@@ -68,6 +71,27 @@ func TestIsDeniedOverride(t *testing.T) {
 	if IsDenied("BEELINEWF_S3_ENDPOINT") {
 		t.Fatal("unrelated key must stay allowed")
 	}
+}
+
+// TestOverrideConcurrentReads pins the race fix: readers must see a
+// consistent override while a writer installs a new one. Run with -race.
+func TestOverrideConcurrentReads(t *testing.T) {
+	defer SetOverride(nil, nil)
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 100 {
+				_ = IsDenied("BEELINEWF_API_TOKEN")
+				_ = IsDenied("BEELINEWF_OPENROUTER_KEY")
+			}
+		}()
+	}
+	for range 100 {
+		SetOverride([]string{"BEELINEWF_OPENROUTER*"}, nil)
+	}
+	wg.Wait()
 }
 
 func TestMergeSnapshotWins(t *testing.T) {

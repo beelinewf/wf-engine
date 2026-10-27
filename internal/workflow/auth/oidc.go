@@ -74,6 +74,11 @@ var defaultScopes = []string{"openid", "profile", "email"}
 // startup instead of failing every request later.
 func NewOIDCAuthenticator(ctx context.Context, cfg configuration.OIDC) (*OIDCAuthenticator, error) {
 	issuer := strings.TrimRight(strings.TrimSpace(cfg.Issuer), "/")
+	if cfg.DiscoveryTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, cfg.DiscoveryTimeout)
+		defer cancel()
+	}
 	provider, err := oidc.NewProvider(ctx, issuer)
 	if err != nil {
 		return nil, fmt.Errorf("auth: oidc discovery for %q: %w", cfg.Issuer, err)

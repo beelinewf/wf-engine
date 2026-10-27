@@ -753,7 +753,14 @@ func (h *InstanceHandler) Migrate(c *gin.Context) {
 		return
 	}
 	nxt := res.Instance
-	cursor, _ := model.ParseFrame(nxt.Frame)
+	cursor, err := model.ParseFrame(nxt.Frame)
+	if err != nil {
+		// The migration committed but its frame is unreadable; surface
+		// the corruption as a 500 (logged server-side) instead of
+		// answering with an empty current node.
+		WriteError(c, err)
+		return
+	}
 	c.JSON(http.StatusCreated, MigrateResponse{
 		Instance: MigrateInstanceResponse{
 			ID:                   nxt.ID,

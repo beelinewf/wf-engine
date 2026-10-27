@@ -275,6 +275,7 @@ system audit user. Key settings:
 | `infra.postgresql.max_idle_conns`                        | `25`                   | Warm idle cap per replica (`BEELINEWF_INFRA_POSTGRESQL_MAX_IDLE_CONNS`)                                            |
 | `infra.postgresql.conn_max_lifetime`                     | `5m`                   | Max connection age before recycle (`BEELINEWF_INFRA_POSTGRESQL_CONN_MAX_LIFETIME`); `0` = unlimited                |
 | `infra.postgresql.conn_max_idle_time`                    | `5m`                   | Max idle time before eviction (`BEELINEWF_INFRA_POSTGRESQL_CONN_MAX_IDLE_TIME`); `0` = unlimited                   |
+| `infra.postgresql.connect_timeout`                       | `15s`                  | Startup ping budget; a blackhole DSN fails the boot fast (`BEELINEWF_INFRA_POSTGRESQL_CONNECT_TIMEOUT`)            |
 | `infra.redis.dsn`                                        | `""` (disabled)        | e.g. `redis://localhost:6379/0`; unreachable broker fails startup                                               |
 | `infra.rabbitmq.dsn`                                     | `""` (disabled)        | e.g. `amqp://beelinewf:beelinewf@localhost:5672/`; queues default to `beelinewf.input`, `beelinewf.output`, `beelinewf.status` |
 | `engine.default_node_timeout` / `max_node_timeout`       | `30s` / `5m`           | Caps script, `external_call`, and `output` nodes                                                                |
@@ -324,6 +325,8 @@ with `Authorization: Bearer <jwt>`.
 The engine validates each token itself: discovery from the issuer, JWKS
 signature check, `iss`, `aud`, and `exp` with a configurable
 `auth.oidc.clock_skew`. No session, no cookie, no callback route.
+Startup discovery is bounded by `auth.oidc.discovery_timeout` (default
+`10s`), so an unreachable issuer fails the boot fast.
 `auth.enabled` is the master switch: when it is false, `auth.oidc.enabled`
 is forced off, so a stray OIDC setting can neither protect `/v1` nor trip
 startup validation.
@@ -689,7 +692,7 @@ docker run -d --name beelinewf-pg -e POSTGRES_USER=gorm -e POSTGRES_PASSWORD=gor
 Validation before opening a PR:
 
 ```bash
-gofmt -l .
+go run mvdan.cc/gofumpt@v0.12.0 -l .
 go vet ./...
 go test ./... -count=1
 go test -race ./... -count=1
@@ -698,7 +701,7 @@ atlas migrate validate --config file://migrations/atlas.hcl --env gorm \
   --var dev_url="postgres://gorm:gorm@localhost:9921/gorm?sslmode=disable"
 ```
 
-CI (`.github/workflows/`) runs gofmt, vet, tests, race tests, lint, and
+CI (`.github/workflows/`) runs gofumpt, vet, tests, race tests, lint, and
 Atlas validate plus apply on pushes to `main`/`master` and on pull requests. A
 coverage workflow tracks a 75% total floor plus per-package floors for the
 DB suites, and the badge at the top of this
@@ -743,14 +746,14 @@ config.e2e-oidc.yaml       app config for scripts/e2e-oidc.sh
 1. Fork the repo and create a feature branch from `main`.
 2. Keep changes surgical: touch only what the task needs, match existing
    style, and add tests for new behavior.
-3. Run the validation block above (`gofmt`, `vet`, tests, `lint`; Atlas
+3. Run the validation block above (`gofumpt`, `vet`, tests, `lint`; Atlas
    validate if migrations changed; `task swagger` if API annotations
    changed).
 4. Open a pull request against `main` describing what changed and how it
    was verified. CI must pass.
 
-Good first checks on any PR: `gofmt -l .` prints nothing, `go vet ./...`
-is clean, and `task test` passes.
+Good first checks on any PR: the gofumpt check prints nothing,
+`go vet ./...` is clean, and `task test` passes.
 
 ## Security
 

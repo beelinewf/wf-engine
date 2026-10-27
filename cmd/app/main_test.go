@@ -39,6 +39,38 @@ func TestNewLoggerRejectsInvalidLevel(t *testing.T) {
 	}
 }
 
+// TestShutdownBudgetFitsTerminationGrace pins the shutdown invariant:
+// every stage shares one budget that fits the orchestrator grace, so
+// sequential stages can never stack past SIGKILL.
+func TestShutdownBudgetFitsTerminationGrace(t *testing.T) {
+	if shutdownBudget <= 0 || shutdownBudget >= defaultTerminationGrace {
+		t.Errorf("shutdownBudget = %v, want a positive budget below %v", shutdownBudget, defaultTerminationGrace)
+	}
+}
+
+// TestSharedShutdownSharesOneDeadline pins the shared clock: every
+// stage context carries the same deadline and expires together.
+func TestSharedShutdownSharesOneDeadline(t *testing.T) {
+	s := newSharedShutdown(50 * time.Millisecond)
+	a, b := s.context(), s.context()
+	da, oka := a.Deadline()
+	db, okb := b.Deadline()
+	if !oka || !okb || !da.Equal(db) {
+		t.Fatalf("deadlines = %v,%v / %v,%v, want one shared deadline", da, oka, db, okb)
+	}
+	select {
+	case <-a.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("shared context did not expire")
+	}
+	select {
+	case <-b.Done():
+	default:
+		t.Fatal("second context outlived the shared deadline")
+	}
+	s.stop()
+}
+
 // TestExecutorLimitsSharesBulkhead pins that the composition root threads
 // one bulkhead built from the configured caps into the executor limits, so
 // executors, pollers, publishers, and custom nodes share it process-wide.
@@ -208,12 +240,14 @@ func TestDatabaseOptions(t *testing.T) {
 				MaxIdleConns:    4,
 				ConnMaxLifetime: 10 * time.Minute,
 				ConnMaxIdleTime: 2 * time.Minute,
+				ConnectTimeout:  7 * time.Second,
 			},
 		},
 	}
 	opts := databaseOptions(explicit)
 	if opts.DSN != "explicit-dsn" || opts.MaxOpenConns != 10 || opts.MaxIdleConns != 4 ||
-		opts.ConnMaxLifetime != 10*time.Minute || opts.ConnMaxIdleTime != 2*time.Minute {
+		opts.ConnMaxLifetime != 10*time.Minute || opts.ConnMaxIdleTime != 2*time.Minute ||
+		opts.ConnectTimeout != 7*time.Second {
 		t.Fatalf("databaseOptions() = %+v, want explicit config values verbatim", opts)
 	}
 
@@ -226,7 +260,8 @@ func TestDatabaseOptions(t *testing.T) {
 	if def.DSN != "default-dsn" {
 		t.Errorf("DSN = %q, want default-dsn", def.DSN)
 	}
-	if def.MaxOpenConns == 0 || def.MaxIdleConns == 0 || def.ConnMaxLifetime == 0 || def.ConnMaxIdleTime == 0 {
+	if def.MaxOpenConns == 0 || def.MaxIdleConns == 0 || def.ConnMaxLifetime == 0 || def.ConnMaxIdleTime == 0 ||
+		def.ConnectTimeout == 0 {
 		t.Errorf("databaseOptions() from defaults = %+v, want all pool fields non-zero", def)
 	}
 	if def.MaxOpenConns != 25 {
@@ -403,15 +438,19 @@ func (stubAuthService) SeedRoles(context.Context) error { return nil }
 func (stubAuthService) ListRoles(context.Context) ([]model.Role, map[string][]string, error) {
 	return nil, nil, nil
 }
+
 func (stubAuthService) GetRole(context.Context, string) (model.Role, []string, error) {
 	return model.Role{}, nil, nil
 }
+
 func (stubAuthService) Me(context.Context, auth.Principal) (model.User, error) {
 	return model.User{}, nil
 }
+
 func (stubAuthService) ListUsers(context.Context, int, int) ([]model.User, int64, error) {
 	return nil, 0, nil
 }
+
 func (stubAuthService) GetUser(context.Context, string) (model.User, error) {
 	return model.User{}, nil
 }

@@ -2418,10 +2418,12 @@ func TestRollbackNestedGroupStack(t *testing.T) {
 		svcNodeJSON(outer, "group", "outer", "", "", map[string]any{
 			"start_node_id": mid,
 			"nodes": []map[string]any{
-				{"id": mid, "type": "group", "name": "mid", "start_node_id": inner,
+				{
+					"id": mid, "type": "group", "name": "mid", "start_node_id": inner,
 					"nodes": []map[string]any{
 						{"id": inner, "type": "script", "name": "leaf", "script": "throw new Error('leaf boom');"},
-					}},
+					},
+				},
 			},
 		}),
 	)
@@ -3153,10 +3155,12 @@ func TestStatusDetailNodesMapNestedGroups(t *testing.T) {
 		svcNodeJSON(outer, "group", "outer", "", "", map[string]any{
 			"start_node_id": mid,
 			"nodes": []map[string]any{
-				{"id": mid, "type": "group", "name": "mid", "start_node_id": inner,
+				{
+					"id": mid, "type": "group", "name": "mid", "start_node_id": inner,
 					"nodes": []map[string]any{
 						{"id": inner, "type": "script", "name": "leaf", "script": "throw new Error('leaf boom');"},
-					}},
+					},
+				},
 			},
 		}),
 	)

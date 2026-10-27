@@ -123,7 +123,8 @@ func TestOutputExecutorPublishesToRabbit(t *testing.T) {
 
 func TestOutputExecutorFailsOnMissingContextPath(t *testing.T) {
 	reg := executor.NewExecutors(executor.Limits{}, nil, executor.Dependencies{
-		Output: executor.NewBrokerOutputPublisher(&fakeRedisPublisher{}, &fakeRabbitPublisher{}, "q")})
+		Output: executor.NewBrokerOutputPublisher(&fakeRedisPublisher{}, &fakeRabbitPublisher{}, "q"),
+	})
 	exe := reg[model.NodeTypeOutput]
 	_, err := exe.Execute(context.Background(), executor.Request{
 		Node:       outNode("redis", "missing.path"),
@@ -138,7 +139,8 @@ func TestOutputExecutorFailsOnMissingContextPath(t *testing.T) {
 func TestOutputExecutorFailsOnPublishError(t *testing.T) {
 	redisPub := &fakeRedisPublisher{err: errors.New("broker down")}
 	reg := executor.NewExecutors(executor.Limits{}, nil, executor.Dependencies{
-		Output: executor.NewBrokerOutputPublisher(redisPub, &fakeRabbitPublisher{}, "q")})
+		Output: executor.NewBrokerOutputPublisher(redisPub, &fakeRabbitPublisher{}, "q"),
+	})
 	exe := reg[model.NodeTypeOutput]
 	_, err := exe.Execute(context.Background(), executor.Request{
 		Node:       outNode("redis", "x"),

@@ -136,6 +136,18 @@ func TestInstanceMigrateErrors(t *testing.T) {
 	}
 }
 
+func TestInstanceMigrateCorruptFrameIs500(t *testing.T) {
+	res := migrateResult()
+	res.Instance.Frame = json.RawMessage(`not json`)
+	svc := &fakeInstanceSvc{migrateRes: res}
+	r := NewRouter(Deps{Health: NewHealth(fakePinger{}), Instances: svc})
+	body := `{"workflow_definition_id":"` + migrateDefID + `","start_node_id":"` + migrateStartID + `"}`
+	w := performJSON(r, http.MethodPost, "/v1/workflow/instance/"+instanceID+"/migrate", body, nil)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 (%s)", w.Code, w.Body.String())
+	}
+}
+
 func TestInstanceStatusIncludesMigrationLinks(t *testing.T) {
 	linked := model.WorkflowInstance{ID: instanceID, MigratedFrom: "src-id", SupersededBy: "new-id"}
 	svc := &fakeInstanceSvc{detail: &service.StatusDetail{Instance: linked}}
