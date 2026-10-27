@@ -108,6 +108,40 @@ func (h *SecretHandler) Get(c *gin.Context) {
 	c.JSON(http.StatusOK, toSecretResponse(secret))
 }
 
+// Update handles PUT /v1/secrets/{key}. It fully replaces the value; running
+// instance snapshots keep the value they were created with. A missing key
+// returns 404, never an upsert.
+//
+// @Summary Update secret
+// @Tags secrets
+// @Accept json
+// @Produce json
+// @Param key path string true "Secret key"
+// @Param request body UpdateSecretRequest true "Secret"
+// @Success 200 {object} SecretResponse
+// @Failure 401,403,400,404,422,500 {object} Problem
+// @Security ApiKeyAuth
+// @Security BearerAuth
+// @Router /v1/secrets/{key} [put]
+func (h *SecretHandler) Update(c *gin.Context) {
+	key := c.Param("key")
+	var req UpdateSecretRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		WriteProblem(c, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+	if req.Value == "" {
+		WriteProblem(c, http.StatusUnprocessableEntity, "value is required")
+		return
+	}
+	secret, err := h.svc.Update(c.Request.Context(), key, req.Value)
+	if err != nil {
+		writeSecretPathError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, toSecretResponse(secret))
+}
+
 // Delete handles DELETE /v1/secrets/{key}.
 //
 // @Summary Delete secret

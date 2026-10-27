@@ -100,6 +100,12 @@ type CreateSecretRequest struct {
 	Value string `json:"value" validate:"required" minLength:"1" maxLength:"8192"`
 }
 
+// UpdateSecretRequest is the PUT /v1/secrets/{key} body. The key comes from
+// the path; the response never returns the plaintext value.
+type UpdateSecretRequest struct {
+	Value string `json:"value" validate:"required" minLength:"1" maxLength:"8192"`
+}
+
 // SecretResponse is the constant-mask representation used by all secret reads.
 type SecretResponse struct {
 	Key         string    `json:"key" validate:"required" pattern:"^[A-Za-z0-9_]{1,128}$"`

@@ -38,6 +38,14 @@ func (f *fakeSecretRepo) List(_ context.Context, _, _ int) ([]repository.Secret,
 	return items, int64(len(items)), nil
 }
 
+func (f *fakeSecretRepo) Update(_ context.Context, key, value string) (repository.Secret, error) {
+	if _, ok := f.secrets[key]; !ok {
+		return repository.Secret{}, model.ErrNotFound
+	}
+	f.secrets[key] = value
+	return repository.Secret{Key: key}, nil
+}
+
 func (f *fakeSecretRepo) Delete(_ context.Context, key string) error {
 	if _, ok := f.secrets[key]; !ok {
 		return model.ErrNotFound
@@ -85,6 +93,36 @@ func TestSecretServiceRejectsInvalidValue(t *testing.T) {
 		if _, err := svc.Create(context.Background(), "API_KEY", value); !errors.Is(err, model.ErrInvalid) {
 			t.Errorf("Create() value length %d error = %v, want ErrInvalid", len(value), err)
 		}
+	}
+}
+
+func TestSecretServiceUpdateRoundTrip(t *testing.T) {
+	svc, _ := newSecretService()
+	if _, err := svc.Create(context.Background(), "API_KEY", "first"); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := svc.Update(context.Background(), "API_KEY", "second")
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if updated.Key != "API_KEY" {
+		t.Fatalf("Update() = %+v", updated)
+	}
+}
+
+func TestSecretServiceUpdateValidates(t *testing.T) {
+	svc, _ := newSecretService()
+	if _, err := svc.Update(context.Background(), "bad-key", "value"); !errors.Is(err, model.ErrInvalid) {
+		t.Errorf("Update(bad key) error = %v, want ErrInvalid", err)
+	}
+	if _, err := svc.Update(context.Background(), "API_KEY", ""); !errors.Is(err, model.ErrInvalid) {
+		t.Errorf("Update(empty value) error = %v, want ErrInvalid", err)
+	}
+	if _, err := svc.Update(context.Background(), "API_KEY", strings.Repeat("x", 8193)); !errors.Is(err, model.ErrInvalid) {
+		t.Errorf("Update(long value) error = %v, want ErrInvalid", err)
+	}
+	if _, err := svc.Update(context.Background(), "MISSING", "value"); !errors.Is(err, model.ErrNotFound) {
+		t.Errorf("Update(missing) error = %v, want ErrNotFound", err)
 	}
 }
 

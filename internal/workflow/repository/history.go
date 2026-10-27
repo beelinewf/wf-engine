@@ -10,6 +10,7 @@ import (
 
 	"github.com/beelinewf/wf-engine/internal/workflow/model"
 	"github.com/beelinewf/wf-engine/pkg/contextdiff"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
@@ -81,6 +82,14 @@ func (r *instanceRepo) ReconstructBefore(
 		Order(`"created_at" ASC, "id" ASC`).
 		Find(&rows).Error; err != nil {
 		return nil, err
+	}
+
+	// Rows are stored with their secret roots sealed; replay works on
+	// plaintext, so map them back through the domain converters first.
+	for i := range rows {
+		plain := NodeContextHistoryFromModel(rows[i])
+		rows[i].Snapshot = datatypes.JSON(plain.Snapshot)
+		rows[i].Diff = datatypes.JSON(plain.Diff)
 	}
 
 	start := 0

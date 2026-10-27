@@ -305,6 +305,14 @@ auth:
 
 # The configured system user is the audit actor for engine and service
 # side effects.
+# Secret at-rest encryption. The key seals secret values in the database
+# (secrets table and the secret root of persisted workflow contexts). It is
+# mandatory with no default: the app refuses to boot without it. Supply it
+# through BEELINEWF_SECRET_ENCRYPTION_KEY (base64 of 32 bytes,
+# `openssl rand -base64 32`); the empty value below only documents the key.
+secrets:
+  encryption_key: ""
+
 system:
   user_id: "00000000-0000-7000-8000-000000000001"
   name: "system"

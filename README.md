@@ -52,7 +52,7 @@ status notifications. Both stay fully disabled when their DSN is absent.
 
 - Immutable node and workflow definitions with linear versioning and graph
   validation.
-- Secret management through `/v1/secrets`: create, list, get, and delete
+- Secret management through `/v1/secrets`: create, list, get, update, and delete
   key-value pairs. Read responses contain only a constant `********` mask.
   Instances freeze the current secret values under `secret` at create time,
   so workflows can render `{{ secret.KEY }}` while later secret changes do
@@ -530,6 +530,7 @@ The authoritative contract is [api/openapi.yaml](api/openapi.yaml)
 | POST       | `/v1/secrets`                                      | Create secret (201; plaintext omitted)                                                                     |
 | GET        | `/v1/secrets`                                      | List masked secrets (paged, ordered by key)                                                                |
 | GET/DELETE | `/v1/secrets/{key}`                                | Get masked secret / delete; duplicate create returns 409                                                   |
+| PUT        | `/v1/secrets/{key}`                                | Replace secret value (404 unless the key exists)                                                           |
 | POST       | `/v1/workflow/instance`                            | Start instance (202)                                                                                       |
 | GET        | `/v1/workflow/instance`                            | List compact summaries (paged, `id`/`workflow_definition_id`/`status` filters)                                   |
 | GET        | `/v1/workflow/instance/{id}/status`                | Status, counters, cursor, per-node `nodes` map, audit actors                                                 |
@@ -559,6 +560,12 @@ curl -s -X POST http://localhost:8080/v1/secrets \
   -H 'Content-Type: application/json' \
   -d '{"key":"API_KEY","value":"replace-me"}'
 # 201: {"key":"API_KEY","value_masked":"********",...}
+
+# Rotate the value later (404 unless the key exists):
+curl -s -X PUT http://localhost:8080/v1/secrets/API_KEY \
+  -H 'Content-Type: application/json' \
+  -d '{"value":"rotated"}'
+# 200: {"key":"API_KEY","value_masked":"********",...}
 ```
 
 At instance creation, all stored secrets are snapshotted under the reserved

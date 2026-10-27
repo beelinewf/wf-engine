@@ -269,6 +269,14 @@ func run(ctx context.Context, cfg *configuration.Config, logger *logrus.Logger) 
 	// and render, so they are installed once here before any workflow runs.
 	envsnapshot.SetOverride(cfg.Engine.EnvDenyExtra, cfg.Engine.EnvAllowExceptions)
 
+	// The secret at-rest cipher is likewise global to the repository
+	// layer. Configuration already validated the key; installing it here,
+	// before any repository is used, means every secret write below is
+	// sealed and every read is opened transparently.
+	if err := repository.InstallSecretEncryption(cfg.Secrets.EncryptionKey); err != nil {
+		return fmt.Errorf("secret encryption: %w", err)
+	}
+
 	db, err := database.New(databaseOptions(cfg))
 	if err != nil {
 		return fmt.Errorf("database: %w", err)
@@ -302,6 +310,16 @@ func run(ctx context.Context, cfg *configuration.Config, logger *logrus.Logger) 
 	nodeDefs := repository.NewNodeDefinitionRepository(db)
 	wfDefs := repository.NewWorkflowDefinitionRepository(db)
 	secrets := repository.NewSecretRepository(db)
+	// Boot probe: a wrong key must fail here, not at the first instance
+	// creation. GetAll is the one read that surfaces undecryptable
+	// values as an error, and the stored-context spot-check covers the
+	// case where the secrets table itself has nothing sealed to open.
+	if _, err := secrets.GetAll(ctx); err != nil {
+		return fmt.Errorf("secret encryption probe: %w", err)
+	}
+	if err := repository.VerifySecretEncryptionReadable(ctx, db); err != nil {
+		return fmt.Errorf("secret encryption probe: %w", err)
+	}
 	forms := repository.NewFormRepository(db)
 	users := repository.NewUserRepository(db)
 	roles := repository.NewRoleRepository(db)

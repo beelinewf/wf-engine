@@ -63,6 +63,9 @@ auth:
       - "instances:read"
       - "input:deliver"
 
+# Secret at-rest encryption key is deliberately absent: the Taskfile exports
+# BEELINEWF_SECRET_ENCRYPTION_KEY once (mandatory, no default) and the app
+# reads it through the secrets.encryption_key binding.
 system:
   user_id: "00000000-0000-7000-8000-000000000001"
   name: "system"

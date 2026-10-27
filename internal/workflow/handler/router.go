@@ -221,6 +221,7 @@ func NewRouter(deps Deps) *gin.Engine {
 		gate(group, auth.ActionSecretsWrite, http.MethodPost, "", secrets.Create)
 		gate(group, auth.ActionSecretsRead, http.MethodGet, "", secrets.List)
 		gate(group, auth.ActionSecretsRead, http.MethodGet, "/:key", secrets.Get)
+		gate(group, auth.ActionSecretsWrite, http.MethodPut, "/:key", secrets.Update)
 		gate(group, auth.ActionSecretsWrite, http.MethodDelete, "/:key", secrets.Delete)
 	}
 

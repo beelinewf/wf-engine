@@ -17,6 +17,8 @@ import (
 type fakeSecretSvc struct {
 	created    repository.Secret
 	createErr  error
+	updated    repository.Secret
+	updateErr  error
 	get        repository.Secret
 	getErr     error
 	items      []repository.Secret
@@ -25,6 +27,8 @@ type fakeSecretSvc struct {
 	deleteErr  error
 	lastGetKey string
 	lastDelKey string
+	lastUpdKey string
+	lastUpdVal string
 }
 
 func (f *fakeSecretSvc) Create(_ context.Context, key, _ string) (repository.Secret, error) {
@@ -33,6 +37,16 @@ func (f *fakeSecretSvc) Create(_ context.Context, key, _ string) (repository.Sec
 	}
 	f.created = repository.Secret{Key: key, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
 	return f.created, nil
+}
+
+func (f *fakeSecretSvc) Update(_ context.Context, key, value string) (repository.Secret, error) {
+	f.lastUpdKey = key
+	f.lastUpdVal = value
+	if f.updateErr != nil {
+		return repository.Secret{}, f.updateErr
+	}
+	f.updated = repository.Secret{Key: key, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+	return f.updated, nil
 }
 
 func (f *fakeSecretSvc) Get(_ context.Context, key string) (repository.Secret, error) {
@@ -143,6 +157,43 @@ func TestSecretDeleteNoContent(t *testing.T) {
 	w := performJSON(secretRouter(&fakeSecretSvc{}), http.MethodDelete, "/v1/secrets/API_KEY", "", nil)
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("status = %d, want 204", w.Code)
+	}
+}
+
+func TestSecretUpdateMasksValue(t *testing.T) {
+	f := &fakeSecretSvc{}
+	r := secretRouter(f)
+	w := performJSON(r, http.MethodPut, "/v1/secrets/API_KEY", `{"value":"new-value"}`, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body %s", w.Code, w.Body.String())
+	}
+	if body := w.Body.String(); body == "" || containsSecretValue(body, "new-value") {
+		t.Fatalf("response body leaked plaintext: %s", body)
+	}
+	var resp SecretResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Key != "API_KEY" || resp.ValueMasked != service.SecretMask {
+		t.Fatalf("response = %+v", resp)
+	}
+	if f.lastUpdKey != "API_KEY" || f.lastUpdVal != "new-value" {
+		t.Fatalf("service update = key %q value %q", f.lastUpdKey, f.lastUpdVal)
+	}
+}
+
+func TestSecretUpdateErrors(t *testing.T) {
+	notFound := performJSON(secretRouter(&fakeSecretSvc{updateErr: model.ErrNotFound}), http.MethodPut, "/v1/secrets/API_KEY", `{"value":"v"}`, nil)
+	if notFound.Code != http.StatusNotFound {
+		t.Fatalf("missing status = %d, want 404", notFound.Code)
+	}
+	invalid := performJSON(secretRouter(&fakeSecretSvc{updateErr: model.ErrInvalid}), http.MethodPut, "/v1/secrets/bad-key", `{"value":"v"}`, nil)
+	if invalid.Code != http.StatusBadRequest {
+		t.Fatalf("invalid key status = %d, want 400", invalid.Code)
+	}
+	empty := performJSON(secretRouter(&fakeSecretSvc{}), http.MethodPut, "/v1/secrets/API_KEY", `{"value":""}`, nil)
+	if empty.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("empty value status = %d, want 422", empty.Code)
 	}
 }
 

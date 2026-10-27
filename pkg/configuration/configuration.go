@@ -13,6 +13,7 @@
 package configuration
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -41,6 +42,7 @@ type Config struct {
 	Engine    Engine    `mapstructure:"engine"`
 	System    System    `mapstructure:"system"`
 	Auth      Auth      `mapstructure:"auth"`
+	Secrets   Secrets   `mapstructure:"secrets"`
 }
 
 // Infra groups infrastructure endpoints.
@@ -301,6 +303,16 @@ type OIDC struct {
 	DiscoveryTimeout time.Duration `mapstructure:"discovery_timeout"`
 }
 
+// Secrets holds the secret-store settings.
+type Secrets struct {
+	// EncryptionKey seals secret values at rest (the secrets table and
+	// the secret root of persisted workflow contexts). It is the base64
+	// encoding of a 32-byte AES-256 key and is mandatory with no default:
+	// every replica must run with the same key, and losing it makes the
+	// stored values unreadable. Exposed as BEELINEWF_SECRET_ENCRYPTION_KEY.
+	EncryptionKey string `mapstructure:"encryption_key"`
+}
+
 // Option customizes Load behavior.
 type Option func(*loader)
 
@@ -377,6 +389,10 @@ func Load(opts ...Option) (*Config, error) {
 	_ = v.BindEnv("infra.http.cors.exposed_headers", "BEELINEWF_INFRA_HTTP_CORS_EXPOSED_HEADERS")
 	_ = v.BindEnv("infra.http.cors.allow_credentials", "BEELINEWF_INFRA_HTTP_CORS_ALLOW_CREDENTIALS")
 	_ = v.BindEnv("infra.http.cors.max_age", "BEELINEWF_INFRA_HTTP_CORS_MAX_AGE")
+	// The secret encryption key rides a singular env name, like the API
+	// token, so it is bound explicitly rather than by AutomaticEnv's
+	// pluralized mapping.
+	_ = v.BindEnv("secrets.encryption_key", "BEELINEWF_SECRET_ENCRYPTION_KEY")
 
 	if _, err := os.Stat(path); err != nil {
 		if explicit {
@@ -529,6 +545,10 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("engine.multipart.max_total_bytes", 134217728)
 	v.SetDefault("engine.multipart.max_file_bytes", 33554432)
 	v.SetDefault("engine.multipart.max_text_bytes", 1048576)
+	// No default value: the empty registration only makes the key
+	// env-addressable. validate() rejects an empty key, so a deployment
+	// can never silently fall back to plaintext storage.
+	v.SetDefault("secrets.encryption_key", "")
 	v.SetDefault("system.user_id", "00000000-0000-7000-8000-000000000001")
 	v.SetDefault("system.name", "system")
 	v.SetDefault("system.email", "system@localhost")
@@ -712,6 +732,20 @@ func (c *Config) validate() error {
 	// deployment has already served traffic attributed to nobody.
 	if !ids.Valid(c.System.UserID) {
 		return fmt.Errorf("configuration: system.user_id %q must be a canonical uuid", c.System.UserID)
+	}
+	// The encryption key is mandatory with no default: without it secret
+	// values would be stored in plaintext. The format rule matches the
+	// cipher (AES-256: base64 of exactly 32 bytes) so a bad key fails
+	// here instead of at the first secret write.
+	if strings.TrimSpace(c.Secrets.EncryptionKey) == "" {
+		return errors.New("configuration: secrets.encryption_key is required (set BEELINEWF_SECRET_ENCRYPTION_KEY)")
+	}
+	key, err := base64.StdEncoding.DecodeString(strings.TrimSpace(c.Secrets.EncryptionKey))
+	if err != nil {
+		return fmt.Errorf("configuration: secrets.encryption_key must be base64: %w", err)
+	}
+	if len(key) != 32 {
+		return fmt.Errorf("configuration: secrets.encryption_key must decode to 32 bytes, got %d", len(key))
 	}
 	return nil
 }

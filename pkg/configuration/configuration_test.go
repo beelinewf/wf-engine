@@ -14,6 +14,18 @@ import (
 
 const testDSN = "host=localhost user=gorm password=gorm dbname=gorm port=9921 sslmode=disable"
 
+// testEncryptionKey is the base64 encoding of bytes 0..31. Test-only.
+const testEncryptionKey = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+
+// TestMain supplies the mandatory secret encryption key for the whole
+// package: Load rejects a missing key, and the tests that are not about
+// the key itself should not each repeat it. The mandatory-key tests
+// override it per test with t.Setenv.
+func TestMain(m *testing.M) {
+	_ = os.Setenv("BEELINEWF_SECRET_ENCRYPTION_KEY", testEncryptionKey)
+	os.Exit(m.Run())
+}
+
 // missingPath returns a config file path that never exists.
 func missingPath(t *testing.T) string {
 	t.Helper()
@@ -51,6 +63,40 @@ func TestLoadEnvOnly(t *testing.T) {
 	}
 	if cfg.Infra.HTTP.SwaggerEnabled {
 		t.Error("swagger_enabled = true, want false from environment")
+	}
+}
+
+func TestLoadSecretEncryptionKeyFromEnv(t *testing.T) {
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+
+	cfg, err := configuration.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Secrets.EncryptionKey != testEncryptionKey {
+		t.Fatalf("Secrets.EncryptionKey = %q, want key from BEELINEWF_SECRET_ENCRYPTION_KEY", cfg.Secrets.EncryptionKey)
+	}
+}
+
+func TestLoadSecretEncryptionKeyMandatory(t *testing.T) {
+	// No default exists to fall back to: an empty (treated as unset)
+	// variable must fail the load.
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+	setenv(t, "BEELINEWF_SECRET_ENCRYPTION_KEY", "")
+
+	if _, err := configuration.Load(); err == nil {
+		t.Fatal("Load() error = nil, want error for missing secrets.encryption_key")
+	}
+}
+
+func TestLoadSecretEncryptionKeyInvalid(t *testing.T) {
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+
+	for _, key := range []string{"not-base64!!", "aGk="} {
+		setenv(t, "BEELINEWF_SECRET_ENCRYPTION_KEY", key)
+		if _, err := configuration.Load(); err == nil {
+			t.Fatalf("Load() error = nil, want error for key %q", key)
+		}
 	}
 }
 

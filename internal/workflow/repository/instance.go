@@ -392,7 +392,7 @@ func (r *instanceRepo) GetContextsByIDs(ctx context.Context, ids []string) (map[
 	}
 	contexts := make(map[string]json.RawMessage, len(rows))
 	for _, row := range rows {
-		contexts[row.ID] = json.RawMessage(row.Context)
+		contexts[row.ID] = decryptContextSecrets(json.RawMessage(row.Context))
 	}
 	return contexts, nil
 }
@@ -455,7 +455,7 @@ func (r *instanceRepo) ReplaceContext(ctx context.Context, u ContextUpdate) (*mo
 		res := tx.Model(&WorkflowInstanceModel{}).
 			Where("id = ? AND status = ?", u.InstanceID, string(model.WorkflowPaused)).
 			Updates(map[string]any{
-				"context":    jsonCol(u.Context, "{}"),
+				"context":    jsonCol(encryptContextSecrets(u.Context), "{}"),
 				"revision":   gorm.Expr("revision + 1"),
 				"updated_at": now,
 			})
@@ -513,7 +513,7 @@ func (r *instanceRepo) RollbackInstance(ctx context.Context, u RollbackUpdate) (
 				"waiting_reason":  string(u.WaitingReason),
 				"pause_requested": false,
 				"frame":           frameRaw,
-				"context":         jsonCol(u.Context, "{}"),
+				"context":         jsonCol(encryptContextSecrets(u.Context), "{}"),
 				"error":           "",
 				"finished_at":     nil,
 				"run_at":          nil,
@@ -821,7 +821,7 @@ func (r *instanceRepo) Checkpoint(ctx context.Context, c Checkpoint) error {
 func execInstanceCheckpointTx(ctx context.Context, tx *gorm.DB, c Checkpoint, frame, counters []byte, now time.Time, cache *statusUpdateCache) error {
 	res := tx.Exec(checkpointSQL,
 		string(c.Status), string(c.WaitingReason), c.PauseRequested,
-		frame, counters, jsonCol(c.Context, "{}"), c.Error,
+		frame, counters, jsonCol(encryptContextSecrets(c.Context), "{}"), c.Error,
 		c.FinishedAt, c.RunAt,
 		c.InstanceID, c.Revision, c.WorkerID,
 	)
@@ -1182,7 +1182,7 @@ func (r *instanceRepo) DeliverInput(ctx context.Context, c InputCompletion) (*mo
 			Updates(map[string]any{
 				"status":        string(model.NodeFinished),
 				"output":        jsonCol(c.Payload, "null"),
-				"context_after": jsonCol(c.NewContext, "null"),
+				"context_after": jsonCol(encryptContextSecretsAuto(c.NewContext), "null"),
 				"finished_at":   now,
 				"updated_at":    now,
 			})
@@ -1203,7 +1203,7 @@ func (r *instanceRepo) DeliverInput(ctx context.Context, c InputCompletion) (*mo
 				"status":         string(c.Status),
 				"waiting_reason": string(model.WaitingReasonRunnable),
 				"frame":          frameRaw,
-				"context":        jsonCol(c.NewContext, "{}"),
+				"context":        jsonCol(encryptContextSecrets(c.NewContext), "{}"),
 				"finished_at":    c.FinishedAt,
 				"revision":       gorm.Expr("revision + 1"),
 				"updated_at":     now,
@@ -1284,7 +1284,7 @@ func (r *instanceRepo) failInput(ctx context.Context, c InputCompletion, deliver
 			Updates(map[string]any{
 				"status":        string(c.NodeStatus),
 				"output":        jsonCol(c.Payload, "null"),
-				"context_after": jsonCol(c.NewContext, "null"),
+				"context_after": jsonCol(encryptContextSecretsAuto(c.NewContext), "null"),
 				"error":         c.Error,
 				"finished_at":   now,
 				"updated_at":    now,
@@ -1301,7 +1301,7 @@ func (r *instanceRepo) failInput(ctx context.Context, c InputCompletion, deliver
 			Updates(map[string]any{
 				"status":         string(model.WorkflowFailed),
 				"waiting_reason": string(model.WaitingReasonRunnable),
-				"context":        jsonCol(c.NewContext, "{}"),
+				"context":        jsonCol(encryptContextSecrets(c.NewContext), "{}"),
 				"error":          c.Error,
 				"finished_at":    now,
 				"revision":       gorm.Expr("revision + 1"),
@@ -1397,7 +1397,7 @@ func (r *instanceRepo) deliverBranchInput(ctx context.Context, c InputCompletion
 			Updates(map[string]any{
 				"status":        string(model.NodeFinished),
 				"output":        jsonCol(c.Payload, "null"),
-				"context_after": jsonCol(c.NewContext, "null"),
+				"context_after": jsonCol(encryptContextSecretsAuto(c.NewContext), "null"),
 				"finished_at":   now,
 				"updated_at":    now,
 			})
@@ -1412,7 +1412,7 @@ func (r *instanceRepo) deliverBranchInput(ctx context.Context, c InputCompletion
 				c.BranchID, string(model.ParallelBranchWaiting), string(model.WaitingReasonInput)).
 			Updates(map[string]any{
 				"frame":          frameRaw,
-				"context":        jsonCol(c.NewContext, "{}"),
+				"context":        jsonCol(encryptContextSecrets(c.NewContext), "{}"),
 				"waiting_reason": string(model.WaitingReasonRunnable),
 				"updated_at":     now,
 			})
@@ -1476,7 +1476,7 @@ func (r *instanceRepo) failBranchInput(ctx context.Context, c InputCompletion, d
 			Updates(map[string]any{
 				"status":        string(c.NodeStatus),
 				"output":        jsonCol(c.Payload, "null"),
-				"context_after": jsonCol(c.NewContext, "null"),
+				"context_after": jsonCol(encryptContextSecretsAuto(c.NewContext), "null"),
 				"error":         c.Error,
 				"finished_at":   now,
 				"updated_at":    now,

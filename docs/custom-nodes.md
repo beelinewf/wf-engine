@@ -120,7 +120,7 @@ configs address them as `{{ env.BEELINEWF_X }}`:
 - Only `BEELINEWF_*` is visible. Anything else (`NOT_MINE`, `PATH`, …) never
   enters the context.
 - Credentials are denied, not snapshotted: `BEELINEWF_API_TOKEN`, `BEELINEWF_AUTH_*`,
-  `BEELINEWF_SYSTEM_*`, and any `BEELINEWF_*_DSN` (PostgreSQL/Redis/RabbitMQ DSNs)
+  `BEELINEWF_SYSTEM_*`, `BEELINEWF_SECRET_ENCRYPTION_KEY`, and any `BEELINEWF_*_DSN` (PostgreSQL/Redis/RabbitMQ DSNs)
   are excluded, and `{{ env.<denied> }}` resolves as missing. Operators add
   patterns with `engine.env_deny_extra` and narrow them with
   `engine.env_allow_exceptions` (env: `BEELINEWF_ENGINE_ENV_DENY_EXTRA`,
