@@ -21,6 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Union allowed_users with allowed_roles (#60) ([e2a8b7d](https://github.com/beelinewf/wf-engine/commit/e2a8b7d5b9ee267aca1e159a82e672aa948e986b))
 - Add boot and shutdown timeouts (#63) ([a2adf3c](https://github.com/beelinewf/wf-engine/commit/a2adf3caa5e42f5aacbb7d22dde43a243c80c6f2))
 - Fix/security (#64) ([a2d384a](https://github.com/beelinewf/wf-engine/commit/a2d384ac7dc0ef6cd7a6ae8b4933ecbc0a0a0f9d))
+- Skip commit when changelog is unchanged (#66) ([be0eb97](https://github.com/beelinewf/wf-engine/commit/be0eb97530013e8ac2a821189fc9c4c054ffe7ac))
 
 ### Features
 
