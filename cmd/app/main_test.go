@@ -169,10 +169,15 @@ func bootstrapSchema(t *testing.T, dsn string) {
 	}()
 	if err := db.AutoMigrate(
 		&repository.UserModel{},
+		&repository.RoleModel{},
+		&repository.RolePermissionModel{},
 		&repository.SecretModel{},
+		&repository.FormModel{},
 		&repository.NodeDefinitionModel{},
 		&repository.WorkflowDefinitionModel{},
 		&repository.WorkflowDefinitionNodeRefModel{},
+		&repository.WorkflowDefinitionFormRefModel{},
+		&repository.NodeDefinitionFormRefModel{},
 		&repository.WorkflowRequestModel{},
 		&repository.CronScheduleModel{},
 		&repository.ScheduleFireModel{},
