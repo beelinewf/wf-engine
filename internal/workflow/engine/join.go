@@ -70,7 +70,7 @@ func (e *Engine) joinParallel(ctx context.Context, sc *execScope, g *workflowGra
 		}
 	}
 
-	status := e.nextStatus(sc)
+	status := e.parkStatus(sc)
 	var finished *time.Time
 	now := e.now()
 	if done {

@@ -197,7 +197,7 @@ func (e *Engine) enterGroup(ctx context.Context, sc *execScope, g *workflowGraph
 		return e.fail(ctx, sc, err)
 	}
 	_ = e.appendEvent(ctx, sc, "group_entered", map[string]any{"node_id": nc.ID})
-	return e.checkpoint(ctx, sc, frame, counters, preCtx, e.nextStatus(sc), "", "", nil, &contextCommit{
+	return e.checkpoint(ctx, sc, frame, counters, preCtx, e.parkStatus(sc), "", "", nil, &contextCommit{
 		start:  ctxMap,
 		end:    preCtx,
 		nodeID: nc.ID,
@@ -696,7 +696,7 @@ func (e *Engine) commitAdvance(ctx context.Context, sc *execScope, g *workflowGr
 	if done {
 		return e.checkpoint(ctx, sc, frame, counters, finalCtx, model.WorkflowFinished, "", "", &now, commit)
 	}
-	return e.checkpoint(ctx, sc, frame, counters, finalCtx, e.nextStatus(sc), "", "", nil, commit)
+	return e.checkpoint(ctx, sc, frame, counters, finalCtx, e.parkStatus(sc), "", "", nil, commit)
 }
 
 // routeFailure records a handled execution failure on an external_call,
@@ -983,7 +983,7 @@ func (e *Engine) checkpointWithRetry(ctx context.Context, sc *execScope, cp *rep
 		cp.Revision = fresh.Revision
 		cp.PauseRequested = fresh.PauseRequested
 		if cp.Status == model.WorkflowWaiting || cp.Status == model.WorkflowPaused {
-			cp.Status = e.nextStatus(sc)
+			cp.Status = e.parkStatus(sc)
 		}
 		err = e.instances.Checkpoint(ctx, *cp)
 		if errors.Is(err, repository.ErrLeaseLost) {
@@ -1128,7 +1128,7 @@ func (e *Engine) inputCheckpoint(ctx context.Context, sc *execScope, frame *mode
 // deadline. The cursor and context are unchanged; the next claim after the
 // deadline re-enters the same node for real execution.
 func (e *Engine) delayCheckpoint(ctx context.Context, sc *execScope, frame *model.Frame, counters model.Counters, ctxMap map[string]any, nodeID string, deadline time.Time) error {
-	return e.checkpointAt(ctx, sc, frame, counters, ctxMap, e.nextStatus(sc), model.WaitingReasonDelay, "", nil, &contextCommit{
+	return e.checkpointAt(ctx, sc, frame, counters, ctxMap, e.parkStatus(sc), model.WaitingReasonDelay, "", nil, &contextCommit{
 		start:  ctxMap,
 		end:    ctxMap,
 		nodeID: nodeID,
@@ -1185,18 +1185,18 @@ func emptyDiffJSON() json.RawMessage {
 	return json.RawMessage(`{"set":{},"unset":[]}`)
 }
 
-// nextStatus decides the post-checkpoint status, honoring a deferred
+// parkStatus decides the post-checkpoint status, honoring a deferred
 // pause and debug step-through: debug runs re-pause after every node
 // transition so each resume advances exactly one step. Input parks go
 // through inputCheckpoint, never here.
-func (e *Engine) nextStatus(sc *execScope) model.WorkflowStatus {
+func (e *Engine) parkStatus(sc *execScope) model.WorkflowStatus {
 	if sc.pauseRequested || sc.debug {
 		return model.WorkflowPaused
 	}
 	return model.WorkflowWaiting
 }
 
-// nextBranchReason mirrors nextStatus for branch parks: debug runs park
+// nextBranchReason mirrors parkStatus for branch parks: debug runs park
 // each branch step paused so every resume advances exactly one step. Input
 // and barrier parks pass through: an input park still waits for its
 // delivery and a barrier park must stay wakeable.

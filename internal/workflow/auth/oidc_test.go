@@ -475,3 +475,33 @@ func TestNewOIDCAuthenticatorRejectsUnreachableIssuer(t *testing.T) {
 		t.Fatal("NewOIDCAuthenticator() error = nil, want a discovery failure")
 	}
 }
+
+// TestNewOIDCAuthenticatorDiscoveryTimeout pins the boot hang fix: a
+// provider that answers discovery too slowly must fail fast instead of
+// hanging the boot.
+func TestNewOIDCAuthenticatorDiscoveryTimeout(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(time.Second)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"issuer":                                "http://" + r.Host,
+			"authorization_endpoint":                "http://" + r.Host + "/authorize",
+			"token_endpoint":                        "http://" + r.Host + "/token",
+			"jwks_uri":                              "http://" + r.Host + "/keys",
+			"id_token_signing_alg_values_supported": []string{"RS256"},
+			"subject_types_supported":               []string{"public"},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	start := time.Now()
+	_, err := auth.NewOIDCAuthenticator(context.Background(), configuration.OIDC{
+		Issuer: srv.URL, ClientID: "beelinewf", DiscoveryTimeout: 100 * time.Millisecond,
+	})
+	if err == nil {
+		t.Fatal("NewOIDCAuthenticator() error = nil, want a discovery timeout")
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Errorf("NewOIDCAuthenticator() took %v, want failure within the discovery timeout", elapsed)
+	}
+}

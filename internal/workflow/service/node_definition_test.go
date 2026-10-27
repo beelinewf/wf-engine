@@ -191,7 +191,8 @@ func TestCreateNodeDefinitionRejectsInvalidContent(t *testing.T) {
 				"nodes":[{"id":"aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa","type":"script","script":"return 1;"}]
 			}`),
 		}, // keys belong to workflow/group occurrences, not reusable definitions
-		{Name: "nested", Type: "script",
+		{
+			Name: "nested", Type: "script",
 			Content: json.RawMessage(`{"node_definition_id":"` + defIDV1 + `"}`),
 		}, // a definition must be self-contained: materialization does not recurse
 	}

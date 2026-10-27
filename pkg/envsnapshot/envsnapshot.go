@@ -11,6 +11,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync/atomic"
 )
 
 // Prefix is the only env namespace snapshotted into workflow contexts.
@@ -28,11 +29,17 @@ var defaultDenied = []string{
 	"BEELINEWF_*_DSN",
 }
 
-// override holds the operator-supplied patterns installed by SetOverride.
-var override struct {
+// overrideConfig holds the operator-supplied patterns installed by
+// SetOverride. It is immutable once stored.
+type overrideConfig struct {
 	extra []string
 	allow []string
 }
+
+// override is read on every snapshot and render, concurrently with the
+// startup install (and any test reinstall), so it is swapped atomically
+// and readers load one consistent snapshot.
+var override atomic.Pointer[overrideConfig]
 
 // IsDeniedDefault reports whether name matches a hardcoded deny pattern.
 func IsDeniedDefault(name string) bool {
@@ -42,19 +49,26 @@ func IsDeniedDefault(name string) bool {
 // IsDenied reports whether name is denied: a default or extra pattern matches
 // and no allow pattern matches.
 func IsDenied(name string) bool {
-	denied := IsDeniedDefault(name) || matchAny(override.extra, name)
+	var extra, allow []string
+	if ov := override.Load(); ov != nil {
+		extra, allow = ov.extra, ov.allow
+	}
+	denied := IsDeniedDefault(name) || matchAny(extra, name)
 	if !denied {
 		return false
 	}
-	return !matchAny(override.allow, name)
+	return !matchAny(allow, name)
 }
 
 // SetOverride installs the operator deny additions and allow exceptions. It is
 // called once at startup from configuration; the empty lists mean defaults
-// only.
+// only. The install is atomic: concurrent readers keep seeing one
+// consistent snapshot.
 func SetOverride(extra, allow []string) {
-	override.extra = append([]string(nil), extra...)
-	override.allow = append([]string(nil), allow...)
+	override.Store(&overrideConfig{
+		extra: append([]string(nil), extra...),
+		allow: append([]string(nil), allow...),
+	})
 }
 
 // matchAny reports whether any glob pattern matches name. An empty pattern

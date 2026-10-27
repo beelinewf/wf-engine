@@ -817,14 +817,22 @@ func TestInputUserGateDenialNamesTheGate(t *testing.T) {
 		want       []string
 		wantAbsent []string
 	}{
-		{"users only", map[string]any{"allowed_users": []any{map[string]any{"id": adaUserID}}},
-			[]string{"users [" + adaUserID + "]"}, nil},
+		{
+			"users only",
+			map[string]any{"allowed_users": []any{map[string]any{"id": adaUserID}}},
+			[]string{"users [" + adaUserID + "]"},
+			nil,
+		},
 		{"both gates name both lists", map[string]any{
 			"allowed_users": []any{map[string]any{"id": adaUserID}},
 			"allowed_roles": []string{"manager"},
 		}, []string{"users [" + adaUserID + "] or roles [manager] are required to deliver to this input node"}, nil},
-		{"roles only keeps its message", map[string]any{"allowed_roles": []string{"manager"}},
-			[]string{"roles [manager] are required to deliver to this input node"}, nil},
+		{
+			"roles only keeps its message",
+			map[string]any{"allowed_roles": []string{"manager"}},
+			[]string{"roles [manager] are required to deliver to this input node"},
+			nil,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -207,7 +207,7 @@ Node statuses: `waiting -> running -> finished | failed | stopped`.
   `"debug": true` (immutable after create, exposed as `debug` on status and
   list). A debug instance is created `paused` (nothing runs before the first
   `resume`), and every `resume` advances exactly one engine transition
-  before the instance re-pauses: `nextStatus` forces `paused` for debug runs
+  before the instance re-pauses: `parkStatus` forces `paused` for debug runs
   on node completions, failure routes, and group entries, while input parks
   stay `waiting`/`input` so `PUT .../input` keeps working (a debug delivery
   that advances the cursor parks `paused`, a terminal delivery stays

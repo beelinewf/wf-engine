@@ -260,7 +260,7 @@ func TestFormServiceRejectsInvalidSchema(t *testing.T) {
 	svc, _ := newFormService()
 	cases := map[string][]byte{
 		"missing":      nil,
-		"empty":        []byte{},
+		"empty":        {},
 		"null":         []byte(`null`),
 		"non-object":   []byte(`[]`),
 		"empty object": []byte(`{}`),

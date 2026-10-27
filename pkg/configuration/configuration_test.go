@@ -994,6 +994,60 @@ func TestLoadPostgreSQLPoolDefaults(t *testing.T) {
 		pg.ConnMaxLifetime != 5*time.Minute || pg.ConnMaxIdleTime != 5*time.Minute {
 		t.Errorf("postgresql pool = %+v, want 25/25/5m/5m", pg)
 	}
+	if pg.ConnectTimeout != 15*time.Second {
+		t.Errorf("postgresql connect_timeout = %v, want 15s", pg.ConnectTimeout)
+	}
+}
+
+func TestLoadOIDCDiscoveryTimeoutDefault(t *testing.T) {
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+
+	cfg, err := configuration.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Auth.OIDC.DiscoveryTimeout != 10*time.Second {
+		t.Errorf("auth.oidc.discovery_timeout = %v, want 10s", cfg.Auth.OIDC.DiscoveryTimeout)
+	}
+}
+
+func TestLoadOIDCDiscoveryTimeoutFromEnv(t *testing.T) {
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+	setenv(t, "BEELINEWF_AUTH_ENABLED", "true")
+	setenv(t, "BEELINEWF_API_TOKEN", "test-token")
+	setenv(t, "BEELINEWF_AUTH_OIDC_ENABLED", "true")
+	setenv(t, "BEELINEWF_AUTH_OIDC_ISSUER", "https://issuer.example.com")
+	setenv(t, "BEELINEWF_AUTH_OIDC_CLIENT_ID", "beelinewf")
+	setenv(t, "BEELINEWF_AUTH_OIDC_DISCOVERY_TIMEOUT", "3s")
+
+	cfg, err := configuration.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Auth.OIDC.DiscoveryTimeout != 3*time.Second {
+		t.Errorf("auth.oidc.discovery_timeout = %v, want 3s from environment", cfg.Auth.OIDC.DiscoveryTimeout)
+	}
+}
+
+func TestLoadRejectsNonPositiveOIDCDiscoveryTimeout(t *testing.T) {
+	for _, value := range []string{"0s", "-1s"} {
+		t.Run(value, func(t *testing.T) {
+			setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+			setenv(t, "BEELINEWF_AUTH_ENABLED", "true")
+			setenv(t, "BEELINEWF_API_TOKEN", "test-token")
+			setenv(t, "BEELINEWF_AUTH_OIDC_ENABLED", "true")
+			setenv(t, "BEELINEWF_AUTH_OIDC_ISSUER", "https://issuer.example.com")
+			setenv(t, "BEELINEWF_AUTH_OIDC_CLIENT_ID", "beelinewf")
+			setenv(t, "BEELINEWF_AUTH_OIDC_DISCOVERY_TIMEOUT", value)
+
+			_, err := configuration.Load()
+			if err == nil {
+				t.Fatalf("Load() error = nil, want error for discovery_timeout=%s", value)
+			} else if !strings.Contains(err.Error(), "auth.oidc.discovery_timeout") {
+				t.Errorf("error = %q, want mention of auth.oidc.discovery_timeout", err)
+			}
+		})
+	}
 }
 
 func TestLoadPostgreSQLPoolFromFile(t *testing.T) {
@@ -1005,6 +1059,7 @@ infra:
     max_idle_conns: 4
     conn_max_lifetime: 10m
     conn_max_idle_time: 2m
+    connect_timeout: 7s
 `)
 	cfg, err := configuration.Load(configuration.WithConfigFile(path))
 	if err != nil {
@@ -1014,6 +1069,9 @@ infra:
 	if pg.MaxOpenConns != 10 || pg.MaxIdleConns != 4 ||
 		pg.ConnMaxLifetime != 10*time.Minute || pg.ConnMaxIdleTime != 2*time.Minute {
 		t.Errorf("postgresql pool = %+v, want 10/4/10m/2m from file", pg)
+	}
+	if pg.ConnectTimeout != 7*time.Second {
+		t.Errorf("postgresql connect_timeout = %v, want 7s from file", pg.ConnectTimeout)
 	}
 }
 
@@ -1031,6 +1089,7 @@ infra:
 	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_MAX_IDLE_CONNS", "10")
 	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_CONN_MAX_LIFETIME", "1h")
 	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_CONN_MAX_IDLE_TIME", "30s")
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_CONNECT_TIMEOUT", "20s")
 
 	cfg, err := configuration.Load(configuration.WithConfigFile(path))
 	if err != nil {
@@ -1040,6 +1099,9 @@ infra:
 	if pg.MaxOpenConns != 50 || pg.MaxIdleConns != 10 ||
 		pg.ConnMaxLifetime != time.Hour || pg.ConnMaxIdleTime != 30*time.Second {
 		t.Errorf("postgresql pool = %+v, want 50/10/1h/30s from environment", pg)
+	}
+	if pg.ConnectTimeout != 20*time.Second {
+		t.Errorf("postgresql connect_timeout = %v, want 20s from environment", pg.ConnectTimeout)
 	}
 }
 
@@ -1053,6 +1115,7 @@ func TestLoadRejectsInvalidPostgreSQLPool(t *testing.T) {
 		{"max_idle_conns", "max_idle_conns", "max_open_conns: 10\n    max_idle_conns: 99"},
 		{"conn_max_lifetime", "conn_max_lifetime", "conn_max_lifetime: -5s"},
 		{"conn_max_idle_time", "conn_max_idle_time", "conn_max_idle_time: -5s"},
+		{"connect_timeout", "connect_timeout", "connect_timeout: 0s"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

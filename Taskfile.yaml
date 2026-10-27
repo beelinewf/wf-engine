@@ -8,6 +8,10 @@ vars:
   # Atlas needs a driver-qualified URL (postgres://); the bare host=... DSN is pgx-only.
   ATLAS_DEV_URL: 'postgres://gorm:gorm@localhost:9921/gorm?sslmode=disable'
   TEST_DSN: '{{.DSN}}'
+  # Pinned formatter (gofumpt is a gofmt superset). Keep the version in
+  # sync with the CI format step and the validation blocks in
+  # README/CONTRIBUTING.
+  GOFUMPT: 'go run mvdan.cc/gofumpt@v0.12.0'
 
 tasks:
   build:
@@ -41,9 +45,9 @@ tasks:
       - golangci-lint run ./...
 
   fmt:
-    desc: Format Go sources
+    desc: Format Go sources (gofumpt)
     cmds:
-      - gofmt -w $$(find . -name '*.go' -not -path './vendor/*')
+      - '{{.GOFUMPT}} -w .'
 
   swagger:
     desc: Generate Swaggo documentation
@@ -86,6 +90,7 @@ tasks:
     cmds:
       - |
         set -euo pipefail
+        . scripts/e2e-bootstrap.sh
         # The single source for the service credential: the app reads it
         # through auth.api_token's BEELINEWF_API_TOKEN binding, and the script
         # reads the same variable. config.e2e-oidc.yaml deliberately leaves
@@ -93,27 +98,15 @@ tasks:
         export BEELINEWF_API_TOKEN="e2e-service-token"
         # Throwaway database for this run. Recreating it keeps a previous
         # run's definitions and instances from changing what the checks see.
-        export PGPASSWORD=gorm
-        psql -h localhost -p 9921 -U gorm -d postgres -c 'DROP DATABASE IF EXISTS beelinewf_e2e WITH (FORCE)' >/dev/null
-        psql -h localhost -p 9921 -U gorm -d postgres -c 'CREATE DATABASE beelinewf_e2e' >/dev/null
-        docker run --rm --network host -v "$PWD/migrations:/migrations:ro" arigaio/atlas:1.3.0@sha256:aa51fd9b86d27a4dde60e51e4ceeaf5b8080b5b37b94c6c591cd9f9526a32dc1 \
-          migrate apply \
-          --url "postgres://gorm:gorm@localhost:9921/beelinewf_e2e?sslmode=disable" \
-          --dir "file:///migrations/versions" >/dev/null
+        e2e_provision_db beelinewf_e2e
         python3 scripts/mock_oidc_provider.py http://127.0.0.1:9099 &
         mock_pid=$!
         trap 'kill $mock_pid 2>/dev/null || true' EXIT
-        for _ in $(seq 1 50); do
-          curl -fsS http://127.0.0.1:9099/.well-known/openid-configuration >/dev/null 2>&1 && break
-          sleep 0.2
-        done
+        e2e_wait_http http://127.0.0.1:9099/.well-known/openid-configuration 50 0.2
         go run ./cmd/app -config config.e2e-oidc.yaml &
         app_pid=$!
         trap 'kill $app_pid $mock_pid 2>/dev/null || true' EXIT
-        for _ in $(seq 1 60); do
-          curl -fsS http://127.0.0.1:9999/health/live >/dev/null 2>&1 && break
-          sleep 1
-        done
+        e2e_wait_http http://127.0.0.1:9999/health/live 60 1
         bash scripts/e2e-oidc.sh http://127.0.0.1:9999 http://127.0.0.1:9099
 
   # Self-contained plain black-box suite: throwaway database, Atlas
@@ -126,13 +119,8 @@ tasks:
     cmds:
       - |
         set -euo pipefail
-        export PGPASSWORD=gorm
-        psql -h localhost -p 9921 -U gorm -d postgres -c 'DROP DATABASE IF EXISTS beelinewf_e2e_plain WITH (FORCE)' >/dev/null
-        psql -h localhost -p 9921 -U gorm -d postgres -c 'CREATE DATABASE beelinewf_e2e_plain' >/dev/null
-        docker run --rm --network host -v "$PWD/migrations:/migrations:ro" arigaio/atlas:1.3.0@sha256:aa51fd9b86d27a4dde60e51e4ceeaf5b8080b5b37b94c6c591cd9f9526a32dc1 \
-          migrate apply \
-          --url "postgres://gorm:gorm@localhost:9921/beelinewf_e2e_plain?sslmode=disable" \
-          --dir "file:///migrations/versions" >/dev/null
+        . scripts/e2e-bootstrap.sh
+        e2e_provision_db beelinewf_e2e_plain
         WORK_DIR=$(mktemp -d)
         trap 'rm -rf "$WORK_DIR"' EXIT
         go build -o "$WORK_DIR/beelinewf-e2e" ./cmd/app
@@ -140,8 +128,5 @@ tasks:
         # No $!/kill: task's embedded shell expands $! to a job id (g1) and
         # lacks the kill builtin, so match this run's unique binary path.
         trap 'pkill -f "$WORK_DIR/beelinewf-e2e" 2>/dev/null || true; rm -rf "$WORK_DIR"' EXIT
-        for _ in $(seq 1 60); do
-          curl -fsS http://127.0.0.1:9999/health/ready >/dev/null 2>&1 && break
-          sleep 1
-        done
+        e2e_wait_http http://127.0.0.1:9999/health/ready 60 1
         bash scripts/e2e.sh http://127.0.0.1:9999

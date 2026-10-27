@@ -331,6 +331,7 @@ func TestParseOutputNodeRejectsInvalidConfig(t *testing.T) {
 		}
 	}
 }
+
 func TestParseUnknownType(t *testing.T) {
 	if _, err := model.ParseNodeContent([]byte(`{"type":"magic"}`), testLimits); err == nil {
 		t.Error("unknown type error = nil, want error")

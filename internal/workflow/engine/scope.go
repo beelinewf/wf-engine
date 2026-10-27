@@ -11,7 +11,17 @@ import (
 // (parent scope) or one parallel branch. Transition methods operate on a
 // scope so node execution, failure routing, and recovery stay shared; only
 // state commits and terminal mappings differ per kind.
+// scopeKind names which execution unit a scope covers. The constructors
+// set it; isBranch reads it instead of inferring from branchID.
+type scopeKind int
+
+const (
+	scopeParent scopeKind = iota
+	scopeBranch
+)
+
 type execScope struct {
+	kind       scopeKind
 	instanceID string
 	// branchID is "" for the parent scope.
 	branchID string
@@ -46,7 +56,7 @@ type execScope struct {
 	definitionID string
 }
 
-func (s *execScope) isBranch() bool { return s.branchID != "" }
+func (s *execScope) isBranch() bool { return s.kind == scopeBranch }
 
 // branchIdentity returns the stable branch identifiers for lifecycle
 // events. appendEvent adds branch_id and parallel_execution_id.
@@ -86,6 +96,7 @@ func (s *execScope) idempotencyKey(attemptID string) string {
 // instanceScope builds the parent scope from a reloaded instance row.
 func instanceScope(w model.WorkflowInstance) *execScope {
 	return &execScope{
+		kind:           scopeParent,
 		instanceID:     w.ID,
 		definitionID:   w.WorkflowDefinitionID,
 		contextMode:    w.ContextMode,
@@ -108,6 +119,7 @@ func instanceScope(w model.WorkflowInstance) *execScope {
 // branch transition paused.
 func branchScope(b model.ParallelBranch, ex model.ParallelExecution, debug bool) *execScope {
 	return &execScope{
+		kind:              scopeBranch,
 		instanceID:        b.InstanceID,
 		branchID:          b.ID,
 		executionID:       b.ParallelExecutionID,
