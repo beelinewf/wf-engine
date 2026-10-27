@@ -60,7 +60,7 @@ tasks:
     cmds:
       - git cliff --tag {{.VERSION}} -o CHANGELOG.md
       - git add CHANGELOG.md cliff.toml
-      - 'git commit -m "chore(release): {{.VERSION}}"'
+      - 'git diff --cached --quiet || git commit -m "chore(release): {{.VERSION}}"'
       - git tag {{.VERSION}}
       - 'echo "Tagged {{.VERSION}}. Push with: git push origin main {{.VERSION}}"'
 
