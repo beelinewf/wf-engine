@@ -234,17 +234,18 @@ auth:
 
   # Equivalent env var: BEELINEWF_AUTH_ROLE_PERMISSIONS (JSON object). A set
   # value overrides this file section; blank falls back to it.
-  # Role catalog: role name to the resource-actions it grants. At startup it
-  # upserts the role and permission rows and prunes the permission rows of
-  # these roles that are no longer granted; no role row is ever deleted. A
-  # role the token carries that is absent here grants nothing, so an unknown
+  # First-boot seed for the role tables: role name to the resource-actions it
+  # grants. It applies only while the roles table is empty; once seeded, the
+  # database is the source of truth and roles are managed over the API
+  # (POST/PUT/DELETE /v1/roles, gated on roles:write). A role the token
+  # carries that is absent from the catalog grants nothing, so an unknown
   # role denies by default.
   #
   # Actions: definitions:read, definitions:write, secrets:read,
   # secrets:write, forms:read, forms:write, instances:create,
   # instances:read, instances:update-context, input:deliver,
   # instances:control, instances:migrate, statistics:read, roles:read,
-  # schedules:read, schedules:write, users:read.
+  # roles:write, schedules:read, schedules:write, users:read.
   role_permissions:
     admin:
       - "definitions:read"
@@ -261,6 +262,7 @@ auth:
       - "instances:migrate"
       - "statistics:read"
       - "roles:read"
+      - "roles:write"
       - "schedules:read"
       - "schedules:write"
       - "users:read"

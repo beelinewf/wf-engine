@@ -16,7 +16,7 @@ import (
 type AuthHandler struct {
 	authSvc  service.AuthService
 	verifier auth.Verifier
-	catalog  auth.Catalog
+	catalog  *auth.Catalog
 	// apiToken marks a token-only deployment, so the login contract can
 	// tell a frontend that no OIDC login exists yet.
 	apiToken bool
@@ -24,7 +24,7 @@ type AuthHandler struct {
 
 // NewAuthHandler builds the auth handler. verifier may be nil, in which case
 // the login contract reports OIDC as disabled.
-func NewAuthHandler(authSvc service.AuthService, verifier auth.Verifier, catalog auth.Catalog, apiTokenEnabled bool) *AuthHandler {
+func NewAuthHandler(authSvc service.AuthService, verifier auth.Verifier, catalog *auth.Catalog, apiTokenEnabled bool) *AuthHandler {
 	return &AuthHandler{authSvc: authSvc, verifier: verifier, catalog: catalog, apiToken: apiTokenEnabled}
 }
 
@@ -99,7 +99,8 @@ func (h *AuthHandler) Me(c *gin.Context) {
 	})
 }
 
-// RoleHandler serves the read-only role catalog.
+// RoleHandler serves the role catalog: reads need roles:read, writes need
+// roles:write.
 type RoleHandler struct {
 	authSvc service.AuthService
 }
@@ -151,6 +152,85 @@ func (h *RoleHandler) Get(c *gin.Context) {
 	c.JSON(http.StatusOK, toRoleResponse(role, perms))
 }
 
+// Create handles POST /v1/roles.
+//
+// A blank name is 422 and a duplicate is 409. The created grants authorize
+// immediately: the write refreshes the shared catalog the gates consult.
+//
+// @Summary Create a role
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param request body CreateRoleRequest true "Role"
+// @Success 201 {object} RoleResponse
+// @Failure 401,403,400,409,422,500 {object} Problem
+// @Security ApiKeyAuth
+// @Security BearerAuth
+// @Router /v1/roles [post]
+func (h *RoleHandler) Create(c *gin.Context) {
+	var req CreateRoleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		WriteProblem(c, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+	role, perms, err := h.authSvc.CreateRole(c.Request.Context(), req.Name, req.Description, req.Permissions)
+	if err != nil {
+		WriteError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, toRoleResponse(role, perms))
+}
+
+// Update handles PUT /v1/roles/{name}. It fully replaces the permission
+// list: an empty list revokes every grant. An omitted description keeps the
+// stored one. Stripping roles:write from the last holder is 409 and leaves
+// the role unchanged.
+//
+// @Summary Replace a role's permissions
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param name path string true "Role name"
+// @Param request body UpdateRoleRequest true "Role"
+// @Success 200 {object} RoleResponse
+// @Failure 401,403,400,404,409,422,500 {object} Problem
+// @Security ApiKeyAuth
+// @Security BearerAuth
+// @Router /v1/roles/{name} [put]
+func (h *RoleHandler) Update(c *gin.Context) {
+	var req UpdateRoleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		WriteProblem(c, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+	role, perms, err := h.authSvc.UpdateRole(c.Request.Context(), c.Param("name"), req.Description, req.Permissions)
+	if err != nil {
+		WriteError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, toRoleResponse(role, perms))
+}
+
+// Delete handles DELETE /v1/roles/{name}. Deleting the last roles:write
+// holder is 409 and leaves the role unchanged. Tokens and input nodes
+// naming a deleted role keep resolving the name, it simply grants nothing.
+//
+// @Summary Delete a role
+// @Tags auth
+// @Param name path string true "Role name"
+// @Success 204
+// @Failure 401,403,400,404,409,500 {object} Problem
+// @Security ApiKeyAuth
+// @Security BearerAuth
+// @Router /v1/roles/{name} [delete]
+func (h *RoleHandler) Delete(c *gin.Context) {
+	if err := h.authSvc.DeleteRole(c.Request.Context(), c.Param("name")); err != nil {
+		WriteError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 // toRoleResponses maps the catalog onto the response list.
 func toRoleResponses(roles []model.Role, perms map[string][]string) []RoleResponse {
 	out := make([]RoleResponse, 0, len(roles))
@@ -178,7 +258,7 @@ func toRoleResponse(r model.Role, perms []string) RoleResponse {
 // sortedPermissions lists the actions a principal effectively holds, so a
 // frontend can hide controls the caller cannot use. A service principal
 // reports every known action.
-func sortedPermissions(catalog auth.Catalog, p auth.Principal) []string {
+func sortedPermissions(catalog *auth.Catalog, p auth.Principal) []string {
 	perms := p.Permissions(catalog)
 	out := make([]string, 0, len(perms))
 	for action := range perms {

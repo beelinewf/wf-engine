@@ -6,10 +6,11 @@
 // keys become underscores, e.g. BEELINEWF_WORKER_POOL_SIZE); a key absent from
 // the environment falls back to the config file, then to the code default.
 // A set-but-empty variable is treated as unset and falls back the same way.
-// The role catalog is the exception: maps cannot ride AutomaticEnv, so
+// The role seed is the exception: maps cannot ride AutomaticEnv, so
 // auth.role_permissions is applied from BEELINEWF_AUTH_ROLE_PERMISSIONS as a
 // post-unmarshal JSON override, where a set non-blank value wins over the
-// file and blank falls back to it.
+// file and blank falls back to it. The seed fills the role tables only while
+// they are empty; afterwards the database wins.
 package configuration
 
 import (
@@ -265,10 +266,10 @@ type Auth struct {
 	// The engine keeps no sessions and no callback: the frontend runs
 	// code+PKCE against the provider and calls the API with the JWT.
 	OIDC OIDC `mapstructure:"oidc"`
-	// RolePermissions is the static role catalog: role name to the
-	// resource-action permissions it grants. At startup it upserts the
-	// role and permission rows and prunes the permission rows of these
-	// roles that are no longer granted; no role row is ever deleted.
+	// RolePermissions is the first-boot seed for the role tables: role name
+	// to the resource-action permissions it grants. It applies only while
+	// the roles table is empty; once seeded, the database is the source of
+	// truth and roles are managed over the API.
 	RolePermissions map[string][]string `mapstructure:"role_permissions"`
 	// RateLimit throttles online API-token guessing: after MaxAttempts
 	// failed X-Api-Token presentations from one client IP within Window,

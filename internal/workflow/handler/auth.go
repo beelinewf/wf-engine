@@ -41,7 +41,7 @@ type AuthConfig struct {
 	// when the service principal is the only possible caller.
 	IdentityResolver IdentityResolver
 	// Catalog turns a caller's roles into the permissions route gates read.
-	Catalog auth.Catalog
+	Catalog *auth.Catalog
 	// SystemUserID is the audit actor the API-token bypass acts as.
 	SystemUserID string
 	// FailureLimiter throttles failed API-token presentations per client
@@ -187,7 +187,7 @@ func bearerToken(header string) string {
 // roles union to action. A service principal is admitted: it holds the
 // wildcard. The gate runs after authentication, so a caller reaching it is
 // known and a refusal is 403 rather than 401.
-func RequirePermission(action string, catalog auth.Catalog) gin.HandlerFunc {
+func RequirePermission(action string, catalog *auth.Catalog) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		principal, ok := auth.FromContext(c.Request.Context())
 		if !ok {

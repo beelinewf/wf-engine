@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/beelinewf/wf-engine/pkg/configuration"
 )
@@ -51,6 +52,7 @@ const (
 	ActionInstancesMigrate = "instances:migrate"
 	ActionStatisticsRead   = "statistics:read"
 	ActionRolesRead        = "roles:read"
+	ActionRolesWrite       = "roles:write"
 	ActionUsersRead        = "users:read"
 	ActionSchedulesRead    = "schedules:read"
 	ActionSchedulesWrite   = "schedules:write"
@@ -81,7 +83,7 @@ type Principal struct {
 // principal's roles. A service principal holds every known action, so a
 // listing of its permissions shows what the bypass covers. The bypass
 // itself lives in HasPermission, not in this set.
-func (p Principal) Permissions(catalog Catalog) map[string]bool {
+func (p Principal) Permissions(catalog *Catalog) map[string]bool {
 	out := make(map[string]bool)
 	if p.Service {
 		for _, action := range KnownActions() {
@@ -104,7 +106,7 @@ func (p Principal) Permissions(catalog Catalog) map[string]bool {
 // A role name that is not in the catalog grants nothing, so an unknown
 // claim role denies by default while still matching an input node's
 // allowed_roles.
-func (p Principal) HasPermission(action string, catalog Catalog) bool {
+func (p Principal) HasPermission(action string, catalog *Catalog) bool {
 	if action == "" {
 		return false
 	}
@@ -156,7 +158,7 @@ func (p Principal) MatchesUserID(allowed []string) bool {
 
 // ContextWithPrincipal returns a context carrying the principal and its
 // resolved permissions.
-func ContextWithPrincipal(ctx context.Context, p Principal, catalog Catalog) context.Context {
+func ContextWithPrincipal(ctx context.Context, p Principal, catalog *Catalog) context.Context {
 	ctx = context.WithValue(ctx, principalContextKey, p)
 	return context.WithValue(ctx, permissionsContextKey, p.Permissions(catalog))
 }
@@ -173,22 +175,52 @@ func PermissionsFromContext(ctx context.Context) (map[string]bool, bool) {
 	return perms, ok
 }
 
-// Catalog is the read-only role catalog. It is built once from
-// configuration and consulted on every request; it is never written to at
-// runtime, so it is safe for concurrent use.
+// Catalog is the shared in-memory role catalog. It is consulted on every
+// request and replaced wholesale whenever the role tables change: at
+// startup from the database (or from configuration on a first boot), after
+// every committed role write, and on the background refresh. One instance
+// is shared by every holder, so a replacement is visible to the request
+// gates without a restart. Reads take the read lock and copy what they
+// return, so concurrent requests never observe a half-swapped map and can
+// never mutate the shared state. The zero value is an empty catalog and is
+// usable as-is; build a populated one with NewCatalog. Always share the
+// pointer, never a copy: copying a Catalog copies its lock.
 type Catalog struct {
+	mu     sync.RWMutex
 	byRole map[string][]string
 }
 
-// NewCatalog builds a catalog from the configured role permissions. Actions
-// are copied so later mutation of the input map cannot affect the catalog.
+// NewCatalog builds a catalog from role permissions. Actions are copied so
+// later mutation of the input map cannot affect the catalog.
 //
 // Role names are trimmed like actions are. A role name is compared against
 // the names a token asserts, so a name carrying stray whitespace is a role no
 // token can ever reach, and the operator sees a configured role that silently
 // grants nothing. A name that is blank once trimmed names nobody and is
 // dropped.
-func NewCatalog(rolePermissions map[string][]string) Catalog {
+func NewCatalog(rolePermissions map[string][]string) *Catalog {
+	return &Catalog{byRole: buildCatalogMap(rolePermissions)}
+}
+
+// CatalogFromConfig builds the catalog from the loaded configuration.
+func CatalogFromConfig(cfg configuration.Auth) *Catalog {
+	return NewCatalog(cfg.RolePermissions)
+}
+
+// Replace swaps the whole role map for a freshly built one. It is how a
+// committed role write and the background refresh become visible to the
+// request gates. The input map is copied with the same trimming NewCatalog
+// applies, so callers may reuse it afterwards.
+func (c *Catalog) Replace(rolePermissions map[string][]string) {
+	fresh := buildCatalogMap(rolePermissions)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.byRole = fresh
+}
+
+// buildCatalogMap copies a role-permission map into catalog shape, trimming
+// role names and actions and dropping blank entries of either.
+func buildCatalogMap(rolePermissions map[string][]string) map[string][]string {
 	byRole := make(map[string][]string, len(rolePermissions))
 	for role, actions := range rolePermissions {
 		role = strings.TrimSpace(role)
@@ -205,34 +237,59 @@ func NewCatalog(rolePermissions map[string][]string) Catalog {
 		}
 		byRole[role] = trimmed
 	}
-	return Catalog{byRole: byRole}
+	return byRole
 }
 
-// CatalogFromConfig builds the catalog from the loaded configuration.
-func CatalogFromConfig(cfg configuration.Auth) Catalog {
-	return NewCatalog(cfg.RolePermissions)
-}
-
-// PermissionsFor returns the actions granted by a role. A role that is not
-// in the catalog returns nil.
-func (c Catalog) PermissionsFor(role string) []string {
-	return c.byRole[role]
+// PermissionsFor returns the actions granted by a role, copied so the caller
+// cannot mutate the shared catalog. A role that is not in the catalog
+// returns nil.
+func (c *Catalog) PermissionsFor(role string) []string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	actions := c.byRole[role]
+	if actions == nil {
+		return nil
+	}
+	out := make([]string, len(actions))
+	copy(out, actions)
+	return out
 }
 
 // HasRole reports whether the catalog knows a role.
-func (c Catalog) HasRole(role string) bool {
+func (c *Catalog) HasRole(role string) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	_, ok := c.byRole[role]
 	return ok
 }
 
 // Roles returns every role name in the catalog, sorted for stable output.
-func (c Catalog) Roles() []string {
+func (c *Catalog) Roles() []string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	out := make([]string, 0, len(c.byRole))
 	for role := range c.byRole {
 		out = append(out, role)
 	}
 	sort.Strings(out)
 	return out
+}
+
+// HasRolesWriteHolder reports whether any role in perms grants the role-write
+// gate, explicitly via roles:write or via the wildcard. It is the one
+// definition of "holder" shared by the boot warning, the role-write path,
+// and the tests; the repository enforces the same condition in SQL inside
+// the write transaction.
+func HasRolesWriteHolder(perms map[string][]string) bool {
+	for _, actions := range perms {
+		for _, action := range actions {
+			action = strings.TrimSpace(action)
+			if action == ActionRolesWrite || action == WildcardAction {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // KnownActions returns every resource-action this build gates on, so a
@@ -255,6 +312,7 @@ func KnownActions() []string {
 		ActionInstancesMigrate,
 		ActionStatisticsRead,
 		ActionRolesRead,
+		ActionRolesWrite,
 		ActionUsersRead,
 		ActionSchedulesRead,
 		ActionSchedulesWrite,
@@ -264,17 +322,25 @@ func KnownActions() []string {
 }
 
 // Seed describes one role and the actions it grants, as stored in the
-// role_permissions table. The catalog is the source of truth; the table is
-// an identity cache seeded from it.
+// role_permissions table. It is the first-boot seed: configuration fills the
+// tables only while they are empty, and the database is the source of truth
+// afterwards.
 type Seed struct {
 	Roles       []string
 	Permissions map[string][]string
 }
 
-// Seed returns the role/action rows to upsert at startup. Permissions are
-// deduplicated and sorted so the seed is deterministic.
-func (c Catalog) Seed() Seed {
-	roles := c.Roles()
+// Seed returns the role/action rows to upsert on a first boot. Permissions
+// are deduplicated and sorted so the seed is deterministic.
+func (c *Catalog) Seed() Seed {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	// Listed inline rather than via Roles: a read lock must not nest.
+	roles := make([]string, 0, len(c.byRole))
+	for role := range c.byRole {
+		roles = append(roles, role)
+	}
+	sort.Strings(roles)
 	perms := make(map[string][]string, len(roles))
 	for _, role := range roles {
 		seen := make(map[string]bool, len(c.byRole[role]))

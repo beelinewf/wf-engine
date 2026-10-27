@@ -166,12 +166,10 @@ func TestUserUpsertConcurrent(t *testing.T) {
 	}
 }
 
-// TestRoleSeedIsIdempotentAndNonDestructive covers the startup catalog
-// write: seeding twice must not duplicate. A role dropped from configuration
-// keeps its row, so an in-flight token still resolves the name, but the
-// permissions it used to grant are pruned: the table is a copy of
-// configuration, so a stale grant there is drift the audit copy must not
-// keep.
+// TestRoleSeedIsIdempotentAndNonDestructive covers the first-boot seed:
+// seeding twice must not duplicate. A role dropped from the seed keeps its
+// row, so an in-flight token still resolves the name, and the prune of a
+// narrowed role is scoped to the roles the seed names.
 func TestRoleSeedIsIdempotentAndNonDestructive(t *testing.T) {
 	db := setupTestDB(t)
 	ctx := context.Background()
@@ -224,8 +222,7 @@ func TestRoleSeedIsIdempotentAndNonDestructive(t *testing.T) {
 
 	// Narrowing a role prunes the grants it no longer has. A role dropped
 	// from the seed keeps both its row and its permission rows: the prune
-	// is scoped to the roles this seed names, so history stays readable and
-	// the read APIs, which serve the live catalog, no longer advertise it.
+	// is scoped to the roles this seed names, so history stays readable.
 	if err := seed(map[string][]string{"admin": {"*", "instances:read"}}); err != nil {
 		t.Fatalf("seed admin with an extra action: %v", err)
 	}

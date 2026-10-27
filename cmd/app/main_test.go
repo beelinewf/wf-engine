@@ -456,6 +456,18 @@ func (stubAuthService) GetRole(context.Context, string) (model.Role, []string, e
 	return model.Role{}, nil, nil
 }
 
+func (stubAuthService) CreateRole(context.Context, string, *string, []string) (model.Role, []string, error) {
+	return model.Role{}, nil, nil
+}
+
+func (stubAuthService) UpdateRole(context.Context, string, *string, []string) (model.Role, []string, error) {
+	return model.Role{}, nil, nil
+}
+
+func (stubAuthService) DeleteRole(context.Context, string) error { return nil }
+
+func (stubAuthService) RefreshCatalog(context.Context) error { return nil }
+
 func (stubAuthService) Me(context.Context, auth.Principal) (model.User, error) {
 	return model.User{}, nil
 }

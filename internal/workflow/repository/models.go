@@ -33,8 +33,8 @@ type UserModel struct {
 // TableName is the users table.
 func (UserModel) TableName() string { return "users" }
 
-// RoleModel persists model.Role. Roles are seeded from configuration, so the
-// catalog is owned by the deployment rather than by the API.
+// RoleModel persists model.Role. Roles are seeded from configuration on a
+// first boot and managed over the roles API afterwards.
 type RoleModel struct {
 	Name        string    `gorm:"column:name;type:text;primaryKey"`
 	Description string    `gorm:"column:description;not null;default:''"`

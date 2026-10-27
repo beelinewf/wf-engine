@@ -142,6 +142,18 @@ func (f *fakeAuthSvc) GetRole(_ context.Context, name string) (model.Role, []str
 	return model.Role{Name: "auditor"}, []string{auth.ActionRolesRead}, nil
 }
 
+func (f *fakeAuthSvc) CreateRole(_ context.Context, name string, _ *string, actions []string) (model.Role, []string, error) {
+	return model.Role{Name: name}, actions, nil
+}
+
+func (f *fakeAuthSvc) UpdateRole(_ context.Context, name string, _ *string, actions []string) (model.Role, []string, error) {
+	return model.Role{Name: name}, actions, nil
+}
+
+func (f *fakeAuthSvc) DeleteRole(context.Context, string) error { return nil }
+
+func (f *fakeAuthSvc) RefreshCatalog(context.Context) error { return nil }
+
 func (f *fakeAuthSvc) Me(_ context.Context, p auth.Principal) (model.User, error) {
 	return model.User{ID: p.UserID, Name: p.Name, Email: p.Email}, nil
 }

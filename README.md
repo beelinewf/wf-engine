@@ -85,7 +85,7 @@ status notifications. Both stay fully disabled when their DSN is absent.
   the provider and calls the API with the JWT. An `X-Api-Token` authenticates
   the service principal, which bypasses every authorization gate and is
   recorded as the system user. With neither configured, `/v1` is open as
-  before. Authorization is role-based over a config-owned action catalog
+  before. Authorization is role-based over a database-backed action catalog
   (see [Authentication and authorization](#authentication-and-authorization)).
   Swagger UI at `/swagger/index.html`.
 
@@ -156,7 +156,8 @@ curl http://localhost:8080/health/ready
   `BEELINEWF_AUTH_OIDC_ENABLED=true BEELINEWF_AUTH_OIDC_ISSUER=http://mock-oidc:9099
   BEELINEWF_AUTH_OIDC_CLIENT_ID=beelinewf docker compose up --build`, then
   `curl http://localhost:9099/token/admin` (`auditor`/`finance` cover the other
-  shipped roles). The stack's role catalog mirrors `config.yaml`.
+  shipped roles). The stack's role catalog is seeded from the compose
+  file's `BEELINEWF_AUTH_ROLE_PERMISSIONS` on first boot.
 - Broker-free mode: unset `BEELINEWF_INFRA_REDIS_DSN` and
   `BEELINEWF_INFRA_RABBITMQ_DSN` on the `app` service.
 
@@ -223,7 +224,7 @@ different role, the same caller accepted once the role matches, the
 path: anonymous delivery accepted on a public node, refused on a private one,
 an invalid credential refused on both, and an anonymous status read still
 401. Set `BEELINEWF_API_TOKEN` to also exercise the service-principal bypass.
-The app must be started with a catalog that grants the roles the script
+The app must be started with a role seed that grants the roles the script
 uses; `config.e2e-oidc.yaml` is a working example.
 
 ## Node types
@@ -289,7 +290,7 @@ system audit user. Key settings:
 | `engine.http_max_in_flight_per_host`                     | `16`                   | Per-host outbound HTTP cap; fleet-wide concurrency is replicas x this                                           |
 | `auth.enabled` / `api_token`                             | `false`                | When enabled, `/v1` requires `X-Api-Token` (the service principal)                                              |
 | `auth.oidc.*`                                            | disabled               | OIDC resource server; needs `issuer` and `client_id`                                                            |
-| `auth.role_permissions` / `BEELINEWF_AUTH_ROLE_PERMISSIONS` | file / `{}`            | Role-to-action catalog as YAML map or JSON object; env overrides file; invalid JSON fails startup               |
+| `auth.role_permissions` / `BEELINEWF_AUTH_ROLE_PERMISSIONS` | file / `{}`            | First-boot seed for the role tables as YAML map or JSON object; env overrides file; invalid JSON fails startup  |
 
 List-valued keys accept comma-separated env values, e.g.
 `BEELINEWF_ENGINE_HTTP_ALLOWLIST="api.example.com,jsonplaceholder.typicode.com"`,
@@ -298,7 +299,8 @@ List-valued keys accept comma-separated env values, e.g.
 list, e.g. `{"admin":["definitions:read","roles:read"]}`. A set value
 overrides the config file; blank falls back to it. Invalid JSON fails
 startup with a `configuration: BEELINEWF_AUTH_ROLE_PERMISSIONS: invalid JSON`
-error.
+error. The seed applies only while the `roles` table is empty: once seeded,
+the database is the source of truth and the API owns the catalog.
 
 A browser frontend on another origin needs CORS: the default `"*"`
 allows any origin, which suits development. For production, set
@@ -355,7 +357,8 @@ still resolves to a stable `users.id` that later shows up in attribution.
 
 ### Authorizing
 
-The catalog is configuration, not API state:
+The role tables are the source of truth; configuration seeds them on a first
+boot:
 
 ```yaml
 auth:
@@ -365,16 +368,14 @@ auth:
     auditor: ["definitions:read", "instances:read", "statistics:read", "roles:read"]
 ```
 
-Same catalog via env: `BEELINEWF_AUTH_ROLE_PERMISSIONS='{"admin":["*"],"finance":["instances:read","input:deliver"]}'` (overrides the file).
+Same seed via env: `BEELINEWF_AUTH_ROLE_PERMISSIONS='{"admin":["*"],"finance":["instances:read","input:deliver"]}'` (overrides the file). The seed runs only while the `roles` table is empty: once seeded, editing config or env no longer changes the catalog, and a restart keeps the database state. Manage roles over the API instead (below).
 
 `"*"` is the wildcard: a role holding it passes every gate, the same bypass
 the service principal gets. The other two lines are the shipped defaults from
 `config.yaml`; read them as a starting point rather than a recommendation,
 because the point of a catalog is to grant the least each role needs.
 
-Every role in the catalog is seeded into the `roles` / `role_permissions`
-tables at startup so a frontend can read the catalog back. Each route declares
-the one action it needs:
+Each route declares the one action it needs:
 
 | Action                           | Covers                                           |
 | -------------------------------- | ------------------------------------------------ |
@@ -389,16 +390,24 @@ the one action it needs:
 | `instances:migrate`              | definition migration of a running instance       |
 | `statistics:read`                | the statistics summary                           |
 | `roles:read`                     | the role catalog                                 |
+| `roles:write`                    | role creation, replacement, and deletion         |
 
 A role the token carries that is absent from the catalog grants nothing, so
-unknown roles deny by default. Seeding upserts the configured roles, prunes
-the permission rows of those roles that the configuration no longer grants,
-and never deletes a role: a role dropped from config keeps its rows but stops
-granting anything, because the grant is computed from the live token plus the
-configured catalog.
+unknown roles deny by default.
 
-`GET /v1/roles` and `GET /v1/roles/{name}` are read-only and need
-`roles:read`.
+`GET /v1/roles` and `GET /v1/roles/{name}` need `roles:read`.
+`POST /v1/roles` (201), `PUT /v1/roles/{name}` (200), and
+`DELETE /v1/roles/{name}` (204) need `roles:write`; the API token bypasses
+with no role grant, so it stays the recovery path. `PUT` fully replaces the
+permission list — an empty list revokes every grant — and keeps the stored
+description when omitted. Writes take effect immediately on the writing
+replica; other replicas catch up within ~30s.
+
+At least one role must always retain the `roles:write` permission, explicitly
+or via `"*"`: stripping it from the last holder, or deleting that role, is
+**409** and leaves the role unchanged. A deployment seeded before
+`roles:write` existed grants it with one API-key write adding `roles:write`
+to `admin`.
 
 ### Input delivery is gated by permission, user, then role
 
@@ -520,6 +529,9 @@ The authoritative contract is [api/openapi.yaml](api/openapi.yaml)
 | GET        | `/v1/auth/me`                                      | The authenticated caller (identity, roles, effective permissions)                                          |
 | GET        | `/v1/roles`                                        | Role catalog (needs `roles:read`)                                                                            |
 | GET        | `/v1/roles/{name}`                                 | One role and its permissions                                                                               |
+| POST       | `/v1/roles`                                        | Create role (201, needs `roles:write`)                                                                       |
+| PUT        | `/v1/roles/{name}`                                 | Replace role permissions (200; 409 on last-holder strip)                                                     |
+| DELETE     | `/v1/roles/{name}`                                 | Delete role (204; 409 on last-holder delete)                                                                 |
 | POST       | `/v1/node/definition`                              | Create immutable node definition (201)                                                                     |
 | GET        | `/v1/node/definition`                              | List (paged, `latest_only`, `type`, ...)                                                                       |
 | GET/DELETE | `/v1/node/definition/{id}`                         | Get / delete (fails if referenced)                                                                         |
@@ -791,7 +803,7 @@ Good first checks on any PR: the gofumpt check prints nothing,
   control both ends.
 - Roles are taken from the verified token, never from the request body, so a
   caller cannot escalate by claiming a role in a parameter. A role absent
-  from `auth.role_permissions` grants nothing.
+  from the catalog grants nothing.
 - Found a vulnerability? Please use GitHub's private vulnerability
   reporting on this repository instead of opening a public issue, so a fix
   can land before disclosure.

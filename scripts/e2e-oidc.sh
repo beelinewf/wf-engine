@@ -8,6 +8,8 @@
 # JWTs signed by its key, and drives the app the way a frontend would:
 #
 #   * a login contract is readable without any credential;
+#   * role writes need roles:write (finance is refused, admin succeeds),
+#     and deleting the last roles:write holder is refused 409;
 #   * a token with a role that holds input:deliver but is absent from the
 #     parked node's allowed_roles is refused 403 (the second gate);
 #   * the same caller on a node that lists the role is accepted, and the
@@ -105,6 +107,49 @@ pass "identity is stable across requests"
 code=$(curl -sS -o /dev/null -w '%{http_code}' "$APP_BASE_URL/v1/roles" -H "Authorization: Bearer $(finance_token finance)")
 [[ "$code" == "403" ]] || fail "GET /v1/roles as finance -> $code, want 403 (no roles:read)"
 pass "role catalog refuses a role without roles:read"
+
+# --- role writes need roles:write; the last holder cannot go -----------------------
+# finance holds no roles:write, so its write is refused.
+code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$APP_BASE_URL/v1/roles" \
+  -H "Authorization: Bearer $(finance_token finance)" -H 'Content-Type: application/json' \
+  -d '{"name":"e2e-temp","permissions":["instances:read"]}')
+[[ "$code" == "403" ]] || fail "POST /v1/roles as finance -> $code, want 403 (no roles:write)"
+pass "role write refuses a role without roles:write"
+
+# admin is the seeded sole holder of roles:write, so its write succeeds and
+# authorizes immediately: a token carrying the new role passes the granted
+# gate with no restart. (The mock provider mints no such token, so the new
+# grant is proven by re-reading the role over the API-token bypass instead.)
+code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$APP_BASE_URL/v1/roles" \
+  -H "Authorization: Bearer $(finance_token admin)" -H 'Content-Type: application/json' \
+  -d '{"name":"e2e-temp","permissions":["instances:read"]}')
+[[ "$code" == "201" ]] || fail "POST /v1/roles as admin -> $code, want 201"
+role=$(curl -fsS "$APP_BASE_URL/v1/roles/e2e-temp" -H "X-Api-Token: $BEELINEWF_API_TOKEN") \
+  || fail "re-read the created role"
+[[ "$(printf '%s' "$role" | jq -r '.permissions[0]')" == "instances:read" ]] \
+  || fail "created role does not carry its grant: $role"
+pass "role write succeeds for a roles:write holder"
+
+# Deleting the sole roles:write holder is refused, and the role survives.
+code=$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE "$APP_BASE_URL/v1/roles/admin" \
+  -H "Authorization: Bearer $(finance_token admin)")
+[[ "$code" == "409" ]] || fail "DELETE /v1/roles/admin -> $code, want 409 (last roles:write holder)"
+role=$(curl -fsS "$APP_BASE_URL/v1/roles/admin" -H "X-Api-Token: $BEELINEWF_API_TOKEN") \
+  || fail "re-read admin after the refused delete"
+[[ "$(printf '%s' "$role" | jq -r '.permissions[0]')" == "roles:write" ]] \
+  || fail "admin lost its grant after the refused delete: $role"
+pass "deleting the last roles:write holder is refused and the role is intact"
+
+# Granting a second holder unblocks the delete; removing the temp role
+# afterwards leaves the seed alone for the rest of the script.
+code=$(curl -sS -o /dev/null -w '%{http_code}' -X PUT "$APP_BASE_URL/v1/roles/e2e-temp" \
+  -H "Authorization: Bearer $(finance_token admin)" -H 'Content-Type: application/json' \
+  -d '{"permissions":["roles:write"]}')
+[[ "$code" == "200" ]] || fail "PUT /v1/roles/e2e-temp -> $code, want 200"
+code=$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE "$APP_BASE_URL/v1/roles/e2e-temp" \
+  -H "Authorization: Bearer $(finance_token admin)")
+[[ "$code" == "204" ]] || fail "DELETE /v1/roles/e2e-temp -> $code, want 204"
+pass "a second holder unblocks the delete"
 
 # --- build a workflow whose input node is closed to finance -------------------------
 # The example node lists manager, so finance passes the endpoint gate and is

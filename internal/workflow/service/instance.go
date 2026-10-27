@@ -446,9 +446,9 @@ type instanceService struct {
 	limits       model.NodeLimits
 	cancels      Canceller
 	leanOptions  model.LeanOptions
-	// catalog is the read-only role catalog used to turn a caller's roles
+	// catalog is the shared role catalog used to turn a caller's roles
 	// into the permissions the input endpoint gate checks.
-	catalog auth.Catalog
+	catalog *auth.Catalog
 	// multipart carries the object store and streaming limits multipart
 	// input deliveries upload through.
 	multipart MultipartDeps
@@ -487,7 +487,7 @@ func NewInstanceService(
 ) InstanceService {
 	return newInstanceService(
 		instances, parallel, wfDefs, secrets, forms, materializer, validator, hooks,
-		actor, limits, cancels, leanOptions, auth.Catalog{}, MultipartDeps{},
+		actor, limits, cancels, leanOptions, auth.NewCatalog(nil), MultipartDeps{},
 	)
 }
 
@@ -508,7 +508,7 @@ func NewInstanceServiceWithCatalog(
 	limits model.NodeLimits,
 	cancels Canceller,
 	leanOptions model.LeanOptions,
-	catalog auth.Catalog,
+	catalog *auth.Catalog,
 ) InstanceService {
 	return newInstanceService(
 		instances, parallel, wfDefs, secrets, forms, materializer, validator, hooks,
@@ -532,7 +532,7 @@ func NewInstanceServiceWithMultipart(
 	limits model.NodeLimits,
 	cancels Canceller,
 	leanOptions model.LeanOptions,
-	catalog auth.Catalog,
+	catalog *auth.Catalog,
 	mp MultipartDeps,
 ) InstanceService {
 	return newInstanceService(
@@ -554,7 +554,7 @@ func newInstanceService(
 	limits model.NodeLimits,
 	cancels Canceller,
 	leanOptions model.LeanOptions,
-	catalog auth.Catalog,
+	catalog *auth.Catalog,
 	mp MultipartDeps,
 ) InstanceService {
 	return &instanceService{
