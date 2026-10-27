@@ -4131,6 +4131,58 @@ func TestGetStatusDetailIncludesParallelTree(t *testing.T) {
 	}
 }
 
+func TestGetStatusDetailMasksBranchErrorsWithSecrets(t *testing.T) {
+	db := setupSvcDB(t)
+	ctx := context.Background()
+	svc := svcInstanceService(db)
+	secrets := repository.NewSecretRepository(db)
+	if _, err := secrets.Create(ctx, "API_KEY", "plain-value"); err != nil {
+		t.Fatal(err)
+	}
+	wfID := svcCreateBranchInputWorkflow(t, db, map[string]any{"channel": "http", "output_property": "webhook"})
+	instID, a, _ := svcSetupBranchInput(t, db, svc, wfID)
+
+	// A branch failure echoing a rendered secret (URL, stdin, header echo).
+	// The read-path scrub keys off the error text, not the branch status.
+	leak := "dial https://api.example.test with plain-value failed"
+	if err := db.Model(&repository.ParallelBranchModel{}).Where("id = ?", a.ID).Update("error", leak).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	d, err := svc.GetStatusDetail(ctx, instID, auth.Principal{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Parallel) != 1 {
+		t.Fatalf("parallel executions = %d, want 1", len(d.Parallel))
+	}
+	var branch *service.ParallelBranchView
+	for i := range d.Parallel[0].Branches {
+		b := &d.Parallel[0].Branches[i]
+		if strings.Contains(b.Error, "plain-value") {
+			t.Fatalf("branch %s leaked plaintext: %q", b.Name, b.Error)
+		}
+		if b.ID == a.ID {
+			branch = b
+		}
+	}
+	if branch == nil {
+		t.Fatalf("branch %s missing from status", a.ID)
+	}
+	if !strings.Contains(branch.Error, secretMaskForTest) {
+		t.Fatalf("branch error missing mask: %q", branch.Error)
+	}
+
+	// The scrub is read-time only: the stored row keeps the raw error.
+	stored, err := repository.NewParallelRepository(db).GetBranch(ctx, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Error != leak {
+		t.Fatalf("stored branch error = %q, want untouched %q", stored.Error, leak)
+	}
+}
+
 func TestGetStatusDetailOmitsParallelWithoutFork(t *testing.T) {
 	db := setupSvcDB(t)
 	ctx := context.Background()

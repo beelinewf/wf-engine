@@ -809,6 +809,10 @@ func (s *instanceService) GetStatusDetail(ctx context.Context, id string, p auth
 	d.Nodes = s.statusNodes(ctx, inst, wc, exs, exErr)
 	if exErr == nil && branchesErr == nil {
 		d.Parallel = statusParallel(exs, branchesByEx)
+		// Branch errors can embed rendered secrets; scrub them against the
+		// pre-redaction snapshot. inst.Context still holds plaintext here
+		// because redactInstanceView copies.
+		redactParallelBranchErrors(d.Parallel, inst.Context)
 	}
 	frame, err := model.ParseFrame(inst.Frame)
 	if err != nil {
