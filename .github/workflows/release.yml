@@ -68,7 +68,7 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-      - uses: orhun/git-cliff-action@7b1e3c4bd0c0d131f6e2ad69ae67d78d932396f2 # v4
+      - uses: orhun/git-cliff-action@a9a95522b26fe6403f7bb24031f21fb573d0f5ff # v4
         id: cliff
         with:
           args: --latest --strip all
