@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/beelinewf/wf-engine/internal/workflow/defcache"
 )
@@ -136,4 +137,48 @@ func TestConcurrentHammer(t *testing.T) {
 	if got := c.Len(); got > 64 {
 		t.Errorf("Len() = %d, want <= 64", got)
 	}
+}
+
+func TestSlowComputeDoesNotStallReaders(t *testing.T) {
+	c := defcache.New[string, string](16)
+	if _, err := c.GetOrCompute("fast", func() (string, error) { return "v", nil }); err != nil {
+		t.Fatal(err)
+	}
+	release := make(chan struct{})
+	slowDone := make(chan struct{})
+	go func() {
+		defer close(slowDone)
+		_, _ = c.GetOrCompute("slow", func() (string, error) {
+			<-release
+			return "s", nil
+		})
+	}()
+	// Give the slow compute a moment to start and block.
+	select {
+	case <-slowDone:
+		t.Fatal("slow compute finished before release; test setup broken")
+	case <-time.After(50 * time.Millisecond):
+	}
+	readDone := make(chan string, 1)
+	go func() {
+		v, err := c.GetOrCompute("fast", func() (string, error) { return "recomputed", nil })
+		if err != nil {
+			t.Error(err)
+			readDone <- ""
+			return
+		}
+		readDone <- v
+	}()
+	select {
+	case v := <-readDone:
+		if v != "v" {
+			t.Errorf("fast read = %q, want cached %q", v, "v")
+		}
+	case <-time.After(500 * time.Millisecond):
+		close(release)
+		<-slowDone
+		t.Fatal("reading a cached key blocked on an unrelated slow compute")
+	}
+	close(release)
+	<-slowDone
 }

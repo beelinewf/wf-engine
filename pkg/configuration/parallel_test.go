@@ -9,7 +9,7 @@ import (
 func TestLoadParallelDefaults(t *testing.T) {
 	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
 
-	cfg, err := configuration.Load(configuration.WithConfigFile(missingPath(t)))
+	cfg, err := configuration.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}

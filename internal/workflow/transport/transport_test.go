@@ -95,3 +95,25 @@ func TestRequeueBackoffIsBounded(t *testing.T) {
 		}
 	}
 }
+
+func TestSleepOrDoneReturnsEarlyOnCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	start := time.Now()
+	if sleepOrDone(ctx, 10*time.Second) {
+		t.Error("sleepOrDone(cancelled) = true, want false")
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Errorf("sleepOrDone took %v, want fast return on cancel", elapsed)
+	}
+}
+
+func TestSleepOrDoneSleepsFullDuration(t *testing.T) {
+	start := time.Now()
+	if !sleepOrDone(context.Background(), 20*time.Millisecond) {
+		t.Error("sleepOrDone(background) = false, want true")
+	}
+	if elapsed := time.Since(start); elapsed < 20*time.Millisecond {
+		t.Errorf("sleepOrDone took %v, want >= 20ms", elapsed)
+	}
+}

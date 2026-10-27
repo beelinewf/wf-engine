@@ -248,6 +248,27 @@ func TestParseInstanceListQueryInvalidValues(t *testing.T) {
 	}
 }
 
+func TestParsePaginationRejectsHugePage(t *testing.T) {
+	c, _ := makeCtx("/v1/workflow/instance?page=99999999")
+	if _, err := ParseInstanceListQuery(c); err == nil {
+		t.Error("ParseInstanceListQuery(page=99999999) error = nil, want error")
+	}
+}
+
+func TestParseInstanceListQueryTooManyStatuses(t *testing.T) {
+	var sb strings.Builder
+	for i := 0; i < 101; i++ {
+		if i > 0 {
+			sb.WriteString("&")
+		}
+		sb.WriteString("status=running")
+	}
+	c, _ := makeCtx("/v1/workflow/instance?" + sb.String())
+	if _, err := ParseInstanceListQuery(c); err == nil {
+		t.Error("ParseInstanceListQuery with 101 statuses error = nil, want error")
+	}
+}
+
 func TestWriteProblem(t *testing.T) {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)

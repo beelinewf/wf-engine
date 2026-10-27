@@ -20,6 +20,17 @@ func NewString() (string, error) {
 	return id.String(), nil
 }
 
+// MustString returns a fresh UUIDv7 in canonical string form, panicking on
+// generation failure. UUIDv7 generation fails only when the system RNG
+// fails, which is unrecoverable; callers that must not panic use NewString.
+func MustString() string {
+	s, err := NewString()
+	if err != nil {
+		panic(err)
+	}
+	return s
+}
+
 // Parse parses a canonical UUID string.
 func Parse(s string) (uuid.UUID, error) {
 	return uuid.Parse(s)

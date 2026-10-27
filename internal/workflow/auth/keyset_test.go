@@ -442,3 +442,30 @@ func TestHMACSignedTokensAreRejectedAtParse(t *testing.T) {
 		t.Errorf("JWKS fetches = %d, want 0: an unparseable token reached the provider", got)
 	}
 }
+
+func TestConcurrentRefreshOnFailingProviderCollapsesToOneFetch(t *testing.T) {
+	var fetches atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fetches.Add(1)
+		time.Sleep(100 * time.Millisecond)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(srv.Close)
+	ks := newTTLKeySetWithClock(srv.URL, time.Hour, newTestClock().Now)
+	var wg sync.WaitGroup
+	start := time.Now()
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ks.refresh(context.Background())
+		}()
+	}
+	wg.Wait()
+	if got := fetches.Load(); got != 1 {
+		t.Errorf("JWKS fetches = %d, want 1 (shared failure, not one per waiter)", got)
+	}
+	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+		t.Errorf("10 concurrent refreshes took %v, want ~100ms (not sequential)", elapsed)
+	}
+}

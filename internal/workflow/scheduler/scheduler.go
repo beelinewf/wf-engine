@@ -104,11 +104,13 @@ func New(ctx context.Context, schedules repository.ScheduleRepository, instances
 // registry in sync across replicas. A load failure is returned and neither
 // loop is started.
 func (s *Scheduler) Run() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := s.sync(); err != nil {
+	rows, err := s.loadEnabled()
+	if err != nil {
 		return err
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.apply(rows)
 	s.inner.Start()
 	s.wg.Add(1)
 	go s.refreshLoop()
@@ -118,13 +120,18 @@ func (s *Scheduler) Run() error {
 // Refresh reloads the enabled schedules, converging the registry on the
 // enabled rows. It is safe to call while running. A load failure keeps the
 // old entries and is logged, never returned, so a service mutation never
-// fails on the refresh path.
+// fails on the refresh path. The rows load outside the lock so a slow table
+// does not serialize mutations against the ticker refresh; only the
+// registry converge holds the lock.
 func (s *Scheduler) Refresh() {
+	rows, err := s.loadEnabled()
+	if err != nil {
+		s.log.Warn("scheduler refresh failed; keeping old entries", "error", err)
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.sync(); err != nil {
-		s.log.Warn("scheduler refresh failed; keeping old entries", "error", err)
-	}
+	s.apply(rows)
 }
 
 // Shutdown stops the loop and waits for in-flight ticks and the registry
@@ -207,19 +214,14 @@ func (s *Scheduler) addAligned(spec string, job cron.Job) (cron.EntryID, error) 
 	return s.inner.AddJob(spec, job)
 }
 
-// sync converges the registry on the currently enabled rows: entries for
+// apply converges the registry on the given enabled rows: entries for
 // new schedules are added, entries for removed, disabled, or changed
 // schedules are dropped and re-added, and untouched entries keep their
 // timers. A clear-and-add reload would reset every @every timer on each
-// refresh, starving any interval longer than the refresh ticker. The rows
-// load before any entry is touched, so a failure keeps the old registry.
-// The caller holds s.mu: two concurrent syncs would otherwise interleave
+// refresh, starving any interval longer than the refresh ticker.
+// The caller holds s.mu: two concurrent applies would otherwise interleave
 // their add-and-remove and duplicate entries.
-func (s *Scheduler) sync() error {
-	rows, err := s.loadEnabled()
-	if err != nil {
-		return err
-	}
+func (s *Scheduler) apply(rows []model.CronSchedule) {
 	want := make(map[string]model.CronSchedule, len(rows))
 	for _, row := range rows {
 		want[row.ID] = row
@@ -257,7 +259,6 @@ func (s *Scheduler) sync() error {
 		}
 		s.entries[row.ID] = registeredEntry{id: entryID, spec: spec}
 	}
-	return nil
 }
 
 func (s *Scheduler) loadEnabled() ([]model.CronSchedule, error) {

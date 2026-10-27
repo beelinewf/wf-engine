@@ -262,15 +262,15 @@ func validateFormInput(name string, schema, ui []byte) error {
 		return fmt.Errorf("%w: form name is required", model.ErrInvalid)
 	}
 	if err := form.CheckSchema(schema); err != nil {
-		return fmt.Errorf("%w: %v", model.ErrInvalid, err)
+		return fmt.Errorf("%w: %w", model.ErrInvalid, err)
 	}
 	if err := form.CheckFileFields(schema); err != nil {
-		return fmt.Errorf("%w: %v", model.ErrInvalid, err)
+		return fmt.Errorf("%w: %w", model.ErrInvalid, err)
 	}
 	if len(ui) > 0 {
 		var uiDoc any
 		if err := json.Unmarshal(ui, &uiDoc); err != nil {
-			return fmt.Errorf("%w: ui must be valid JSON: %v", model.ErrInvalid, err)
+			return fmt.Errorf("%w: ui must be valid JSON: %w", model.ErrInvalid, err)
 		}
 		if _, ok := uiDoc.(map[string]any); !ok {
 			return fmt.Errorf("%w: ui must be an object", model.ErrInvalid)

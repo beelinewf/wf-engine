@@ -188,3 +188,43 @@ func TestFinishAttempt(t *testing.T) {
 		}
 	})
 }
+
+func TestPersistContextAfterPolicies(t *testing.T) {
+	t.Run("fail policy returns marshal error", func(t *testing.T) {
+		attempt := &model.NodeInstance{}
+		end := map[string]any{"bad": func() {}}
+		if err := persistContextAfter(attempt, map[string]any{"a": 1}, end, "full", failOnUnserializable); err == nil {
+			t.Fatal("persistContextAfter(fail) error = nil, want marshal error")
+		}
+	})
+	t.Run("fallback policy uses start context", func(t *testing.T) {
+		attempt := &model.NodeInstance{}
+		start := map[string]any{"a": 1}
+		end := map[string]any{"bad": func() {}}
+		if err := persistContextAfter(attempt, start, end, "full", fallbackToStart); err != nil {
+			t.Fatalf("persistContextAfter(fallback) error = %v", err)
+		}
+		var got map[string]any
+		if err := json.Unmarshal(attempt.ContextAfter, &got); err != nil || got["a"] != float64(1) {
+			t.Errorf("ContextAfter = %s, want start context", attempt.ContextAfter)
+		}
+	})
+	t.Run("fallback policy fails when start is unserializable", func(t *testing.T) {
+		attempt := &model.NodeInstance{}
+		bad := map[string]any{"bad": func() {}}
+		if err := persistContextAfter(attempt, bad, bad, "full", fallbackToStart); err == nil {
+			t.Fatal("persistContextAfter(fallback, bad start) error = nil, want marshal error")
+		}
+	})
+	t.Run("lean mode stores diff under both policies", func(t *testing.T) {
+		for _, p := range []contextAfterPolicy{failOnUnserializable, fallbackToStart} {
+			attempt := &model.NodeInstance{}
+			if err := persistContextAfter(attempt, map[string]any{"a": 1}, map[string]any{"a": 1, "b": 2}, "lean", p); err != nil {
+				t.Fatalf("persistContextAfter(lean) error = %v", err)
+			}
+			if string(attempt.ContextBefore) != "null" {
+				t.Errorf("ContextBefore = %s, want null", attempt.ContextBefore)
+			}
+		}
+	})
+}

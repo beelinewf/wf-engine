@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/beelinewf/wf-engine/internal/workflow/metrics"
+	"github.com/beelinewf/wf-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/pump"
 	"github.com/beelinewf/wf-engine/internal/workflow/repository"
 	"github.com/panjf2000/ants/v2"
 )
@@ -63,7 +65,7 @@ func NewDispatcher(ctx context.Context, e *Engine, instances repository.Instance
 	if opts.Heartbeat <= 0 {
 		opts.Heartbeat = 5 * time.Second
 	}
-	pool, err := ants.NewPool(opts.PoolSize, ants.WithNonblocking(false))
+	pool, err := ants.NewPool(opts.PoolSize, ants.WithNonblocking(true))
 	if err != nil {
 		return nil, err
 	}
@@ -100,32 +102,16 @@ func (d *Dispatcher) claimLoop() {
 			return
 		case <-ticker.C:
 		}
-		claimed, err := d.instances.ClaimNext(d.ctx, d.workerID, d.lease, d.batchSize)
-		if err != nil {
-			if d.ctx.Err() == nil {
-				slog.Warn("dispatcher claim failed", "worker", d.workerID, "error", err)
-			}
-			continue
-		}
-		d.metrics.DispatcherClaimsAdd(len(claimed))
-		for _, w := range claimed {
-			w := w
-			d.wg.Add(1)
-			err := d.pool.Submit(func() {
-				defer d.wg.Done()
-				if err := d.engine.Process(d.ctx, w); err != nil && d.ctx.Err() == nil {
+		pump.Batch(d.ctx, &d.wg, d.pool, d.workerID, "dispatcher",
+			func(ctx context.Context) ([]model.WorkflowInstance, error) {
+				return d.instances.ClaimNext(ctx, d.workerID, d.lease, d.batchSize)
+			},
+			func(ctx context.Context, w model.WorkflowInstance) {
+				if err := d.engine.Process(ctx, w); err != nil && ctx.Err() == nil {
 					slog.Warn("dispatcher process failed", "worker", d.workerID, "instance", w.ID, "error", err)
 				}
-			})
-			if err != nil {
-				d.wg.Done()
-				// Pool closed (shutdown): run the transition inline rather
-				// than dropping the claim.
-				if err := d.engine.Process(d.ctx, w); err != nil && d.ctx.Err() == nil {
-					slog.Warn("dispatcher inline process failed", "worker", d.workerID, "instance", w.ID, "error", err)
-				}
-			}
-		}
+			},
+			d.metrics.DispatcherClaimsAdd)
 		d.claimBranches()
 	}
 }
@@ -134,35 +120,21 @@ func (d *Dispatcher) claimBranches() {
 	if d.parallel == nil {
 		return
 	}
-	branches, err := d.parallel.ClaimNextBranches(d.ctx, d.workerID, d.lease, d.batchSize)
-	if err != nil {
-		if d.ctx.Err() == nil {
-			slog.Warn("dispatcher branch claim failed", "worker", d.workerID, "error", err)
-		}
-		return
-	}
-	d.metrics.DispatcherClaimsAdd(len(branches))
-	if len(branches) > 0 {
-		slog.Debug("dispatcher claimed branches", "worker", d.workerID, "count", len(branches))
-	}
-	for _, b := range branches {
-		b := b
-		d.wg.Add(1)
-		err := d.pool.Submit(func() {
-			defer d.wg.Done()
-			if err := d.engine.ProcessBranch(d.ctx, b); err != nil && d.ctx.Err() == nil {
+	pump.Batch(d.ctx, &d.wg, d.pool, d.workerID, "dispatcher branch",
+		func(ctx context.Context) ([]model.ParallelBranch, error) {
+			return d.parallel.ClaimNextBranches(ctx, d.workerID, d.lease, d.batchSize)
+		},
+		func(ctx context.Context, b model.ParallelBranch) {
+			if err := d.engine.ProcessBranch(ctx, b); err != nil && ctx.Err() == nil {
 				slog.Warn("dispatcher branch process failed", "worker", d.workerID, "branch", b.ID, "error", err)
 			}
-		})
-		if err != nil {
-			d.wg.Done()
-			// Pool closed (shutdown): run the transition inline rather
-			// than dropping the claim.
-			if err := d.engine.ProcessBranch(d.ctx, b); err != nil && d.ctx.Err() == nil {
-				slog.Warn("dispatcher inline branch process failed", "worker", d.workerID, "branch", b.ID, "error", err)
+		},
+		func(n int) {
+			d.metrics.DispatcherClaimsAdd(n)
+			if n > 0 {
+				slog.Debug("dispatcher claimed branches", "worker", d.workerID, "count", n)
 			}
-		}
-	}
+		})
 }
 
 func (d *Dispatcher) heartbeatLoop() {

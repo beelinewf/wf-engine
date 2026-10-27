@@ -171,11 +171,11 @@ func (a *OIDCAuthenticator) Verify(ctx context.Context, rawToken string) (Princi
 		// audience, because those checks already passed.
 		var expired *oidc.TokenExpiredError
 		if a.lax == nil || !errors.As(err, &expired) {
-			return Principal{}, fmt.Errorf("%w: %v", ErrUnauthenticated, err)
+			return Principal{}, fmt.Errorf("%w: %w", ErrUnauthenticated, err)
 		}
 		idToken, err = a.lax.Verify(ctx, rawToken)
 		if err != nil {
-			return Principal{}, fmt.Errorf("%w: %v", ErrUnauthenticated, err)
+			return Principal{}, fmt.Errorf("%w: %w", ErrUnauthenticated, err)
 		}
 	}
 	var claims map[string]any

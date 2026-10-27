@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"os"
 	"path"
@@ -312,6 +313,7 @@ func Load(opts ...Option) (*Config, error) {
 		opt(&l)
 	}
 
+	explicit := l.configFile != ""
 	path := l.configFile
 	if path == "" {
 		path = defaultConfigFile
@@ -367,11 +369,17 @@ func Load(opts ...Option) (*Config, error) {
 	_ = v.BindEnv("infra.http.cors.allow_credentials", "BEELINEWF_INFRA_HTTP_CORS_ALLOW_CREDENTIALS")
 	_ = v.BindEnv("infra.http.cors.max_age", "BEELINEWF_INFRA_HTTP_CORS_MAX_AGE")
 
-	if _, err := os.Stat(path); err == nil {
+	if _, err := os.Stat(path); err != nil {
+		if explicit {
+			return nil, fmt.Errorf("configuration: explicit config file %s: %w", path, err)
+		}
+		slog.Info("configuration: no config file, using environment and defaults", "path", path)
+	} else {
 		v.SetConfigFile(path)
 		if err := v.ReadInConfig(); err != nil {
 			return nil, fmt.Errorf("configuration: read config file %s: %w", path, err)
 		}
+		slog.Info("configuration: loaded config file", "path", path)
 	}
 	// auth.role_permissions cannot ride AutomaticEnv: a set-but-blank
 	// BEELINEWF_AUTH_ROLE_PERMISSIONS would shadow the file subtree with an

@@ -174,7 +174,9 @@ func (c *RabbitClient) Consume(ctx context.Context, consumerTag string, handler 
 			res, err := handler(ctx, msg)
 			if err != nil {
 				failures++
-				time.Sleep(requeueBackoff(failures))
+				if !sleepOrDone(ctx, requeueBackoff(failures)) {
+					return nil
+				}
 				_ = d.Nack(false, true)
 				continue
 			}
@@ -242,6 +244,19 @@ func (c *RabbitClient) ConsumeQueue(ctx context.Context, queue, consumerTag stri
 				_ = d.Nack(false, false)
 			}
 		}
+	}
+}
+
+// sleepOrDone sleeps d unless ctx is cancelled first. It reports whether
+// the full duration elapsed.
+func sleepOrDone(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
 	}
 }
 
