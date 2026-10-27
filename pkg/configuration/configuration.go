@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/url"
 	"os"
 	"path"
@@ -269,6 +270,13 @@ type Auth struct {
 	// role and permission rows and prunes the permission rows of these
 	// roles that are no longer granted; no role row is ever deleted.
 	RolePermissions map[string][]string `mapstructure:"role_permissions"`
+	// RateLimit throttles online API-token guessing: after MaxAttempts
+	// failed X-Api-Token presentations from one client IP within Window,
+	// further attempts from that IP answer 429 for BlockDuration. OIDC
+	// Bearer [REDACTED] are signed and not guessable, so their failures never
+	// count. The limiter is per-replica in-memory state; a proxy-level
+	// throttle is the stronger multi-replica control.
+	RateLimit RateLimit `mapstructure:"rate_limit"`
 }
 
 // OIDC holds the OIDC resource-server settings.
@@ -301,6 +309,31 @@ type OIDC struct {
 	// so a blackhole issuer fails the boot fast instead of hanging it.
 	// Zero means no timeout. Default 10s.
 	DiscoveryTimeout time.Duration `mapstructure:"discovery_timeout"`
+}
+
+// RateLimit holds the API-token failure throttle: per-source-IP,
+// failures-only, with an explicit trusted-proxy list.
+type RateLimit struct {
+	// Enabled turns the throttle on. Default true: with auth on, guessing
+	// is bounded out of the box; with auth off the middleware never runs
+	// and this setting is inert.
+	Enabled bool `mapstructure:"enabled"`
+	// MaxAttempts is the failed X-Api-Token presentations one client IP
+	// may make within Window before further attempts answer 429.
+	// Default 20.
+	MaxAttempts int `mapstructure:"max_attempts"`
+	// Window is the fixed window the failure count accumulates in.
+	// Default 1m.
+	Window time.Duration `mapstructure:"window"`
+	// BlockDuration is how long a throttled IP keeps answering 429.
+	// Default 1m.
+	BlockDuration time.Duration `mapstructure:"block_duration"`
+	// TrustedProxies lists the IPs or CIDRs whose X-Forwarded-For and
+	// X-Real-Ip headers may identify the client. Empty (the default)
+	// trusts no proxy: the key is always the direct peer, so a spoofed
+	// header can never rotate the attacker's identity. List the reverse
+	// proxy here when one terminates client connections.
+	TrustedProxies []string `mapstructure:"trusted_proxies"`
 }
 
 // Secrets holds the secret-store settings.
@@ -358,6 +391,15 @@ func Load(opts ...Option) (*Config, error) {
 		"discovery_timeout",
 	} {
 		_ = v.BindEnv("auth.oidc."+key, "BEELINEWF_AUTH_OIDC_"+strings.ToUpper(key))
+	}
+	// auth.rate_limit.* is exposed as BEELINEWF_AUTH_RATE_LIMIT_* (the
+	// default mapping), bound explicitly so the keys resolve without a
+	// config file.
+	for _, key := range []string{
+		"enabled", "max_attempts", "window", "block_duration",
+		"trusted_proxies",
+	} {
+		_ = v.BindEnv("auth.rate_limit."+key, "BEELINEWF_AUTH_RATE_LIMIT_"+strings.ToUpper(key))
 	}
 	// Lean settings are operator toggles and must override config.yaml.
 	_ = v.BindEnv("engine.lean_context_default", "BEELINEWF_ENGINE_LEAN_CONTEXT_DEFAULT")
@@ -471,6 +513,15 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("auth.oidc.clock_skew", "1m")
 	v.SetDefault("auth.oidc.cache_ttl", "5m")
 	v.SetDefault("auth.oidc.discovery_timeout", "10s")
+	// The API-token failure throttle is on by default with conservative
+	// bounds, so auth-enabled deployments are protected without any
+	// operator action. Trusted proxies default to none: proxy headers
+	// are honored only from explicitly listed addresses.
+	v.SetDefault("auth.rate_limit.enabled", true)
+	v.SetDefault("auth.rate_limit.max_attempts", 20)
+	v.SetDefault("auth.rate_limit.window", "1m")
+	v.SetDefault("auth.rate_limit.block_duration", "1m")
+	v.SetDefault("auth.rate_limit.trusted_proxies", []string{})
 	v.SetDefault("infra.postgresql.dsn", "")
 	v.SetDefault("infra.postgresql.max_open_conns", 25)
 	v.SetDefault("infra.postgresql.max_idle_conns", 25)
@@ -703,6 +754,20 @@ func (c *Config) validate() error {
 	if c.Auth.Enabled && strings.TrimSpace(c.Auth.APIToken) == "" {
 		return errors.New("configuration: auth.api_token is required when auth.enabled is true")
 	}
+	if c.Auth.RateLimit.Enabled {
+		if c.Auth.RateLimit.MaxAttempts <= 0 {
+			return errors.New("configuration: auth.rate_limit.max_attempts must be > 0")
+		}
+		if c.Auth.RateLimit.Window <= 0 {
+			return errors.New("configuration: auth.rate_limit.window must be > 0")
+		}
+		if c.Auth.RateLimit.BlockDuration <= 0 {
+			return errors.New("configuration: auth.rate_limit.block_duration must be > 0")
+		}
+		if err := validateTrustedProxies(c.Auth.RateLimit.TrustedProxies); err != nil {
+			return err
+		}
+	}
 	if c.Auth.OIDC.Enabled {
 		if strings.TrimSpace(c.Auth.OIDC.Issuer) == "" {
 			return errors.New("configuration: auth.oidc.issuer is required when auth.oidc.enabled is true")
@@ -769,6 +834,27 @@ func validCORSOrigin(s string) bool {
 		return false
 	}
 	return u.Path == "" && u.RawQuery == "" && u.Fragment == ""
+}
+
+// validateTrustedProxies rejects a trusted-proxy entry that is neither an
+// IP nor a CIDR. A bad entry would silently never match, leaving the
+// operator's proxy untrusted (fail-closed but surprising), so it fails
+// the boot instead.
+func validateTrustedProxies(entries []string) error {
+	for _, e := range entries {
+		e = strings.TrimSpace(e)
+		if e == "" {
+			continue
+		}
+		if net.ParseIP(e) != nil {
+			continue
+		}
+		if _, _, err := net.ParseCIDR(e); err == nil {
+			continue
+		}
+		return fmt.Errorf("configuration: auth.rate_limit.trusted_proxies: %q must be an IP or CIDR", e)
+	}
+	return nil
 }
 
 // validateEnvPatterns rejects a malformed env deny/allow pattern. A pattern

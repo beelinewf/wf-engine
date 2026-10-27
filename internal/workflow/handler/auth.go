@@ -44,6 +44,11 @@ type AuthConfig struct {
 	Catalog auth.Catalog
 	// SystemUserID is the audit actor the API-token bypass acts as.
 	SystemUserID string
+	// FailureLimiter throttles failed API-token presentations per client
+	// IP (F7). A nil limiter disables throttling. One limiter is shared
+	// by every middleware instance so /metrics guesses count against the
+	// same budget as /v1 guesses.
+	FailureLimiter *authFailureLimiter
 }
 
 // RequireAuth returns Gin middleware that authenticates every request and
@@ -62,8 +67,14 @@ type AuthConfig struct {
 // route or node gate is 403, which the gate decides, not the middleware.
 func RequireAuth(cfg AuthConfig) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if cfg.limitApplies(c) && !checkAuthLimit(c, cfg) {
+			return
+		}
 		principal, err := authenticate(c, cfg)
 		if err != nil {
+			if cfg.limitApplies(c) {
+				noteAuthFailure(c, cfg)
+			}
 			WriteProblem(c, http.StatusUnauthorized, err.Error())
 			return
 		}
@@ -217,8 +228,14 @@ func TryAuth(cfg AuthConfig) gin.HandlerFunc {
 			c.Next()
 			return
 		}
+		if cfg.limitApplies(c) && !checkAuthLimit(c, cfg) {
+			return
+		}
 		principal, err := authenticate(c, cfg)
 		if err != nil {
+			if cfg.limitApplies(c) {
+				noteAuthFailure(c, cfg)
+			}
 			WriteProblem(c, http.StatusUnauthorized, err.Error())
 			return
 		}
@@ -267,7 +284,13 @@ func authPresented(c *gin.Context, cfg AuthConfig) bool {
 // matches, so auth-enabled without a token fails closed on every request.
 func RequireAPIToken(cfg AuthConfig) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if cfg.limitApplies(c) && !checkAuthLimit(c, cfg) {
+			return
+		}
 		if !tokensEqual(c.GetHeader(APIKeyHeader), cfg.APIToken) {
+			if cfg.limitApplies(c) {
+				noteAuthFailure(c, cfg)
+			}
 			WriteProblem(c, http.StatusUnauthorized, "missing or invalid API token")
 			return
 		}

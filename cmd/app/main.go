@@ -13,7 +13,7 @@ import (
 	// @securityDefinitions.apikey ApiKeyAuth
 	// @in header
 	// @name X-Api-Token
-	// @description API token authentication via the X-Api-Token header. The token authenticates as the service principal, which bypasses every authorization gate.
+	// @description API token authentication via the X-Api-Token header. The token authenticates as the service principal, which bypasses every authorization gate. Failed presentations are throttled per client IP (auth.rate_limit): past the configured threshold further attempts answer 429 with a Retry-After until the block expires.
 	// @securityDefinitions.apikey BearerAuth
 	// @in header
 	// @name Authorization

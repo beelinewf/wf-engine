@@ -103,6 +103,12 @@ func NewRouter(deps Deps) *gin.Engine {
 	v1 := r.Group("/v1")
 	enabled := deps.authEnabled()
 
+	// One failure limiter for every auth middleware: /metrics guesses
+	// count against the same per-IP budget as /v1 guesses. Nil when the
+	// throttle is disabled, which leaves every middleware exactly as
+	// before.
+	limiter := newAuthFailureLimiter(deps.AuthSettings.RateLimit)
+
 	if deps.MetricsEnabled && deps.Metrics != nil {
 		metricsHandler := func(c *gin.Context) {
 			if deps.MetricsRefresh != nil {
@@ -111,7 +117,11 @@ func NewRouter(deps Deps) *gin.Engine {
 			deps.Metrics.Handler().ServeHTTP(c.Writer, c.Request)
 		}
 		if enabled {
-			r.GET("/metrics", RequireAPIToken(AuthConfig{APIToken: deps.AuthSettings.APIToken}), metricsHandler)
+			r.GET("/metrics", RequireAPIToken(AuthConfig{
+				Enabled:        deps.AuthSettings.Enabled,
+				APIToken:       deps.AuthSettings.APIToken,
+				FailureLimiter: limiter,
+			}), metricsHandler)
 		} else {
 			r.GET("/metrics", metricsHandler)
 		}
@@ -140,6 +150,7 @@ func NewRouter(deps Deps) *gin.Engine {
 			IdentityResolver: resolver,
 			Catalog:          deps.Catalog,
 			SystemUserID:     deps.SystemUserID,
+			FailureLimiter:   limiter,
 		}
 		// PUT input is the one route that serves anonymous callers: a
 		// public input node accepts a delivery with no credential at all.

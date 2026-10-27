@@ -249,6 +249,100 @@ func TestLoadRejectsNonPositiveMaxBodyBytes(t *testing.T) {
 	}
 }
 
+func TestLoadRateLimitDefaults(t *testing.T) {
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+
+	cfg, err := configuration.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	rl := cfg.Auth.RateLimit
+	if !rl.Enabled {
+		t.Error("default rate_limit.enabled = false, want true")
+	}
+	if rl.MaxAttempts != 20 {
+		t.Errorf("default rate_limit.max_attempts = %d, want 20", rl.MaxAttempts)
+	}
+	if rl.Window != time.Minute {
+		t.Errorf("default rate_limit.window = %v, want 1m", rl.Window)
+	}
+	if rl.BlockDuration != time.Minute {
+		t.Errorf("default rate_limit.block_duration = %v, want 1m", rl.BlockDuration)
+	}
+	if len(rl.TrustedProxies) != 0 {
+		t.Errorf("default rate_limit.trusted_proxies = %v, want empty", rl.TrustedProxies)
+	}
+}
+
+func TestLoadRateLimitEnvOverridesFile(t *testing.T) {
+	path := writeConfig(t, `
+infra:
+  postgresql:
+    dsn: "file-dsn"
+auth:
+  rate_limit:
+    max_attempts: 5
+    window: "2m"
+    trusted_proxies:
+      - "10.0.0.1"
+`)
+	setenv(t, "BEELINEWF_AUTH_RATE_LIMIT_MAX_ATTEMPTS", "7")
+	setenv(t, "BEELINEWF_AUTH_RATE_LIMIT_TRUSTED_PROXIES", "192.0.2.1,198.51.100.0/24")
+
+	cfg, err := configuration.Load(configuration.WithConfigFile(path))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	rl := cfg.Auth.RateLimit
+	if rl.MaxAttempts != 7 {
+		t.Errorf("max_attempts = %d, want 7 from environment", rl.MaxAttempts)
+	}
+	if rl.Window != 2*time.Minute {
+		t.Errorf("window = %v, want 2m from file", rl.Window)
+	}
+	if len(rl.TrustedProxies) != 2 || rl.TrustedProxies[0] != "192.0.2.1" || rl.TrustedProxies[1] != "198.51.100.0/24" {
+		t.Errorf("trusted_proxies = %v, want [192.0.2.1 198.51.100.0/24] from environment", rl.TrustedProxies)
+	}
+}
+
+func TestLoadRejectsInvalidRateLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		key   string
+		value string
+	}{
+		{"zero max_attempts", "BEELINEWF_AUTH_RATE_LIMIT_MAX_ATTEMPTS", "0"},
+		{"negative max_attempts", "BEELINEWF_AUTH_RATE_LIMIT_MAX_ATTEMPTS", "-1"},
+		{"zero window", "BEELINEWF_AUTH_RATE_LIMIT_WINDOW", "0s"},
+		{"zero block_duration", "BEELINEWF_AUTH_RATE_LIMIT_BLOCK_DURATION", "0s"},
+		{"bad trusted proxy", "BEELINEWF_AUTH_RATE_LIMIT_TRUSTED_PROXIES", "not-an-ip"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+			setenv(t, tc.key, tc.value)
+			if _, err := configuration.Load(); err == nil {
+				t.Fatalf("Load() error = nil, want error for %s=%s", tc.key, tc.value)
+			}
+		})
+	}
+}
+
+// Disabled means disabled: invalid numbers alongside enabled=false load
+// fine, since nothing reads them.
+func TestLoadRateLimitDisabledSkipsValidation(t *testing.T) {
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+	setenv(t, "BEELINEWF_AUTH_RATE_LIMIT_ENABLED", "false")
+	setenv(t, "BEELINEWF_AUTH_RATE_LIMIT_MAX_ATTEMPTS", "0")
+
+	cfg, err := configuration.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Auth.RateLimit.Enabled {
+		t.Error("rate_limit.enabled = true, want false from environment")
+	}
+}
+
 func TestLoadServerTimeoutDefaults(t *testing.T) {
 	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
 
