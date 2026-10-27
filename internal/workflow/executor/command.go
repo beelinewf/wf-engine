@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -73,6 +74,17 @@ func (e *CommandExecutor) Execute(ctx context.Context, req Request) (*Result, er
 	defer cancel()
 
 	cmd := exec.Command(canonical, cfg.Command[1:]...)
+	// F2: never inherit the engine environment (API token, DSNs, storage
+	// keys). Empty but non-nil blocks inheritance; nil would inherit.
+	cmd.Env = []string{}
+	// Every invocation gets its own fresh dir under the temp dir, removed
+	// afterwards — never the engine CWD, never shared between runs.
+	dir, err := os.MkdirTemp("", "wf-cmd-*")
+	if err != nil {
+		return nil, &NodeError{Node: req.Node, Reason: "command", Err: fmt.Errorf("scratch dir: %w", err)}
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	cmd.Dir = dir
 	cmd.Stdin = strings.NewReader(stdin)
 	var stdout, stderr cappedBuffer
 	stdout.max = e.maxOutput

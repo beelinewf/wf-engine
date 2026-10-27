@@ -257,3 +257,65 @@ func TestNewExecutorsAcceptsEmptyAllowlist(t *testing.T) {
 		t.Errorf("Execute() error = %v, want allowlist rejection", err)
 	}
 }
+
+// TestCommandExecutorScrubsEnvironment pins F2: the child must not inherit
+// the engine process environment (API token, DSNs, storage keys).
+func TestCommandExecutorScrubsEnvironment(t *testing.T) {
+	t.Setenv("BEELINEWF_API_TOKEN", "sentinel-api-token")
+	t.Setenv("BEELINEWF_S3_SECRET_KEY", "sentinel-storage-key")
+	exe := writeScript(t, t.TempDir(), "dumpenv", "env\n")
+	ex := executor.NewExecutors(executor.Limits{ExecAllowlist: []string{exe}, MaxOutputBytes: 1 << 20}, nil, executor.Dependencies{})[model.NodeTypeExternalCall]
+	res, err := ex.Execute(context.Background(), executor.Request{
+		Node:    execNode([]string{exe}, ""),
+		Context: map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	out := res.Output.(*executor.CommandResult).Stdout
+	for _, sentinel := range []string{"sentinel-api-token", "sentinel-storage-key"} {
+		if strings.Contains(out, sentinel) {
+			t.Errorf("child env leaks %q", sentinel)
+		}
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "BEELINEWF_") {
+			t.Errorf("child env contains %q", line)
+		}
+	}
+}
+
+// TestCommandExecutorRunsInOwnScratchDir pins the second half of F2: every
+// command invocation runs in its own fresh dir under the temp dir, removed
+// afterwards — never the engine's working directory, never shared.
+func TestCommandExecutorRunsInOwnScratchDir(t *testing.T) {
+	exe := writeScript(t, t.TempDir(), "whereami", "pwd\n")
+	ex := executor.NewExecutors(executor.Limits{ExecAllowlist: []string{exe}, MaxOutputBytes: 4096}, nil, executor.Dependencies{})[model.NodeTypeExternalCall]
+	run := func() string {
+		t.Helper()
+		res, err := ex.Execute(context.Background(), executor.Request{
+			Node:    execNode([]string{exe}, ""),
+			Context: map[string]any{},
+		})
+		if err != nil {
+			t.Fatalf("Execute() error = %v", err)
+		}
+		return strings.TrimSpace(res.Output.(*executor.CommandResult).Stdout)
+	}
+	scratch, err := filepath.EvalSymlinks(os.TempDir())
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%q): %v", os.TempDir(), err)
+	}
+	first, second := run(), run()
+	for _, dir := range []string{first, second} {
+		if rel, err := filepath.Rel(scratch, dir); err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+			t.Errorf("child dir = %q, want a fresh dir under %q", dir, scratch)
+		}
+		if _, statErr := os.Stat(dir); !os.IsNotExist(statErr) {
+			t.Errorf("child dir %q still exists after Execute, want removed", dir)
+		}
+	}
+	if first == second {
+		t.Errorf("both runs used %q, want a fresh dir per execution", first)
+	}
+}
