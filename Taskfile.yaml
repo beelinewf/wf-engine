@@ -39,6 +39,31 @@ tasks:
     cmds:
       - go vet ./...
 
+  changelog:
+    desc: Preview unreleased changelog entries (needs git-cliff)
+    cmds:
+      - git cliff --unreleased --strip all
+
+  release:
+    desc: 'Cut a release (refresh CHANGELOG.md, commit, tag). Usage: task release VERSION=v1.0.0'
+    preconditions:
+      - sh: test -n "{{.VERSION}}"
+        msg: "VERSION is required: task release VERSION=v1.0.0"
+      - sh: echo "{{.VERSION}}" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-.+)?$'
+        msg: "VERSION must be semver with a v prefix (e.g. v1.0.0, v1.0.0-rc.1)"
+      - sh: test -z "$(git tag -l '{{.VERSION}}')"
+        msg: "Tag {{.VERSION}} already exists"
+      - sh: command -v git-cliff >/dev/null
+        msg: "git-cliff not found (cargo install git-cliff)"
+      - sh: git diff --quiet && git diff --cached --quiet
+        msg: "Working tree must be clean before release (commit or stash first)"
+    cmds:
+      - git cliff --tag {{.VERSION}} -o CHANGELOG.md
+      - git add CHANGELOG.md cliff.toml
+      - 'git commit -m "chore(release): {{.VERSION}}"'
+      - git tag {{.VERSION}}
+      - 'echo "Tagged {{.VERSION}}. Push with: git push origin main {{.VERSION}}"'
+
   lint:
     desc: Run golangci-lint
     cmds:
