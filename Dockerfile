@@ -12,7 +12,7 @@ RUN CGO_ENABLED=0 go build -trimpath -o /out/app ./cmd/app
 
 # -- runtime stage ------------------------------------------------------------
 FROM alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc AS app
-RUN apk add --no-cache ca-certificates \
+RUN apk add --no-cache ca-certificates tzdata \
     && addgroup -S -g 10001 app \
     && adduser -S -D -u 10001 -G app app
 COPY --from=build /out/app /usr/local/bin/app
