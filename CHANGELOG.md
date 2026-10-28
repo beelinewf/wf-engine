@@ -4,6 +4,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 
+## [1.1.1] - 2026-10-28
+
+
+### Bug Fixes
+
+- Ship tzdata in runtime image (#73) ([e264cf6](https://github.com/beelinewf/wf-engine/commit/e264cf6ba4fb026c9f5edf0ba6d031273a3b0078))
+
+### Other
+
+- Release v1.1.0 (#69) ([e52ad45](https://github.com/beelinewf/wf-engine/commit/e52ad451647f2b16a716018a3971bd35e44d2343))
+- Add banner image to top (#72) ([3be18a0](https://github.com/beelinewf/wf-engine/commit/3be18a0e7813c003c42cf9a69139d39b79da7c3e))
+
 ## [1.1.0] - 2026-10-28
 
 
