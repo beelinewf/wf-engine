@@ -62,7 +62,7 @@ tasks:
       - git add CHANGELOG.md cliff.toml
       - 'git diff --cached --quiet || git commit -m "chore(release): {{.VERSION}}"'
       - git tag {{.VERSION}}
-      - 'echo "Tagged {{.VERSION}}. Push with: git push origin main {{.VERSION}}"'
+      - 'echo "Tagged {{.VERSION}} (local commit + tag, nothing pushed). Next: git push origin $(git branch --show-current) -> PR to main -> merge -> git push origin {{.VERSION}} (see HOW_TO_RELEASE.md)"'
 
   lint:
     desc: Run golangci-lint
