@@ -1,3 +1,5 @@
+![BeelineWF banner](banner.png)
+
 # BeelineWF — Durable Workflow Engine on PostgreSQL
 
 [![CI](https://github.com/beelinewf/wf-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/beelinewf/wf-engine/actions/workflows/ci.yml)
