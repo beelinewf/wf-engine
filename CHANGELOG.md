@@ -4,6 +4,22 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 
+## [1.1.0] - 2026-10-28
+
+
+### Bug Fixes
+
+- Add missing tables to test schema ([2cdb72a](https://github.com/beelinewf/wf-engine/commit/2cdb72a5e4bb474166c22aa5f9d5cdfd8fd08b84))
+
+### Features
+
+- Manage roles over the API ([3e1a835](https://github.com/beelinewf/wf-engine/commit/3e1a835dcc9c708f674843ae2f80866550479f99))
+- Manage roles over the API (#68) ([a0971ee](https://github.com/beelinewf/wf-engine/commit/a0971eec57c79636461365c4901ec26d267e1a60))
+
+### Other
+
+- Bump go-jose/v4 to v4.1.6 ([8649773](https://github.com/beelinewf/wf-engine/commit/86497739e2bf44e8f5bc40664df234e04cbd9260))
+
 ## [1.0.0] - 2026-10-27
 
 
@@ -22,6 +38,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Add boot and shutdown timeouts (#63) ([a2adf3c](https://github.com/beelinewf/wf-engine/commit/a2adf3caa5e42f5aacbb7d22dde43a243c80c6f2))
 - Fix/security (#64) ([a2d384a](https://github.com/beelinewf/wf-engine/commit/a2d384ac7dc0ef6cd7a6ae8b4933ecbc0a0a0f9d))
 - Skip commit when changelog is unchanged (#66) ([be0eb97](https://github.com/beelinewf/wf-engine/commit/be0eb97530013e8ac2a821189fc9c4c054ffe7ac))
+- Update git-cliff-action pin to working v4 SHA ([711ba93](https://github.com/beelinewf/wf-engine/commit/711ba9344f440d14c9bc4d132234fb9164a1b9f9))
 
 ### Features
 
