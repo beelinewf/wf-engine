@@ -35,7 +35,7 @@ paths:
         Public by design: a frontend has to read this to learn where to log
         in, which is exactly when it holds no token yet. Reports whether OIDC
         is configured, the provider endpoints to run the flow against, the
-        claim the roles are read from, and every role name the configured
+        claim the roles are read from, and every role name the role
         catalog knows, so a role can be labelled before the caller has one.
       responses:
         "200":
@@ -78,10 +78,10 @@ paths:
         - BearerAuth: []
       summary: List roles and their permissions
       description: |
-        Served from the live role catalog, which is what the request gates
-        consult, so the response never advertises a permission the engine
-        would not grant. Read-only: there is no role-write API, because the
-        catalog is configuration.
+        Served from the role tables, which are the source of truth every
+        committed write refreshes the in-memory catalog from, so the
+        response never advertises a permission the engine would not grant.
+        Reads need roles:read; writes need roles:write.
       responses:
         "403": { $ref: "#/components/responses/Forbidden" }
         "200":
@@ -90,6 +90,35 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/RoleList" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    post:
+      tags: [Roles]
+      operationId: createRole
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      summary: Create a role
+      description: |
+        Needs roles:write; the API token bypasses with no role grant. A
+        blank name is 422 and a duplicate is 409. The created grants
+        authorize immediately: the write refreshes the shared catalog the
+        gates consult.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RoleCreate" }
+      responses:
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "201":
+          description: Created role
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Role" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
         "500": { $ref: "#/components/responses/InternalError" }
   /v1/roles/{name}:
     get:
@@ -117,6 +146,68 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/Unprocessable" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    put:
+      tags: [Roles]
+      operationId: updateRole
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      summary: Replace a role's permissions
+      description: |
+        Needs roles:write; the API token bypasses with no role grant. Fully
+        replaces the permission list: an empty list revokes every grant. An
+        omitted description keeps the stored one. Stripping roles:write
+        from the last holder is 409 and leaves the role unchanged: at least
+        one role must always retain the roles:write permission.
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RoleUpdate" }
+      responses:
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "200":
+          description: Updated role
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Role" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    delete:
+      tags: [Roles]
+      operationId: deleteRole
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      summary: Delete a role
+      description: |
+        Needs roles:write; the API token bypasses with no role grant.
+        Deleting the last roles:write holder is 409 and leaves the role
+        unchanged: at least one role must always retain the roles:write
+        permission. Tokens and input nodes naming a deleted role keep
+        resolving the name, it simply grants nothing.
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "204": { description: Deleted }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
         "500": { $ref: "#/components/responses/InternalError" }
   /v1/users:
     get:
@@ -1524,7 +1615,7 @@ components:
         roles:
           type: array
           items: { type: string }
-          description: Every role name the configured catalog knows, so a role can be labelled before the caller holds one
+          description: Every role name the role catalog knows, so a role can be labelled before the caller holds one
     AuthMe:
       type: object
       description: The identity behind the presented credential.
@@ -1556,13 +1647,35 @@ components:
         description:
           type: string
           nullable: true
-          description: Derived from configuration; roles are not hand-authored
+          description: Authored over the API, or derived as "Configured role <name>" when omitted at creation
         permissions:
           type: array
           items: { type: string }
-          description: Actions this role grants, as the live catalog defines them
+          description: Actions this role grants, as the role tables store them
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    RoleCreate:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, description: Role name; blank is 422, a duplicate is 409 }
+        description:
+          type: string
+          description: Omitted or blank derives "Configured role <name>"
+        permissions:
+          type: array
+          items: { type: string }
+          description: Actions the role grants, trimmed and deduped; a blank entry is 422, an omitted list grants nothing
+    RoleUpdate:
+      type: object
+      properties:
+        description:
+          type: string
+          description: Omitted keeps the stored description
+        permissions:
+          type: array
+          items: { type: string }
+          description: Fully replaces the grant set; an empty or omitted list revokes every grant, a blank entry is 422
     RoleList:
       type: object
       required: [items]

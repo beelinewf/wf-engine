@@ -202,13 +202,16 @@ services:
       BEELINEWF_AUTH_OIDC_AUDIENCE: "${BEELINEWF_AUTH_OIDC_AUDIENCE:-}"
       BEELINEWF_AUTH_OIDC_ROLES_CLAIM: "${BEELINEWF_AUTH_OIDC_ROLES_CLAIM:-roles}"
       BEELINEWF_AUTH_OIDC_USERNAME_CLAIM: "${BEELINEWF_AUTH_OIDC_USERNAME_CLAIM:-name}"
-      # Role catalog: mirrors config.yaml role_permissions so OIDC tokens
-      # asserting the shipped roles grant the shipped permissions. A role a
-      # token carries that is absent here grants nothing (deny by default).
+      # First-boot seed for the role tables: mirrors config.yaml
+      # role_permissions so OIDC tokens asserting the shipped roles grant the
+      # shipped permissions. It applies only while the roles table is empty;
+      # once seeded, the database wins and roles are managed over the API. A
+      # role a token carries that is absent from the catalog grants nothing
+      # (deny by default).
       BEELINEWF_AUTH_ROLE_PERMISSIONS: >-
         {"admin": ["definitions:read", "definitions:write", "secrets:read", "secrets:write",
           "instances:create", "instances:read", "instances:update-context", "input:deliver",
-          "instances:control", "instances:migrate", "statistics:read", "roles:read", "schedules:read", "schedules:write", "users:read"],
+          "instances:control", "instances:migrate", "statistics:read", "roles:read", "roles:write", "schedules:read", "schedules:write", "users:read"],
          "finance": ["instances:read", "input:deliver"],
          "auditor": ["definitions:read", "instances:read", "statistics:read", "roles:read"]}
       BEELINEWF_WORKER_POOL_SIZE: "50"

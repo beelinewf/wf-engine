@@ -154,6 +154,59 @@ func warnAboutCatalog(rolePermissions map[string][]string, logger *logrus.Logger
 			}
 		}
 	}
+	// A seed with no roles:write holder is legal — a first boot may simply
+	// not grant it yet — but roles then cannot be managed over the API, so
+	// it gets a line rather than failing the boot. The API token bypasses
+	// every gate and stays the recovery path.
+	if !auth.HasRolesWriteHolder(rolePermissions) {
+		logger.Warnf("auth: no role grants roles:write, so roles cannot be managed over the API until one does")
+	}
+}
+
+// loadRoleCatalog decides what fills the shared role catalog at startup.
+// While the role tables are empty, configuration seeds them; otherwise the
+// database wins and configuration is ignored for roles.
+func loadRoleCatalog(ctx context.Context, roles repository.RoleRepository, authSvc service.AuthService, rolePermissions map[string][]string, logger *logrus.Logger) error {
+	existing, _, err := roles.List(ctx)
+	if err != nil {
+		return fmt.Errorf("list roles: %w", err)
+	}
+	if len(existing) == 0 {
+		warnAboutCatalog(rolePermissions, logger)
+		// The catalog is upserted and its stale permissions pruned, but no
+		// role row is ever deleted: a role dropped from the config keeps
+		// its rows so an in-flight token still resolves it.
+		if err := authSvc.SeedRoles(ctx); err != nil {
+			return fmt.Errorf("seed roles: %w", err)
+		}
+		return nil
+	}
+	if err := authSvc.RefreshCatalog(ctx); err != nil {
+		return fmt.Errorf("refresh catalog: %w", err)
+	}
+	return nil
+}
+
+// catalogRefreshInterval bounds how stale one replica's in-memory catalog
+// can go after another replica writes a role.
+const catalogRefreshInterval = 30 * time.Second
+
+// refreshCatalogLoop reloads the shared catalog on an interval so role
+// writes made through other replicas take effect locally. A failed refresh
+// warns and retries on the next tick; the loop ends with the context.
+func refreshCatalogLoop(ctx context.Context, authSvc service.AuthService, logger *logrus.Logger) {
+	ticker := time.NewTicker(catalogRefreshInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		if err := authSvc.RefreshCatalog(ctx); err != nil && ctx.Err() == nil {
+			logger.Warnf("catalog refresh: %v", err)
+		}
+	}
 }
 
 // checkAuthWiring refuses to boot an authentication setup that cannot name
@@ -338,17 +391,19 @@ func run(ctx context.Context, cfg *configuration.Config, logger *logrus.Logger) 
 		logger.Infof("oidc enabled for issuer %s", cfg.Auth.OIDC.Issuer)
 	}
 	catalog := auth.CatalogFromConfig(cfg.Auth)
-	warnAboutCatalog(cfg.Auth.RolePermissions, logger)
 	authSvc := service.NewAuthService(users, roles, catalog, actor)
 	if err := checkAuthWiring(oidcVerifier, authSvc, actor); err != nil {
 		return err
 	}
-	// The catalog is upserted and its stale permissions pruned, but no role
-	// row is ever deleted: a role dropped from the config keeps its rows so
-	// an in-flight token still resolves it.
-	if err := authSvc.SeedRoles(ctx); err != nil {
-		return fmt.Errorf("seed roles: %w", err)
+	// Configuration seeds the role tables only while they are empty; once
+	// seeded, the database is the source of truth and the shared catalog
+	// loads from it.
+	if err := loadRoleCatalog(ctx, roles, authSvc, cfg.Auth.RolePermissions, logger); err != nil {
+		return err
 	}
+	// Another replica's role writes land in the shared tables; the ticker
+	// bounds how stale this replica's in-memory catalog can go.
+	go refreshCatalogLoop(ctx, authSvc, logger)
 
 	leanOpts := model.LeanOptions{
 		LeanContextDefault: cfg.Engine.LeanContextDefault,

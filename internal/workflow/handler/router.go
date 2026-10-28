@@ -40,7 +40,7 @@ type Deps struct {
 	// OIDC is the bearer token verifier, or nil when OIDC is disabled.
 	OIDC auth.Verifier
 	// Catalog turns caller roles into permissions for the route gates.
-	Catalog auth.Catalog
+	Catalog *auth.Catalog
 	// SystemUserID is the audit actor the API-token bypass acts as.
 	SystemUserID string
 	// MetricsEnabled exposes GET /metrics. Disabled leaves no route (404).
@@ -196,6 +196,9 @@ func NewRouter(deps Deps) *gin.Engine {
 		roleGroup := v1.Group("/roles")
 		gate(roleGroup, auth.ActionRolesRead, http.MethodGet, "", roles.List)
 		gate(roleGroup, auth.ActionRolesRead, http.MethodGet, "/:name", roles.Get)
+		gate(roleGroup, auth.ActionRolesWrite, http.MethodPost, "", roles.Create)
+		gate(roleGroup, auth.ActionRolesWrite, http.MethodPut, "/:name", roles.Update)
+		gate(roleGroup, auth.ActionRolesWrite, http.MethodDelete, "/:name", roles.Delete)
 	}
 
 	if deps.Auth != nil {

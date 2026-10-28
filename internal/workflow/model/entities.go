@@ -23,8 +23,9 @@ type User struct {
 	UpdatedAt time.Time
 }
 
-// Role is a named bundle of resource-action permissions. Roles are seeded
-// from configuration at startup and are read-only over the API.
+// Role is a named bundle of resource-action permissions. The tables are the
+// source of truth: configuration seeds them on a first boot, and the roles
+// API manages them afterwards.
 type Role struct {
 	Name        string
 	Description string
@@ -33,7 +34,8 @@ type Role struct {
 }
 
 // RolePermission grants one resource-action to a role. The pair is the
-// primary key; it is seeded from configuration and never written at runtime.
+// primary key; rows are seeded from configuration on a first boot and
+// managed over the roles API afterwards.
 type RolePermission struct {
 	Role      string
 	Action    string

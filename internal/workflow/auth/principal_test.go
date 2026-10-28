@@ -2,6 +2,7 @@ package auth_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/beelinewf/wf-engine/internal/workflow/auth"
@@ -308,6 +309,146 @@ func TestKnownActionsIncludesUsers(t *testing.T) {
 	if !known[auth.ActionUsersRead] {
 		t.Errorf("KnownActions() = %v, want users:read", auth.KnownActions())
 	}
+}
+
+func TestKnownActionsIncludesRolesWrite(t *testing.T) {
+	known := map[string]bool{}
+	for _, action := range auth.KnownActions() {
+		known[action] = true
+	}
+	if !known[auth.ActionRolesWrite] {
+		t.Errorf("KnownActions() = %v, want roles:write", auth.KnownActions())
+	}
+}
+
+// Replace is how a committed role write becomes visible to the request
+// gates: the grants swap wholesale, and roles absent from the new map stop
+// granting anything.
+func TestCatalogReplaceSwapsGrants(t *testing.T) {
+	catalog := auth.NewCatalog(map[string][]string{
+		"finance": {auth.ActionInputDeliver},
+	})
+	finance := auth.Principal{Roles: []string{"finance"}}
+	if !finance.HasPermission(auth.ActionInputDeliver, catalog) {
+		t.Fatal("finance must hold input:deliver before the replace")
+	}
+
+	catalog.Replace(map[string][]string{
+		"auditor": {auth.ActionRolesRead},
+	})
+
+	if finance.HasPermission(auth.ActionInputDeliver, catalog) {
+		t.Error("finance still holds input:deliver after the replace dropped it")
+	}
+	if catalog.HasRole("finance") {
+		t.Error("HasRole(finance) = true after the replace dropped it")
+	}
+	auditor := auth.Principal{Roles: []string{"auditor"}}
+	if !auditor.HasPermission(auth.ActionRolesRead, catalog) {
+		t.Error("auditor does not hold roles:read after the replace granted it")
+	}
+	if roles := catalog.Roles(); len(roles) != 1 || roles[0] != "auditor" {
+		t.Errorf("Roles() = %v, want [auditor] after the replace", roles)
+	}
+}
+
+// Replace copies its input with the same trimming NewCatalog applies, so a
+// caller handing over a database-shaped map may reuse it afterwards.
+func TestCatalogReplaceCopiesAndTrimsInput(t *testing.T) {
+	catalog := auth.NewCatalog(nil)
+	source := map[string][]string{
+		" finance ": {auth.ActionInputDeliver},
+		"   ":       {auth.ActionRolesRead},
+	}
+	catalog.Replace(source)
+	source["finance"] = nil
+	source["admin"] = []string{auth.ActionRolesRead}
+
+	if !(auth.Principal{Roles: []string{"finance"}}).HasPermission(auth.ActionInputDeliver, catalog) {
+		t.Error("catalog changed after the replaced source map was mutated")
+	}
+	if catalog.HasRole("admin") {
+		t.Error("a role added to the source map appeared in the catalog")
+	}
+	if catalog.HasRole("   ") {
+		t.Error("a blank role name survived the replace")
+	}
+}
+
+// PermissionsFor hands out a copy: a caller mutating the returned slice
+// must not change what the gates consult.
+func TestPermissionsForReturnsACopy(t *testing.T) {
+	catalog := auth.NewCatalog(map[string][]string{
+		"finance": {auth.ActionInputDeliver},
+	})
+	got := catalog.PermissionsFor("finance")
+	got[0] = "made:up"
+	if again := catalog.PermissionsFor("finance"); len(again) != 1 || again[0] != auth.ActionInputDeliver {
+		t.Errorf("PermissionsFor(finance) = %v after mutating a previous return, want [input:deliver]", again)
+	}
+}
+
+func TestHasRolesWriteHolder(t *testing.T) {
+	cases := []struct {
+		name  string
+		perms map[string][]string
+		want  bool
+	}{
+		{"explicit grant", map[string][]string{"admin": {auth.ActionRolesWrite}}, true},
+		{"wildcard grant", map[string][]string{"admin": {auth.WildcardAction}}, true},
+		{"holder among others", map[string][]string{
+			"finance": {auth.ActionInputDeliver},
+			"admin":   {auth.ActionRolesRead, auth.ActionRolesWrite},
+		}, true},
+		{"read alone is not a holder", map[string][]string{"auditor": {auth.ActionRolesRead}}, false},
+		{"empty catalog", map[string][]string{}, false},
+		{"nil catalog", nil, false},
+		{"role with no grants", map[string][]string{"nobody": {}}, false},
+		{"padded grant still counts", map[string][]string{"admin": {"  roles:write  "}}, true},
+		{"blank entries are not grants", map[string][]string{"admin": {"  "}}, false},
+	}
+	for _, tc := range cases {
+		if got := auth.HasRolesWriteHolder(tc.perms); got != tc.want {
+			t.Errorf("%s: HasRolesWriteHolder() = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// Readers run on every request while a role write swaps the map: hammer
+// both sides together so the race detector proves the swap is safe.
+func TestCatalogConcurrentReadAndReplace(t *testing.T) {
+	catalog := auth.NewCatalog(map[string][]string{
+		"finance": {auth.ActionInputDeliver},
+	})
+	var wg sync.WaitGroup
+	for r := 0; r < 8; r++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			p := auth.Principal{Roles: []string{"finance", "auditor"}}
+			for i := 0; i < 200; i++ {
+				_ = catalog.PermissionsFor("finance")
+				_ = catalog.HasRole("auditor")
+				_ = catalog.Roles()
+				_ = catalog.Seed()
+				_ = p.HasPermission(auth.ActionInputDeliver, catalog)
+			}
+		}()
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 50; i++ {
+			catalog.Replace(map[string][]string{
+				"finance": {auth.ActionInputDeliver},
+				"auditor": {auth.ActionRolesRead},
+			})
+			catalog.Replace(map[string][]string{
+				"finance": {auth.ActionInputDeliver},
+			})
+		}
+	}()
+	wg.Wait()
 }
 
 func TestSystemPrincipalIsService(t *testing.T) {

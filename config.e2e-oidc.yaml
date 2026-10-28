@@ -42,8 +42,14 @@ auth:
   # Deliberately not the shipped catalog: the script needs a "manager" role
   # to satisfy the node gate, and "finance" to prove the endpoint gate passes
   # while the node gate still refuses. Note finance holds neither
-  # definitions:write nor roles:read, which the script also asserts.
+  # definitions:write nor roles:read, which the script also asserts. "admin"
+  # is the sole holder of roles:write, which the role-write assertions need:
+  # finance must be refused writes (403) while admin succeeds, and deleting
+  # the last roles:write holder must fail (409). It is a first-boot seed: the
+  # task target recreates the database every run, so the seed always applies.
   role_permissions:
+    admin:
+      - "roles:write"
     manager:
       - "definitions:read"
       - "definitions:write"

@@ -169,10 +169,15 @@ func bootstrapSchema(t *testing.T, dsn string) {
 	}()
 	if err := db.AutoMigrate(
 		&repository.UserModel{},
+		&repository.RoleModel{},
+		&repository.RolePermissionModel{},
 		&repository.SecretModel{},
+		&repository.FormModel{},
 		&repository.NodeDefinitionModel{},
 		&repository.WorkflowDefinitionModel{},
 		&repository.WorkflowDefinitionNodeRefModel{},
+		&repository.WorkflowDefinitionFormRefModel{},
+		&repository.NodeDefinitionFormRefModel{},
 		&repository.WorkflowRequestModel{},
 		&repository.CronScheduleModel{},
 		&repository.ScheduleFireModel{},
@@ -455,6 +460,18 @@ func (stubAuthService) ListRoles(context.Context) ([]model.Role, map[string][]st
 func (stubAuthService) GetRole(context.Context, string) (model.Role, []string, error) {
 	return model.Role{}, nil, nil
 }
+
+func (stubAuthService) CreateRole(context.Context, string, *string, []string) (model.Role, []string, error) {
+	return model.Role{}, nil, nil
+}
+
+func (stubAuthService) UpdateRole(context.Context, string, *string, []string) (model.Role, []string, error) {
+	return model.Role{}, nil, nil
+}
+
+func (stubAuthService) DeleteRole(context.Context, string) error { return nil }
+
+func (stubAuthService) RefreshCatalog(context.Context) error { return nil }
 
 func (stubAuthService) Me(context.Context, auth.Principal) (model.User, error) {
 	return model.User{}, nil

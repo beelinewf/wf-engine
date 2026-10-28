@@ -174,11 +174,11 @@ func svcInstanceServiceWithOptions(db *gorm.DB, options model.LeanOptions) servi
 
 // svcInstanceServiceWithCatalog mirrors production wiring plus the role
 // catalog the input authorization gate reads.
-func svcInstanceServiceWithCatalog(db *gorm.DB, catalog auth.Catalog) service.InstanceService {
+func svcInstanceServiceWithCatalog(db *gorm.DB, catalog *auth.Catalog) service.InstanceService {
 	return svcInstanceServiceWithCatalogAndOptions(db, model.LeanOptions{}, catalog)
 }
 
-func svcInstanceServiceWithCatalogAndOptions(db *gorm.DB, options model.LeanOptions, catalog auth.Catalog) service.InstanceService {
+func svcInstanceServiceWithCatalogAndOptions(db *gorm.DB, options model.LeanOptions, catalog *auth.Catalog) service.InstanceService {
 	instances := repository.NewInstanceRepositoryWithOptions(db, options)
 	validator := &executor.InputExecutor{}
 	return service.NewInstanceServiceWithCatalog(

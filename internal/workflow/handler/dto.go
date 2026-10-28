@@ -210,7 +210,7 @@ type AuthConfigResponse struct {
 	RolesClaim       string   `json:"roles_claim,omitempty"`
 	Scopes           []string `json:"scopes,omitempty"`
 	ApiTokenEnabled  bool     `json:"api_token_enabled"`
-	// Roles is every role name the configured catalog knows, so a frontend
+	// Roles is every role name the role catalog knows, so a frontend
 	// can label a role before the caller has one.
 	Roles []string `json:"roles"`
 }
@@ -244,6 +244,23 @@ type RoleResponse struct {
 // RoleListResponse is the GET /v1/roles body.
 type RoleListResponse struct {
 	Items []RoleResponse `json:"items"`
+}
+
+// CreateRoleRequest is the POST /v1/roles body. An omitted or blank
+// description is derived as "Configured role <name>"; an omitted permission
+// list grants nothing.
+type CreateRoleRequest struct {
+	Name        string   `json:"name"`
+	Description *string  `json:"description,omitempty"`
+	Permissions []string `json:"permissions,omitempty"`
+}
+
+// UpdateRoleRequest is the PUT /v1/roles/{name} body. The name comes from
+// the path. Permissions fully replaces the grant set: an empty or omitted
+// list revokes every grant. An omitted description keeps the stored one.
+type UpdateRoleRequest struct {
+	Description *string  `json:"description,omitempty"`
+	Permissions []string `json:"permissions,omitempty"`
 }
 
 // UserResponse is one row of the users table as served by GET /v1/users and

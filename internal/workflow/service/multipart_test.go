@@ -81,7 +81,7 @@ func svcMultipartService(db *gorm.DB, store *mpFakeStore) service.InstanceServic
 		svcLimits,
 		nil,
 		model.LeanOptions{},
-		auth.Catalog{},
+		auth.NewCatalog(nil),
 		service.MultipartDeps{Store: store, Limits: multipart.DefaultLimits()},
 	)
 }

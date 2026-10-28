@@ -15,7 +15,7 @@ import (
 const authSvcIssuer = "https://idp.example.test"
 
 // authServiceFor builds a real auth service over the test database.
-func authServiceFor(t *testing.T, catalog auth.Catalog) (service.AuthService, *gorm.DB) {
+func authServiceFor(t *testing.T, catalog *auth.Catalog) (service.AuthService, *gorm.DB) {
 	t.Helper()
 	db := setupSvcDB(t)
 	return service.NewAuthService(
@@ -205,36 +205,39 @@ func TestSeedRolesIsIdempotentAndNonDestructive(t *testing.T) {
 		t.Fatalf("admin permissions = %v, want [*]", got)
 	}
 
-	// Drop finance from the catalog and reseed. The role row survives, but
-	// it is no longer part of the live catalog, so it is not served: the
-	// read APIs answer from the catalog that authorizes requests, and a
-	// role that grants nothing must not be advertised as if it did.
+	// Drop finance from the seed and reseed. The role row and its grants
+	// survive: the prune is scoped to the roles the seed names, and the
+	// tables are the source of truth, so the reads still serve finance.
 	svc = service.NewAuthService(users, roles, auth.NewCatalog(map[string][]string{
 		"admin": {"*"},
 	}), svcSysUserID)
 	if err := svc.SeedRoles(ctx); err != nil {
 		t.Fatalf("reseed after removal: %v", err)
 	}
-	if _, _, err := svc.GetRole(ctx, "finance"); !errors.Is(err, model.ErrNotFound) {
-		t.Fatalf("GetRole(finance) error = %v, want ErrNotFound once dropped from the catalog", err)
+	role, financePerms, err := svc.GetRole(ctx, "finance")
+	if err != nil {
+		t.Fatalf("GetRole(finance) error = %v, want the surviving row", err)
+	}
+	if role.Name != "finance" || len(financePerms) != 2 {
+		t.Errorf("GetRole(finance) = %+v %v, want the row with both grants", role, financePerms)
 	}
 	list, perms, err = svc.ListRoles(ctx)
 	if err != nil {
 		t.Fatalf("list roles after removal: %v", err)
 	}
-	if len(list) != 1 || list[0].Name != "admin" {
-		t.Errorf("roles = %+v, want only admin (the live catalog)", list)
+	if len(list) != 2 {
+		t.Errorf("roles = %+v, want admin and finance from the tables", list)
 	}
-	if _, ok := perms["finance"]; ok {
-		t.Errorf("permissions = %v, want no entry for a dropped role", perms)
+	if len(perms["finance"]) != 2 {
+		t.Errorf("finance permissions = %v, want both grants", perms["finance"])
 	}
 }
 
-// The role tables are an audit copy of configuration, not the source of
-// truth: authorization reads the live catalog. A permission removed from
-// configuration must therefore stop being reported, even though its row is
-// still in the table.
-func TestRolesAreServedFromTheLiveCatalog(t *testing.T) {
+// The role tables are the source of truth: the reads serve the rows as
+// stored, with real row timestamps. A permission row removed behind the
+// service's back stops being reported, the way another replica's write
+// looks before this replica refreshes.
+func TestRolesAreServedFromTheDatabase(t *testing.T) {
 	db := setupSvcDB(t)
 	ctx := context.Background()
 	roles := repository.NewRoleRepository(db)
@@ -246,21 +249,31 @@ func TestRolesAreServedFromTheLiveCatalog(t *testing.T) {
 	if err := svc.SeedRoles(ctx); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	// Narrow the role in the database only, as a stale row would look.
+	// Narrow the role in the database only, as a concurrent write would.
 	if err := db.Model(&repository.RolePermissionModel{}).
 		Where("action = ?", auth.ActionInstancesRead).
 		Delete(&repository.RolePermissionModel{}).Error; err != nil {
-		t.Fatalf("delete stale permission row: %v", err)
+		t.Fatalf("delete permission row: %v", err)
 	}
 
-	// The catalog is the source of truth, so the full grant is reported
-	// even though the table lost a row.
+	// The tables are the source of truth, so the narrowed grant is
+	// reported even though the seed wrote two actions.
 	_, perms, err := svc.ListRoles(ctx)
 	if err != nil {
 		t.Fatalf("list roles: %v", err)
 	}
-	if len(perms["finance"]) != 2 {
-		t.Errorf("finance permissions = %v, want both actions from the catalog", perms["finance"])
+	if len(perms["finance"]) != 1 || perms["finance"][0] != auth.ActionInputDeliver {
+		t.Errorf("finance permissions = %v, want the database state", perms["finance"])
+	}
+	role, _, err := svc.GetRole(ctx, "finance")
+	if err != nil {
+		t.Fatalf("GetRole() error = %v", err)
+	}
+	if role.Description != "Configured role finance" {
+		t.Errorf("description = %q, want the seeded row value", role.Description)
+	}
+	if role.CreatedAt.IsZero() || role.UpdatedAt.IsZero() {
+		t.Error("timestamps are zero, want real row timestamps")
 	}
 }
 
