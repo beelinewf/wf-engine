@@ -1,4 +1,4 @@
-![BeelineWF banner](banner.png)
+<img src="./banner.png" />
 
 # BeelineWF — Durable Workflow Engine on PostgreSQL
 
