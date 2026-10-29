@@ -193,12 +193,37 @@ engine:
   exec_allowlist:
     - "/bin/echo"
     - "/bin/ls"
+  # Workflow-mail relay serving smtp external_call nodes. This relay is
+  # distinct from auth.local.smtp, which delivers verification mail only
+  # when local auth and email verification are both enabled. An empty host
+  # disables workflow mail: definitions still parse, but a send fails at
+  # execution time. A host of "log" selects the dev/e2e sender that logs
+  # recipients and subject instead of sending. Point host/port at an
+  # authenticated internal relay with use_tls true to send for real; pass
+  # the password via BEELINEWF_ENGINE_SMTP_PASSWORD, never in this file.
+  # template_dir roots local smtp file bodies (a file path that is not
+  # s3:// resolves under it; empty disables local files) and must name an
+  # existing directory at boot. s3:// bodies read through the global
+  # object store, so they additionally need infra.storage configured.
+  # Equivalent env vars: BEELINEWF_ENGINE_SMTP_HOST,
+  # BEELINEWF_ENGINE_SMTP_PORT, BEELINEWF_ENGINE_SMTP_USERNAME,
+  # BEELINEWF_ENGINE_SMTP_PASSWORD, BEELINEWF_ENGINE_SMTP_FROM,
+  # BEELINEWF_ENGINE_SMTP_USE_TLS, BEELINEWF_ENGINE_SMTP_TEMPLATE_DIR.
+  smtp:
+    host: ""
+    port: 587
+    username: ""
+    password: ""
+    from: ""
+    use_tls: true
+    template_dir: ""
   # Env snapshot deny list. At instance creation, BEELINEWF_* process env is
   # snapshotted into the instance context under the reserved env root, and
   # these patterns are the credentials that never enter a workflow template:
   # BEELINEWF_API_TOKEN, BEELINEWF_AUTH_*, BEELINEWF_SYSTEM_*, BEELINEWF_INFRA_*,
-  # and any BEELINEWF_*_DSN (PostgreSQL, Redis, RabbitMQ). A denied name is
-  # dropped from the snapshot and {{ env.<denied> }} resolves as "path not found".
+  # BEELINEWF_ENGINE_SMTP_PASSWORD, and any BEELINEWF_*_DSN (PostgreSQL,
+  # Redis, RabbitMQ). A denied name is dropped from the snapshot and
+  # {{ env.<denied> }} resolves as "path not found".
   #
   # Operator overrides: BEELINEWF_ENGINE_ENV_DENY_EXTRA,
   # BEELINEWF_ENGINE_ENV_ALLOW_EXCEPTIONS (comma-separated globs). These only

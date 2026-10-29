@@ -127,6 +127,28 @@ func TestExecutorLimitsSharesBulkhead(t *testing.T) {
 	}
 }
 
+// TestExecutorLimitsMapsSMTP pins that the composition root threads the
+// workflow-mail relay defaults into the executor limits.
+func TestExecutorLimitsMapsSMTP(t *testing.T) {
+	cfg := &configuration.Config{}
+	cfg.Engine.SMTP.From = "relay@example.test"
+	cfg.Engine.SMTP.TemplateDir = "/var/lib/beelinewf/mail-templates"
+
+	limits := executorLimits(cfg)
+	if limits.SMTPFrom != "relay@example.test" {
+		t.Errorf("SMTPFrom = %q, want relay default from config", limits.SMTPFrom)
+	}
+	if limits.SMTPTemplateDir != "/var/lib/beelinewf/mail-templates" {
+		t.Errorf("SMTPTemplateDir = %q, want template root from config", limits.SMTPTemplateDir)
+	}
+
+	limits = executorLimits(&configuration.Config{})
+	if limits.SMTPFrom != "" || limits.SMTPTemplateDir != "" {
+		t.Errorf("zero config maps to %q/%q, want empty smtp limits",
+			limits.SMTPFrom, limits.SMTPTemplateDir)
+	}
+}
+
 func freePort(t *testing.T) string {
 	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")

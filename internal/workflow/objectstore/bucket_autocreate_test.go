@@ -63,6 +63,10 @@ func (f *fakeMinio) RemoveObject(_ context.Context, _, _ string, _ minio.RemoveO
 	return nil
 }
 
+func (f *fakeMinio) GetObject(_ context.Context, _, _ string, _ minio.GetObjectOptions) (*minio.Object, error) {
+	return nil, errors.New("fakeMinio: no objects")
+}
+
 // A Put to a missing bucket creates the bucket first, then uploads.
 func TestPutCreatesMissingBucket(t *testing.T) {
 	f := newFakeMinio()

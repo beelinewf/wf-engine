@@ -193,7 +193,7 @@ func TestCustomNodeSchemaEnvelope(t *testing.T) {
 			t.Errorf("envelope missing common field %q", common)
 		}
 	}
-	for _, builtin := range []string{"script", "conditions", "channel", "http_config", "execution_config", "nodes", "form", "start_node_id", "context_path"} {
+	for _, builtin := range []string{"script", "conditions", "channel", "http_config", "execution_config", "smtp_config", "nodes", "form", "start_node_id", "context_path"} {
 		if _, present := props[builtin]; present {
 			t.Errorf("envelope must not allow builtin field %q", builtin)
 		}

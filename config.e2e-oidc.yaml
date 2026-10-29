@@ -20,6 +20,11 @@ engine:
     - "127.0.0.1"
     - "localhost"
   exec_allowlist: []
+  # Workflow-mail relay (see config.yaml). Disabled here: an empty host
+  # means definitions still parse but sends fail at execution time.
+  # Distinct from auth.local.smtp (verification mail only).
+  smtp:
+    host: ""
 
 auth:
   # api_token is deliberately absent: the Taskfile exports BEELINEWF_API_TOKEN

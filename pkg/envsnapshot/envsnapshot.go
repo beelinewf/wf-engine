@@ -26,6 +26,7 @@ var defaultDenied = []string{
 	"BEELINEWF_AUTH_*",
 	"BEELINEWF_SYSTEM_*",
 	"BEELINEWF_INFRA_*",
+	"BEELINEWF_ENGINE_SMTP_PASSWORD",
 	"BEELINEWF_*_DSN",
 	// The at-rest master key itself: it arrives through the process
 	// environment, so without this entry every instance snapshot would

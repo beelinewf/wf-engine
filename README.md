@@ -65,11 +65,11 @@ status notifications. Both stay fully disabled when their DSN is absent.
   — JSON Schema plus ui hints — plus validation script and `Idempotency-Key` dedupe;
   instances created with `"snapshot_forms": true` freeze those bytes at start),
   `output` (publish a context value to Redis or RabbitMQ, returns a
-  receipt), nested `group`, `external_call` (outbound HTTP or allowlisted
-  command), and `poller` (active wait over HTTP, Redis, or RabbitMQ until
-  an `until` predicate matches), `delay` (explicit timed wait, the node
-  form of `start_delay`), plus `parallel_start`/`parallel_end` for
-  fork/join branches with snapshot isolation and a scripted merge.
+  receipt), nested `group`, `external_call` (outbound HTTP, allowlisted
+  command, or templated email), and `poller` (active wait over HTTP, Redis,
+  or RabbitMQ until an `until` predicate matches), `delay` (explicit timed
+  wait, the node form of `start_delay`), plus `parallel_start`/`parallel_end`
+  for fork/join branches with snapshot isolation and a scripted merge.
 - Lifecycle hooks: optional `pre_script`/`post_script` context transforms
   on every node type, run in the same sandbox.
 - Failure routing: `external_call` and `poller` nodes can route failures
@@ -239,7 +239,7 @@ uses; `config.e2e-oidc.yaml` is a working example.
 | `input`          | Parks with `waiting_reason: input` until a payload arrives                         | [API reference](#api-reference)    |
 | `output`         | Publishes `context_path` JSON to Redis or RabbitMQ, returns receipt                | [workflow.yaml](workflow.yaml)     |
 | `group`          | Nested sub-graph with its own key routing and hooks                                | [ARCHITECTURE.md](ARCHITECTURE.md) |
-| `external_call`  | Outbound HTTP (allowlisted) or allowlisted command, optional `on_failure` fallback | [Configuration](#configuration)    |
+| `external_call`  | Outbound HTTP (allowlisted), allowlisted command, or templated email; optional `on_failure` fallback | [Configuration](#configuration)    |
 | `poller`         | Repeats HTTP/Redis/RabbitMQ reads until `until` returns `true`                     | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | `parallel_start` | Forks named branches from a frozen parent snapshot, parks on the join              | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | `parallel_end`   | Barrier join: runs `combining_script` over branch contexts, continues past         | [ARCHITECTURE.md](ARCHITECTURE.md) |
@@ -289,6 +289,7 @@ system audit user. Key settings:
 | `engine.parallel.max_active_branches_per_instance`          | `128`                  | Max live branches per instance across all executions                                                                           |
 | `engine.http_allowlist`                                     | loopback + examples    | `"*"` allows any target (development only, logs a warning)                                                                     |
 | `engine.exec_allowlist`                                     | `/bin/echo`, `/bin/ls` | Absolute paths only (bare names fail startup); direct argv, never a shell                                                      |
+| `engine.smtp.*`                                            | `""` (disabled)        | Workflow-mail relay for `smtp_config`: `host`/`port`/`username`/`password`/`from`/`use_tls`/`template_dir` (`BEELINEWF_ENGINE_SMTP_*`); empty host disables sends |
 | `engine.http_max_in_flight`                                 | `128`                  | Process-wide outbound HTTP cap shared by nodes, pollers, publishers, custom nodes                                              |
 | `engine.http_max_in_flight_per_host`                        | `16`                   | Per-host outbound HTTP cap; fleet-wide concurrency is replicas x this                                                          |
 | `auth.enabled` / `api_token`                                | `false`                | When enabled, `/v1` requires a credential: `X-Api-Token`, OIDC, or local (at least one must be configured)                     |
@@ -898,6 +899,17 @@ Good first checks on any PR: the gofumpt check prints nothing,
   `BEELINEWF_AUTH_LOCAL_SMTP_PASSWORD`), never in a committed file. The JWT
   secret signs every local session — rotate it and every outstanding token
   dies; the SMTP password authenticates the verification relay.
+- Workflow mail (`smtp_config`) sends through a separate relay,
+  `engine.smtp` — not the verification relay above. Point it at an
+  authenticated internal relay with `use_tls` on, and ship its password
+  via env (`BEELINEWF_ENGINE_SMTP_PASSWORD`), never in a committed file;
+  the password never enters workflow context. Local body files resolve
+  only under `engine.smtp.template_dir` (absolute and escaping paths are
+  rejected) — a different knob from `auth.local.smtp.template_dir`, which
+  overrides the fixed verification pair. Any context value mailed is by
+  design, including the `secret` root, and a retried send delivers twice,
+  so keep `retry_on_recovery` off for mail nodes unless duplicates are
+  acceptable.
 - Local passwords are stored as bcrypt hashes and are never returned by any
   API; verification tokens are stored hashed too, and the raw token exists
   only in the email. Login and resend answers are generic by design, so a

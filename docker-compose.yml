@@ -243,6 +243,18 @@ services:
       BEELINEWF_AUTH_LOCAL_SMTP_FROM: "${BEELINEWF_AUTH_LOCAL_SMTP_FROM:-noreply@example.test}"
       BEELINEWF_AUTH_LOCAL_SMTP_USE_TLS: "${BEELINEWF_AUTH_LOCAL_SMTP_USE_TLS:-false}"
       BEELINEWF_AUTH_LOCAL_SMTP_TEMPLATE_DIR: "${BEELINEWF_AUTH_LOCAL_SMTP_TEMPLATE_DIR:-}"
+      # Workflow-mail relay serving smtp external_call nodes. Distinct from
+      # the verification relay above (auth.local.smtp): the two relays share
+      # the bundled Mailpit here (read workflow mail at http://<host>:18025
+      # too) but are configured and enabled independently. Set
+      # BEELINEWF_ENGINE_SMTP_HOST=log to print sends to the app log instead.
+      BEELINEWF_ENGINE_SMTP_HOST: "${BEELINEWF_ENGINE_SMTP_HOST:-mailpit}"
+      BEELINEWF_ENGINE_SMTP_PORT: "${BEELINEWF_ENGINE_SMTP_PORT:-1025}"
+      BEELINEWF_ENGINE_SMTP_USERNAME: "${BEELINEWF_ENGINE_SMTP_USERNAME:-}"
+      BEELINEWF_ENGINE_SMTP_PASSWORD: "${BEELINEWF_ENGINE_SMTP_PASSWORD:-}"
+      BEELINEWF_ENGINE_SMTP_FROM: "${BEELINEWF_ENGINE_SMTP_FROM:-noreply@example.test}"
+      BEELINEWF_ENGINE_SMTP_USE_TLS: "${BEELINEWF_ENGINE_SMTP_USE_TLS:-false}"
+      BEELINEWF_ENGINE_SMTP_TEMPLATE_DIR: "${BEELINEWF_ENGINE_SMTP_TEMPLATE_DIR:-}"
       # First-boot seed for the role tables: mirrors config.yaml
       # role_permissions so OIDC tokens asserting the shipped roles grant the
       # shipped permissions. It applies only while the roles table is empty;

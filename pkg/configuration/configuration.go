@@ -195,6 +195,7 @@ type Engine struct {
 	HTTPMaxInFlightPerHost int           `mapstructure:"http_max_in_flight_per_host"`
 	HTTPAllowlist          []string      `mapstructure:"http_allowlist"`
 	ExecAllowlist          []string      `mapstructure:"exec_allowlist"`
+	SMTP                   EngineSMTP    `mapstructure:"smtp"`
 	LeanContextDefault     bool          `mapstructure:"lean_context_default"`
 	LeanAnchorEvery        int           `mapstructure:"lean_anchor_every"`
 	LeanReplayMax          int           `mapstructure:"lean_replay_max"`
@@ -210,6 +211,33 @@ type Engine struct {
 	ConsumerRetry ConsumerRetry `mapstructure:"consumer_retry"`
 	// Multipart bounds streaming multipart input uploads.
 	Multipart Multipart `mapstructure:"multipart"`
+}
+
+// EngineSMTP holds the workflow-mail relay settings serving smtp
+// external_call nodes. It is distinct from auth.local.smtp, which delivers
+// verification mail only when local auth and email verification are both
+// enabled. An empty host disables workflow mail: definitions still parse,
+// but a send fails at execution time. A host of "log" selects the dev/e2e
+// sender that logs instead of sending.
+type EngineSMTP struct {
+	Host     string `mapstructure:"host"`
+	Port     int    `mapstructure:"port"`
+	Username string `mapstructure:"username"`
+	Password string `mapstructure:"password"`
+	// From is the default sender address, used when the node sets no
+	// from of its own.
+	From   string `mapstructure:"from"`
+	UseTLS bool   `mapstructure:"use_tls"`
+	// TemplateDir roots local smtp file bodies: a file path that is not
+	// s3:// resolves under this directory. Empty disables local files.
+	// s3:// bodies additionally need infra.storage configured.
+	TemplateDir string `mapstructure:"template_dir"`
+}
+
+// Enabled reports whether workflow mail is configured. Only the host
+// switches it on; any other set field without a host is rejected at load.
+func (s EngineSMTP) Enabled() bool {
+	return strings.TrimSpace(s.Host) != ""
 }
 
 // Parallel holds the parallel execution safety limits.
@@ -541,6 +569,15 @@ func Load(opts ...Option) (*Config, error) {
 	// config.yaml.
 	_ = v.BindEnv("engine.http_max_in_flight", "BEELINEWF_ENGINE_HTTP_MAX_IN_FLIGHT")
 	_ = v.BindEnv("engine.http_max_in_flight_per_host", "BEELINEWF_ENGINE_HTTP_MAX_IN_FLIGHT_PER_HOST")
+	// Workflow-mail relay settings are operator toggles and must override
+	// config.yaml.
+	_ = v.BindEnv("engine.smtp.host", "BEELINEWF_ENGINE_SMTP_HOST")
+	_ = v.BindEnv("engine.smtp.port", "BEELINEWF_ENGINE_SMTP_PORT")
+	_ = v.BindEnv("engine.smtp.username", "BEELINEWF_ENGINE_SMTP_USERNAME")
+	_ = v.BindEnv("engine.smtp.password", "BEELINEWF_ENGINE_SMTP_PASSWORD")
+	_ = v.BindEnv("engine.smtp.from", "BEELINEWF_ENGINE_SMTP_FROM")
+	_ = v.BindEnv("engine.smtp.use_tls", "BEELINEWF_ENGINE_SMTP_USE_TLS")
+	_ = v.BindEnv("engine.smtp.template_dir", "BEELINEWF_ENGINE_SMTP_TEMPLATE_DIR")
 	_ = v.BindEnv("infra.http.metrics_enabled", "BEELINEWF_INFRA_HTTP_METRICS_ENABLED")
 	_ = v.BindEnv("infra.http.max_body_bytes", "BEELINEWF_INFRA_HTTP_MAX_BODY_BYTES")
 	_ = v.BindEnv("infra.http.read_header_timeout", "BEELINEWF_INFRA_HTTP_READ_HEADER_TIMEOUT")
@@ -732,6 +769,16 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("engine.http_max_in_flight_per_host", 16)
 	v.SetDefault("engine.http_allowlist", []string{})
 	v.SetDefault("engine.exec_allowlist", []string{})
+	// Workflow mail stays disabled until a host is set; the port and TLS
+	// defaults keep every key env-addressable so validation stays
+	// meaningful.
+	v.SetDefault("engine.smtp.host", "")
+	v.SetDefault("engine.smtp.port", 587)
+	v.SetDefault("engine.smtp.username", "")
+	v.SetDefault("engine.smtp.password", "")
+	v.SetDefault("engine.smtp.from", "")
+	v.SetDefault("engine.smtp.use_tls", true)
+	v.SetDefault("engine.smtp.template_dir", "")
 	v.SetDefault("engine.lean_context_default", false)
 	v.SetDefault("engine.lean_anchor_every", 20)
 	v.SetDefault("engine.lean_replay_max", 500)
@@ -902,6 +949,32 @@ func (c *Config) validate() error {
 	}
 	if c.Engine.Multipart.MaxTextBytes <= 0 {
 		return errors.New("configuration: engine.multipart.max_text_bytes must be > 0")
+	}
+	// Workflow mail is host-gated like the SMTP sender it feeds: an empty
+	// host disables it, while any other set field without a host is a
+	// misconfiguration rather than a disabled relay.
+	smtp := c.Engine.SMTP
+	if !smtp.Enabled() {
+		if strings.TrimSpace(smtp.From) != "" || strings.TrimSpace(smtp.Username) != "" ||
+			strings.TrimSpace(smtp.Password) != "" || strings.TrimSpace(smtp.TemplateDir) != "" {
+			return errors.New("configuration: engine.smtp.host is required when engine.smtp settings are set")
+		}
+	} else {
+		if strings.TrimSpace(smtp.From) == "" && strings.TrimSpace(smtp.Host) != "log" {
+			return errors.New("configuration: engine.smtp.from is required when engine.smtp.host is set")
+		}
+		if smtp.Port <= 0 || smtp.Port > 65535 {
+			return errors.New("configuration: engine.smtp.port must be 1..65535")
+		}
+		if dir := strings.TrimSpace(smtp.TemplateDir); dir != "" {
+			st, err := os.Stat(dir)
+			if err != nil {
+				return fmt.Errorf("configuration: engine.smtp.template_dir: %w", err)
+			}
+			if !st.IsDir() {
+				return fmt.Errorf("configuration: engine.smtp.template_dir %q is not a directory", dir)
+			}
+		}
 	}
 	// auth.enabled requires at least one credential: the API token, an
 	// OIDC provider, or local auth. Enabled with none of them would

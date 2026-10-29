@@ -24,6 +24,8 @@ func TestSnapshotExcludesDenied(t *testing.T) {
 	t.Setenv("BEELINEWF_SECRET_ENCRYPTION_KEY", "a2V5")
 	t.Setenv("BEELINEWF_AUTH_ENABLED", "true")
 	t.Setenv("BEELINEWF_SYSTEM_USER_ID", "u1")
+	t.Setenv("BEELINEWF_ENGINE_SMTP_PASSWORD", "relay-pass")
+	t.Setenv("BEELINEWF_ENGINE_SMTP_HOST", "mailpit")
 	t.Setenv("BEELINEWF_S3_ENDPOINT", "play.min.io:9000")
 	got := Snapshot(Prefix)
 	for _, k := range []string{
@@ -33,6 +35,7 @@ func TestSnapshotExcludesDenied(t *testing.T) {
 		"BEELINEWF_SECRET_ENCRYPTION_KEY",
 		"BEELINEWF_AUTH_ENABLED",
 		"BEELINEWF_SYSTEM_USER_ID",
+		"BEELINEWF_ENGINE_SMTP_PASSWORD",
 	} {
 		if _, ok := got[k]; ok {
 			t.Fatalf("denied key %s snapshotted", k)
@@ -40,6 +43,9 @@ func TestSnapshotExcludesDenied(t *testing.T) {
 	}
 	if got["BEELINEWF_S3_ENDPOINT"] != "play.min.io:9000" {
 		t.Fatal("allowed key missing")
+	}
+	if got["BEELINEWF_ENGINE_SMTP_HOST"] != "mailpit" {
+		t.Fatal("non-secret relay host missing: the deny must stay narrow")
 	}
 }
 

@@ -268,6 +268,8 @@ func executorLimits(cfg *configuration.Config) executor.Limits {
 		HTTPBulkhead:           executor.NewHTTPBulkhead(cfg.Engine.HTTPMaxInFlight, cfg.Engine.HTTPMaxInFlightPerHost),
 		HTTPMaxInFlight:        cfg.Engine.HTTPMaxInFlight,
 		HTTPMaxInFlightPerHost: cfg.Engine.HTTPMaxInFlightPerHost,
+		SMTPFrom:               cfg.Engine.SMTP.From,
+		SMTPTemplateDir:        cfg.Engine.SMTP.TemplateDir,
 	}
 }
 
@@ -549,11 +551,34 @@ func run(ctx context.Context, cfg *configuration.Config, logger *logrus.Logger) 
 		logger.Info("object storage configured")
 	}
 
+	// Optional workflow-mail sender for smtp external_call nodes. A nil
+	// sender means the relay is not configured and sends fail at
+	// execution time; like the verification sender, host "log" selects
+	// the dev/e2e sender that logs instead of sending.
+	var workflowMail executor.SMTPSender
+	if cfg.Engine.SMTP.Enabled() {
+		sender, err := mail.NewMessageSender(
+			cfg.Engine.SMTP.Host,
+			cfg.Engine.SMTP.Port,
+			cfg.Engine.SMTP.Username,
+			cfg.Engine.SMTP.Password,
+			cfg.Engine.SMTP.From,
+			cfg.Engine.SMTP.UseTLS,
+		)
+		if err != nil {
+			return fmt.Errorf("workflow mail: %w", err)
+		}
+		workflowMail = sender
+		logger.Info("workflow mail configured")
+	}
+
 	hookRunner := executor.NewHookRunner(nil)
 	executors := executor.NewExecutors(execLimits, nil, executor.Dependencies{
 		Output:       executor.NewBrokerOutputPublisher(redisPub, rabbitPub, cfg.Infra.RabbitMQ.OutputQueue),
 		RedisPoller:  redisClient,
 		RabbitPoller: rabbitClient,
+		SMTPSender:   workflowMail,
+		SMTPObjects:  objStore,
 	})
 	loader := func(ctx context.Context, instanceID string) (*model.WorkflowContent, error) {
 		inst, err := instances.GetByID(ctx, instanceID)
