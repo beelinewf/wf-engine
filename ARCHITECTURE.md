@@ -480,12 +480,13 @@ so admitting anonymous callers is a routing decision, not a per-handler
 `if`. The anonymous routes are therefore registered *before* that `Use`,
 each carrying optional auth instead: `PUT
 /v1/workflow/instance/:id/input` (`TryAuth`, enforcing `input:deliver` for
-callers that present a credential) and the two public reads, `GET
-/v1/forms/:id` and `GET /v1/workflow/definition/:id` (`TryAuthForAction`
-with `forms:read` and `definitions:read`). Gin binds a group's middleware
+callers that present a credential) and the three public reads, `GET
+/v1/workflow/instance/:id/status`, `GET /v1/forms/:id`, and `GET
+/v1/workflow/definition/:id` (`TryAuthForAction` with `instances:read`,
+`forms:read`, and `definitions:read`). Gin binds a group's middleware
 to each route at registration time, so a route added afterwards would
 inherit the global gate and answer 401 to exactly the caller the flag
-exists to admit. The asymmetry is the point: three routes out of `/v1`
+exists to admit. The asymmetry is the point: four routes out of `/v1`
 admit anonymous callers, and the code makes that visible as registrations
 that sit apart from the gated block.
 
@@ -509,14 +510,18 @@ against the node flag rather than the credential:
 - authenticated → the two gates run unchanged, on a public node too, so an
   authenticated caller is never treated as anonymous.
 
-The two reads make their own anonymous decision past the middleware. The
+The three reads make their own anonymous decision past the middleware. The
 form body is already frontend-only, so it is served unchanged; the
 definition read serves an allowlisted projection of the resolved,
 materialized tree (graph plus input delivery contracts — no scripts,
 configs, gates, or audit fields), degrading to the declared fields of
-stored content that no longer resolves. The anonymous definition response
-carries `Cache-Control: no-store` and `Vary` on the credential headers,
-since the same path serves the full definition to credentialed callers.
+stored content that no longer resolves; and the status read serves the ids
+a credential-less frontend needs to fetch the definition and the form, plus
+the pending delivery contract — only while the instance waits on a public
+input node, with any other anonymous state answering 403. Each anonymous
+response carries `Cache-Control: no-store` and `Vary` on the credential
+headers, since the same paths serve the full bodies to credentialed
+callers.
 
 The audit trail keeps the three cases apart. `input_received` carries
 `delivered_by` (`anonymous`, `service`, or `user`) and `input_forbidden` does
