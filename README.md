@@ -80,8 +80,9 @@ status notifications. Both stay fully disabled when their DSN is absent.
 - Status notifications: per-definition `status_update` webhooks and broker
   messages, delivered from a PostgreSQL transactional outbox, ordered per
   instance and per transport, at-least-once with shared idempotency keys.
-- Auth: two independent credentials on `/v1` (`/health/*` stays public, and
-  an input node with `public: true` accepts an anonymous delivery).
+- Auth: two independent credentials on `/v1` (`/health/*` stays public, an
+  input node with `public: true` accepts an anonymous delivery, and the
+  single form and workflow-definition reads are public for it).
   An OIDC bearer token authenticates a human; the engine is a stateless
   resource server with no callback, so the frontend runs code+PKCE against
   the provider and calls the API with the JWT. An `X-Api-Token` authenticates
@@ -542,9 +543,13 @@ posts a payload it cannot hold a credential for.
 ```
 
 A public node accepts a `PUT` carrying **no credential at all**, even with
-authentication switched on, and `PUT /v1/workflow/instance/{id}/input` is
-the only endpoint exempted from the global auth gate to allow it. Everything
-else, including the status and forms-library reads, still requires a credential.
+authentication switched on. The delivery route is exempted from the global
+auth gate to allow it, together with the two reads a credential-less
+frontend needs: `GET /v1/forms/{id}` serves the render contract unchanged,
+and `GET /v1/workflow/definition/{id}` serves a filtered projection of the
+graph (node identities, edges, and input delivery contracts — no scripts,
+configs, authorization gates, or audit fields). Everything else, including
+the instance status and context reads, still requires a credential.
 
 The flag is opt-in and per node, and it forces the delivery open and
 unattributed: a public node ignores `allowed_roles` and `allowed_users`,
@@ -574,9 +579,9 @@ event, so the history tells an anonymous delivery apart from a
 service-principal bypass and from a user delivery. Refusals carry the same
 marker on their `input_forbidden` event.
 
-Because the status reads stay authenticated, an anonymous caller cannot
-discover the payload shape for itself: share the instance id and the expected
-form out-of-band, the way you would share a webhook URL. The pending-input
+Instance status reads stay authenticated, so share the instance id
+out-of-band, the way you would share a webhook URL — but the caller fetches
+the payload shape itself from the two public reads. The pending-input
 contract reports `public`, so an authenticated frontend can tell before anyone
 tries.
 
@@ -620,7 +625,7 @@ The authoritative contract is [api/openapi.yaml](api/openapi.yaml)
 | GET        | `/v1/node/types`                                   | Node type catalog (builtins + registered customs, each with its schema)                                             |
 | POST       | `/v1/workflow/definition`                          | Create immutable workflow definition (201)                                                                          |
 | GET        | `/v1/workflow/definition`                          | List (paged, `latest_only`, ...)                                                                                    |
-| GET/DELETE | `/v1/workflow/definition/{id}`                     | Get / delete (fails if referenced)                                                                                  |
+| GET/DELETE | `/v1/workflow/definition/{id}`                     | Get (public filtered read) / delete (fails if referenced)                                                           |
 | POST       | `/v1/secrets`                                      | Create secret (201; plaintext omitted)                                                                              |
 | GET        | `/v1/secrets`                                      | List masked secrets (paged, ordered by key)                                                                         |
 | GET/DELETE | `/v1/secrets/{key}`                                | Get masked secret / delete; duplicate create returns 409                                                            |
@@ -640,9 +645,10 @@ The authoritative contract is [api/openapi.yaml](api/openapi.yaml)
 Instance statuses: `waiting`, `running`, `paused`, `finished`, `failed`,
 `stopped`. Errors follow RFC 7807 `problem+json`. A missing or invalid
 credential is **401**; a valid caller without the route's permission, or one
-refused by an input node's user or role gate, is **403**. The one exception is
-`PUT …/input` on a node with `public: true`, which is reachable with no
-credential at all; see
+refused by an input node's user or role gate, is **403**. The exceptions are
+the public-input reads — `GET /v1/forms/{id}` and the filtered
+`GET /v1/workflow/definition/{id}` — plus `PUT …/input` on a node with
+`public: true`, all reachable with no credential at all; see
 [Public input nodes](#public-input-nodes-accept-anonymous-delivery).
 
 ### Secrets and templates
@@ -875,6 +881,12 @@ Good first checks on any PR: the gofumpt check prints nothing,
 - `GET /v1/auth/config` is intentionally public and returns no secret: it
   carries only the issuer, client id, endpoints, and roles claim, which the
   provider publishes anyway, plus which local logins exist.
+- The single form and workflow-definition reads are public alongside it, so
+  a public-input frontend can fetch the shape with no credential. The form
+  body is the render contract itself; the definition body is a filtered
+  projection (graph and input delivery contracts only — no scripts,
+  configs, gates, or audit fields). Anyone holding an id can confirm it
+  exists, so treat ids as unguessable but not secret.
 - `auth.local.jwt_secret` and `auth.local.smtp.password` are secrets: ship
   them via env (`BEELINEWF_AUTH_LOCAL_JWT_SECRET`,
   `BEELINEWF_AUTH_LOCAL_SMTP_PASSWORD`), never in a committed file. The JWT

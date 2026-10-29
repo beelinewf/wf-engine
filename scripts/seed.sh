@@ -10,6 +10,27 @@ set -euo pipefail
 
 BASE_URL="${1:-http://localhost:8080}"
 
+# Auto-resolve the API token when not exported: the compose stack is the dev
+# default source of truth, with config.yaml as fallback for non-compose runs.
+# An exported BEELINEWF_API_TOKEN always wins.
+if [[ -z "${BEELINEWF_API_TOKEN:-}" ]]; then
+  _seed_root="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
+  _token_candidate="$(grep -m1 -E 'BEELINEWF_API_TOKEN:' "$_seed_root/docker-compose.yml" 2>/dev/null | sed -E 's/^[^:]*:[[:space:]]*"?([^"#]+)"?.*/\1/' | tr -d '[:space:]"' | tr -d "'" || true)"
+  # Unwrap compose ${VAR:-default} interpolation to the default.
+  if [[ "${_token_candidate:-}" == \$\{* ]]; then
+    _token_candidate="${_token_candidate##*:-}"
+    _token_candidate="${_token_candidate%\}}"
+  fi
+  if [[ -z "${_token_candidate:-}" ]]; then
+    _token_candidate="$(grep -m1 -E '^[[:space:]]*api_token:' "$_seed_root/config.yaml" 2>/dev/null | sed -E 's/^[^:]*:[[:space:]]*"?([^"#]+)"?.*/\1/' | tr -d '[:space:]"' | tr -d "'" || true)"
+  fi
+  if [[ -n "${_token_candidate:-}" ]]; then
+    export BEELINEWF_API_TOKEN="$_token_candidate"
+    echo "seed: using auto-resolved API token" >&2
+  fi
+  unset _seed_root _token_candidate
+fi
+
 fail() {
   echo "seed: FAIL: $*" >&2
   exit 1

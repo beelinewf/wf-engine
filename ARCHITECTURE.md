@@ -287,9 +287,10 @@ Node statuses: `waiting -> running -> finished | failed | stopped`.
   `allowed_roles`, `allowed_users`, `record_actor`, `public` (both gates
   reported empty on a public node); field omitted unless parked on
   an input node); the frontend renders `form` when present, else fetches
-  `GET /v1/forms/{form_id}` for the bytes, so one generic renderer serves
-  every workflow version without per-version form code. Instances created
-  with `snapshot_forms` freeze every referenced form's `schema`/`ui` into
+  the public `GET /v1/forms/{form_id}` for the bytes, so one generic
+  renderer serves every workflow version without per-version form code.
+  Instances created with `snapshot_forms` freeze every referenced form's
+  `schema`/`ui` into
   the instance row at start, so later library edits do not move a running
   run (definition migration carries the snapshot). Graph load failures
   leave `pending_input` nil, same degraded-status rule as the nodes map.
@@ -476,21 +477,27 @@ would have no `user_id` to write.
 
 Authentication is enforced by one `v1.Use(RequireAuth)` on the whole group,
 so admitting anonymous callers is a routing decision, not a per-handler
-`if`. `PUT /v1/workflow/instance/:id/input` is therefore registered *before*
-that `Use`, carrying `TryAuth` instead. Gin binds a group's middleware to
-each route at registration time, so a route added afterwards would inherit
-the global gate and answer 401 to exactly the caller the flag exists to
-admit. The asymmetry is the point: one route out of `/v1` is unauthenticated,
-and the code makes that visible as a single registration that sits apart from
-the gated block.
+`if`. The anonymous routes are therefore registered *before* that `Use`,
+each carrying optional auth instead: `PUT
+/v1/workflow/instance/:id/input` (`TryAuth`, enforcing `input:deliver` for
+callers that present a credential) and the two public reads, `GET
+/v1/forms/:id` and `GET /v1/workflow/definition/:id` (`TryAuthForAction`
+with `forms:read` and `definitions:read`). Gin binds a group's middleware
+to each route at registration time, so a route added afterwards would
+inherit the global gate and answer 401 to exactly the caller the flag
+exists to admit. The asymmetry is the point: three routes out of `/v1`
+admit anonymous callers, and the code makes that visible as registrations
+that sit apart from the gated block.
 
-`TryAuth` is `RequireAuth` minus the requirement. A request carrying a
-credential is authenticated exactly as usual — invalid is 401 and never
-degrades to anonymous — and a request carrying none passes with no principal
-on the context. The middleware marks that case in the Gin context, because
-"no principal" is otherwise ambiguous: it is also what an auth-disabled
-deployment produces, and that deployment must keep the trusted
-service-principal meaning it has always had.
+`TryAuthForAction` is `RequireAuth` minus the requirement, parameterized on
+the permission it enforces for callers that do present a credential
+(`TryAuth` is that middleware for the delivery endpoint). A request
+carrying a credential is authenticated exactly as usual — invalid is 401
+and never degrades to anonymous — and a request carrying none passes with
+no principal on the context. The middleware marks that case in the Gin
+context (`AnonymousFrom`), because "no principal" is otherwise ambiguous:
+it is also what an auth-disabled deployment produces, and that deployment
+must keep the trusted service-principal meaning it has always had.
 
 `authorizeDelivery` then branches on that marker before either gate, and
 against the node flag rather than the credential:
@@ -501,6 +508,15 @@ against the node flag rather than the credential:
   before any delivery row exists;
 - authenticated → the two gates run unchanged, on a public node too, so an
   authenticated caller is never treated as anonymous.
+
+The two reads make their own anonymous decision past the middleware. The
+form body is already frontend-only, so it is served unchanged; the
+definition read serves an allowlisted projection of the resolved,
+materialized tree (graph plus input delivery contracts — no scripts,
+configs, gates, or audit fields), degrading to the declared fields of
+stored content that no longer resolves. The anonymous definition response
+carries `Cache-Control: no-store` and `Vary` on the credential headers,
+since the same path serves the full definition to credentialed callers.
 
 The audit trail keeps the three cases apart. `input_received` carries
 `delivered_by` (`anonymous`, `service`, or `user`) and `input_forbidden` does

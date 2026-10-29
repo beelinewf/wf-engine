@@ -482,8 +482,9 @@ type PendingInputResponse struct {
 	// payload, so the frontend knows which shape the context will hold.
 	RecordActor bool `json:"record_actor"`
 	// Public reports that the node accepts anonymous deliveries over HTTP
-	// with no credential, even when auth is on. Status and form reads stay
-	// authenticated, so an anonymous caller learns the shape out-of-band.
+	// with no credential, even when auth is on. While the instance parks
+	// here, anonymous callers also read this contract from the public
+	// status projection and the form from the public form read.
 	Public bool `json:"public"`
 	// Accept lists the request media types the node delivers. A frontend
 	// reads it to decide between a JSON body and a multipart upload.

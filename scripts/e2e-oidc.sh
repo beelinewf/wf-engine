@@ -386,8 +386,10 @@ code=$(curl -sS -o /dev/null -w '%{http_code}' -X PUT "$APP_BASE_URL/v1/workflow
 [[ "$code" == "403" ]] || fail "anonymous delivery to a private node -> $code, want 403"
 pass "anonymous delivery is refused on a private node"
 
-# Exempting PUT input must not exempt anything else: the reads an anonymous
-# caller would use to discover the shape stay authenticated.
+# Exempting PUT input must not exempt instance reads: status and context
+# stay authenticated even on a public instance. (The single form and
+# workflow-definition reads are intentionally public so an anonymous caller
+# can fetch the shape itself.)
 code=$(curl -sS -o /dev/null -w '%{http_code}' "$APP_BASE_URL/v1/workflow/instance/$PUB_INST/status")
 [[ "$code" == "401" ]] || fail "anonymous status read on a public instance -> $code, want 401"
 code=$(curl -sS -o /dev/null -w '%{http_code}' "$APP_BASE_URL/v1/workflow/instance/$PUB_INST/context")

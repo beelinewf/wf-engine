@@ -87,3 +87,7 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 - Repo: `beelinewf/wf-engine` (`github.com/beelinewf/wf-engine`).
 - Use `default.github___*` tools for all GitHub reads/writes. Never the `gh` CLI, curl, WebSearch, or FetchUrl for GitHub.
 
+## 7. Protected Files (mandatory)
+
+- **NEVER TOUCH `CHANGELOG.md`.** Do not create, edit, format, regenerate, or delete it for any task. Leave it exactly as-is, even when a change would normally warrant a changelog entry. User maintains it.
+

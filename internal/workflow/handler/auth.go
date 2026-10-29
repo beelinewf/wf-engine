@@ -202,26 +202,22 @@ func RequirePermission(action string, catalog *auth.Catalog) gin.HandlerFunc {
 	}
 }
 
-// TryAuth returns Gin middleware that authenticates when the request
+// TryAuthForAction returns Gin middleware that authenticates when the request
 // carries a credential and lets it through anonymous when it does not. A
 // present credential is checked exactly like RequireAuth: valid resolves
 // and stores the principal, invalid is 401 and never degrades to
-// anonymous. A request with nothing to check carries no principal, so the
-// handler reads it the same way it reads an auth-disabled deployment and
-// the service decides against the pending node's public flag. Only the
-// credential-less path records itself as anonymous, which is what keeps an
-// authenticated delivery on a public node attributed to its caller rather
-// than marked anonymous.
+// anonymous. A request with nothing to check carries no principal and is
+// recorded as anonymous (see AnonymousFrom), so the handler can tell it
+// apart from an auth-disabled deployment.
 //
 // It also checks the endpoint permission itself, and only for the callers it
 // actually authenticated. An anonymous caller holds no permission to check,
-// so the flag cannot be answered until the service has loaded the parked
-// node; the service refuses it there. For a credentialed caller the check
-// has to stay here rather than in the service, because a refusal written by
-// the service would run after the object-level ownership check, and that one
-// answers 404 to hide the instance. A caller who cannot act on the instance
-// at all must be refused on its own terms, not told the instance is gone.
-func TryAuth(cfg AuthConfig) gin.HandlerFunc {
+// so whatever makes the route safe for anonymous callers — a public input
+// node, a filtered public read — is decided past the middleware. For a
+// credentialed caller the check has to stay here rather than in the service,
+// so a caller with no access at all is refused on its own terms instead of
+// by whatever the handler answers next.
+func TryAuthForAction(action string, cfg AuthConfig) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !authPresented(c, cfg) {
 			c.Set(anonymousKey, true)
@@ -239,8 +235,8 @@ func TryAuth(cfg AuthConfig) gin.HandlerFunc {
 			WriteProblem(c, http.StatusUnauthorized, err.Error())
 			return
 		}
-		if !principal.HasPermission(auth.ActionInputDeliver, cfg.Catalog) {
-			WriteProblem(c, http.StatusForbidden, "the "+auth.ActionInputDeliver+" permission is required")
+		if !principal.HasPermission(action, cfg.Catalog) {
+			WriteProblem(c, http.StatusForbidden, "the "+action+" permission is required")
 			return
 		}
 		if cfg.IdentityResolver != nil {
@@ -261,6 +257,21 @@ func TryAuth(cfg AuthConfig) gin.HandlerFunc {
 		c.Set(principalKey, principal)
 		c.Next()
 	}
+}
+
+// TryAuth is TryAuthForAction for the input-delivery endpoint: the flag the
+// service decides against is the pending node's public flag, and it refuses
+// a private node. Only the credential-less path records itself as anonymous,
+// which is what keeps an authenticated delivery on a public node attributed
+// to its caller rather than marked anonymous.
+//
+// The permission check stays here rather than in the service because a
+// refusal written by the service would run after the object-level ownership
+// check, and that one answers 404 to hide the instance. A caller who cannot
+// act on the instance at all must be refused on its own terms, not told the
+// instance is gone.
+func TryAuth(cfg AuthConfig) gin.HandlerFunc {
+	return TryAuthForAction(auth.ActionInputDeliver, cfg)
 }
 
 // authPresented reports whether the request carries anything to check: an

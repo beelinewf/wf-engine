@@ -128,10 +128,10 @@ func TestAuthenticatedPutInputStaysAttributed(t *testing.T) {
 	}
 }
 
-// Exempting PUT input must not exempt anything else. The status and form
-// reads stay behind the global gate, so an anonymous caller cannot use a
-// public node to discover the workflow's shape; it learns the contract
-// out-of-band instead.
+// Exempting PUT input must not exempt anything else. The instance reads
+// that stay private (list, node debug, context) remain behind the global
+// gate; status, definition, and form reads have their own public
+// contracts, covered by the public-reads tests.
 func TestAnonymousReadsOtherInstanceRoutesAreUnauthorized(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := anonRouter(&fakeInstanceSvc{
@@ -139,7 +139,6 @@ func TestAnonymousReadsOtherInstanceRoutesAreUnauthorized(t *testing.T) {
 	})
 	for _, path := range []string{
 		"/v1/workflow/instance",
-		"/v1/workflow/instance/" + instanceID + "/status",
 		"/v1/workflow/instance/" + instanceID + "/status/node/" + occurrenceID,
 		"/v1/workflow/instance/" + instanceID + "/context",
 		"/v1/auth/me",

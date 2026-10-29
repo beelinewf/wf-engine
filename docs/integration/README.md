@@ -134,6 +134,15 @@ Every `GET` list returns the same envelope:
    for editor autocomplete.
 9. Dashboard: `GET /v1/statistics` for KPI cards (`active_runs` for live load) and `runs_per_day` charts over the `created_from`/`created_to` window.
 
+## Anonymous public-input flow
+
+When the parked input node sets `public: true`, no credential is needed at all: `GET
+/v1/workflow/instance/{id}/status` returns the filtered projection (the definition id plus the pending delivery
+contract), `GET /v1/workflow/definition/{id}` returns the filtered projection (graph plus each input node's `form_id`
+and delivery contract), `GET /v1/forms/{form_id}` returns the render contract, and `PUT .../input` accepts the
+credential-less delivery. Context reads stay authenticated; share the instance id deliberately and let the caller
+resolve everything else from it.
+
 ## Instance lifecycle (for button state)
 
 ```
