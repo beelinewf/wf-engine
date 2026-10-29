@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 
+## [1.2.0] - 2026-10-29
+
+
+### Features
+
+- Add local users with email verify (#75) ([f6571ce](https://github.com/beelinewf/wf-engine/commit/f6571ce531536274b4310a43726db4741b267c4f))
+- Add public reads for anon callers (#76) ([dd1d735](https://github.com/beelinewf/wf-engine/commit/dd1d735c2168afa8ebad74df0a8bab4b5b140b13))
+- Add workflow mail send (#77) ([372a6d8](https://github.com/beelinewf/wf-engine/commit/372a6d82d8970231de0c6a3e09c5c719f316b75f))
+
 ## [1.1.1] - 2026-10-28
 
 
