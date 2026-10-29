@@ -15,6 +15,7 @@ import (
 	"github.com/beelinewf/wf-engine/internal/workflow/executor"
 	"github.com/beelinewf/wf-engine/internal/workflow/model"
 	"github.com/beelinewf/wf-engine/internal/workflow/repository"
+	"github.com/beelinewf/wf-engine/internal/workflow/service"
 	"github.com/beelinewf/wf-engine/internal/workflow/testdb"
 	"github.com/beelinewf/wf-engine/pkg/configuration"
 	"github.com/beelinewf/wf-engine/pkg/database"
@@ -171,6 +172,7 @@ func bootstrapSchema(t *testing.T, dsn string) {
 		&repository.UserModel{},
 		&repository.RoleModel{},
 		&repository.RolePermissionModel{},
+		&repository.UserRoleModel{},
 		&repository.SecretModel{},
 		&repository.FormModel{},
 		&repository.NodeDefinitionModel{},
@@ -477,12 +479,42 @@ func (stubAuthService) Me(context.Context, auth.Principal) (model.User, error) {
 	return model.User{}, nil
 }
 
-func (stubAuthService) ListUsers(context.Context, int, int) ([]model.User, int64, error) {
+func (stubAuthService) ListUsers(context.Context, repository.UserListQuery) ([]model.User, int64, error) {
 	return nil, 0, nil
 }
 
 func (stubAuthService) GetUser(context.Context, string) (model.User, error) {
 	return model.User{}, nil
+}
+
+func (stubAuthService) CreateUser(context.Context, string, string, string, []string) (model.User, error) {
+	return model.User{}, nil
+}
+
+func (stubAuthService) UpdateUser(context.Context, auth.Principal, string, service.UpdateUserParams) (model.User, error) {
+	return model.User{}, nil
+}
+
+func (stubAuthService) DisableUser(context.Context, auth.Principal, string) (model.User, error) {
+	return model.User{}, nil
+}
+
+func (stubAuthService) Register(context.Context, string, string, string) (service.RegisterResult, error) {
+	return service.RegisterResult{}, nil
+}
+
+func (stubAuthService) Login(context.Context, string, string) (service.LoginResult, error) {
+	return service.LoginResult{}, nil
+}
+
+func (stubAuthService) VerifyEmail(context.Context, string) (service.LoginResult, error) {
+	return service.LoginResult{}, nil
+}
+
+func (stubAuthService) ResendVerification(context.Context, string) error { return nil }
+
+func (stubAuthService) ResendVerificationForUser(context.Context, auth.Principal, string) error {
+	return nil
 }
 
 // TestCompositionNilBrokerDependencies mirrors the app wiring with brokers

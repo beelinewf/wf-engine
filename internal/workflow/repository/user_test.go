@@ -377,7 +377,7 @@ func TestUserListPaginationAndOrder(t *testing.T) {
 	}
 	assertPage := func(page, perPage int, want []string) {
 		t.Helper()
-		users, total, err := repo.List(ctx, page, perPage)
+		users, total, err := repo.List(ctx, repository.UserListQuery{Page: page, PerPage: perPage})
 		if err != nil {
 			t.Fatalf("List(%d, %d) error = %v", page, perPage, err)
 		}

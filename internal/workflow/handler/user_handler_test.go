@@ -10,6 +10,7 @@ import (
 
 	"github.com/beelinewf/wf-engine/internal/workflow/auth"
 	"github.com/beelinewf/wf-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/repository"
 	"github.com/beelinewf/wf-engine/pkg/configuration"
 )
 
@@ -145,7 +146,7 @@ func TestRouterUsersListReportsEmptyAsArray(t *testing.T) {
 // handler's own envelope rather than the service's slice.
 type emptyUserListSvc struct{ fakeAuthSvc }
 
-func (emptyUserListSvc) ListUsers(context.Context, int, int) ([]model.User, int64, error) {
+func (emptyUserListSvc) ListUsers(context.Context, repository.UserListQuery) ([]model.User, int64, error) {
 	return nil, 0, nil
 }
 
@@ -158,6 +159,47 @@ func TestRouterUsersListRejectsBadPagination(t *testing.T) {
 		if w.Code != http.StatusBadRequest {
 			t.Errorf("GET /v1/users%s status = %d, want 400", query, w.Code)
 		}
+	}
+}
+
+// The list route forwards parsed filters to the service: the fake captures
+// the converted query, pinning the parse→convert→call chain, and a bad
+// filter is 400 before the service is reached.
+type captureUserListSvc struct {
+	fakeAuthSvc
+	got repository.UserListQuery
+}
+
+func (s *captureUserListSvc) ListUsers(_ context.Context, q repository.UserListQuery) ([]model.User, int64, error) {
+	s.got = q
+	return nil, 0, nil
+}
+
+func TestRouterUsersListForwardsFilters(t *testing.T) {
+	svc := &captureUserListSvc{}
+	r := NewRouter(Deps{Health: NewHealth(fakePinger{}), Auth: svc})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/users?role=admin,viewer&is_active=true&order=created_at", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", w.Code, w.Body.String())
+	}
+	q := svc.got
+	if len(q.Roles) != 2 || q.Roles[0] != "admin" || q.Roles[1] != "viewer" {
+		t.Errorf("roles = %v, want [admin viewer]", q.Roles)
+	}
+	if q.IsActive == nil || !*q.IsActive {
+		t.Errorf("is_active = %v, want true", q.IsActive)
+	}
+	if q.Order != "created_at" {
+		t.Errorf("order = %q, want created_at", q.Order)
+	}
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/v1/users?order=name", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("bad order status = %d, want 400", w.Code)
 	}
 }
 

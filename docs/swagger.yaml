@@ -20,10 +20,27 @@ definitions:
         type: string
       client_id:
         type: string
+      email_verification_enabled:
+        description: |-
+          EmailVerificationEnabled says whether a registered account stays
+          pending until its mailed link is consumed over POST
+          /v1/auth/verify-email.
+        type: boolean
       enabled:
         type: boolean
       issuer:
         type: string
+      local_enabled:
+        description: |-
+          LocalEnabled reports the built-in local login: POST
+          /v1/auth/register and POST /v1/auth/login with HS256 JWTs verified
+          as Bearer [REDACTED]
+        type: boolean
+      registration_enabled:
+        description: |-
+          RegistrationEnabled says whether POST /v1/auth/register admits
+          self-registration, or users arrive from an admin only.
+        type: boolean
       roles:
         description: |-
           Roles is every role name the role catalog knows, so a frontend
@@ -141,6 +158,19 @@ definitions:
     required:
     - key
     - value
+    type: object
+  internal_workflow_handler.CreateUserRequest:
+    properties:
+      email:
+        type: string
+      name:
+        type: string
+      password:
+        type: string
+      roles:
+        items:
+          type: string
+        type: array
     type: object
   internal_workflow_handler.CreateWorkflowDefinitionRequest:
     properties:
@@ -467,6 +497,24 @@ definitions:
       total_pages:
         type: integer
     type: object
+  internal_workflow_handler.LoginRequest:
+    properties:
+      email:
+        type: string
+      password:
+        type: string
+    type: object
+  internal_workflow_handler.LoginResponse:
+    properties:
+      access_token:
+        type: string
+      expires_in:
+        type: integer
+      token_type:
+        type: string
+      user:
+        $ref: '#/definitions/internal_workflow_handler.UserResponse'
+    type: object
   internal_workflow_handler.MigrateInstanceResponse:
     properties:
       created_at:
@@ -747,6 +795,38 @@ definitions:
       type:
         type: string
     type: object
+  internal_workflow_handler.RegisterRequest:
+    properties:
+      email:
+        type: string
+      name:
+        type: string
+      password:
+        type: string
+    type: object
+  internal_workflow_handler.RegisterResponse:
+    properties:
+      access_token:
+        type: string
+      expires_in:
+        type: integer
+      pending_verification:
+        type: boolean
+      token_type:
+        type: string
+      user:
+        $ref: '#/definitions/internal_workflow_handler.UserResponse'
+    type: object
+  internal_workflow_handler.ResendVerificationRequest:
+    properties:
+      email:
+        type: string
+    type: object
+  internal_workflow_handler.ResendVerificationResponse:
+    properties:
+      message:
+        type: string
+    type: object
   internal_workflow_handler.ResumeResponse:
     properties:
       status:
@@ -910,21 +990,63 @@ definitions:
     required:
     - value
     type: object
+  internal_workflow_handler.UpdateUserRequest:
+    properties:
+      current_password:
+        type: string
+      email:
+        type: string
+      email_verified:
+        type: boolean
+      is_active:
+        type: boolean
+      name:
+        type: string
+      password:
+        type: string
+      roles:
+        items:
+          type: string
+        type: array
+    type: object
   internal_workflow_handler.UserResponse:
     properties:
       created_at:
         type: string
       email:
         type: string
+      email_verified:
+        description: |-
+          EmailVerified is false while a self-registered account awaits its
+          verification link.
+        type: boolean
       id:
         type: string
+      is_active:
+        description: IsActive is false for a disabled (soft-deleted) account.
+        type: boolean
+      is_local:
+        description: IsLocal reports a password account rather than an OIDC identity.
+        type: boolean
       issuer:
         type: string
       name:
         type: string
+      roles:
+        description: |-
+          Roles are a local user's stored roles. OIDC callers carry theirs
+          on the live token, so this is empty for them.
+        items:
+          type: string
+        type: array
       subject:
         type: string
       updated_at:
+        type: string
+    type: object
+  internal_workflow_handler.VerifyEmailRequest:
+    properties:
+      token:
         type: string
     type: object
   internal_workflow_handler.WorkflowDefinitionResponse:
@@ -1013,6 +1135,47 @@ paths:
       summary: Get the OIDC login contract
       tags:
       - auth
+  /v1/auth/login:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Credentials
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_workflow_handler.LoginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.LoginResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "429":
+          description: Too Many Requests
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+      summary: Log in with email and password
+      tags:
+      - auth
   /v1/auth/me:
     get:
       produces:
@@ -1038,6 +1201,125 @@ paths:
       - ApiKeyAuth: []
       - BearerAuth: []
       summary: Get the authenticated caller
+      tags:
+      - auth
+  /v1/auth/register:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Account
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_workflow_handler.RegisterRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.RegisterResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "429":
+          description: Too Many Requests
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+      summary: Register a local account
+      tags:
+      - auth
+  /v1/auth/resend-verification:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Email
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_workflow_handler.ResendVerificationRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.ResendVerificationResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "429":
+          description: Too Many Requests
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+      summary: Resend a verification link
+      tags:
+      - auth
+  /v1/auth/verify-email:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Token
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_workflow_handler.VerifyEmailRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.LoginResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "429":
+          description: Too Many Requests
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+      summary: Verify an email with its mailed token
       tags:
       - auth
   /v1/forms:
@@ -2013,6 +2295,42 @@ paths:
         in: query
         name: per_page
         type: integer
+      - description: 'Sort order: created_at or -created_at (default)'
+        in: query
+        name: order
+        type: string
+      - description: Comma-separated user IDs
+        in: query
+        name: id
+        type: string
+      - description: Comma-separated membership filter; only local users match
+        in: query
+        name: role
+        type: string
+      - description: Comma-separated issuer filter
+        in: query
+        name: issuer
+        type: string
+      - description: Only password accounts (true) or provider/system rows (false)
+        in: query
+        name: is_local
+        type: boolean
+      - description: Only proven (true) or pending (false) mailboxes
+        in: query
+        name: email_verified
+        type: boolean
+      - description: Only enabled (true) or disabled (false) accounts
+        in: query
+        name: is_active
+        type: boolean
+      - description: Case-insensitive email substring
+        in: query
+        name: email
+        type: string
+      - description: Case-insensitive name substring
+        in: query
+        name: name
+        type: string
       produces:
       - application/json
       responses:
@@ -2042,7 +2360,94 @@ paths:
       summary: List users
       tags:
       - auth
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: User
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_workflow_handler.CreateUserRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.UserResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      summary: Create a local user
+      tags:
+      - auth
   /v1/users/{id}:
+    delete:
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      summary: Disable a local user
+      tags:
+      - auth
     get:
       parameters:
       - description: User ID
@@ -2081,6 +2486,95 @@ paths:
       - ApiKeyAuth: []
       - BearerAuth: []
       summary: Get one user
+      tags:
+      - auth
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: User
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_workflow_handler.UpdateUserRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.UserResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      summary: Update a local user
+      tags:
+      - auth
+  /v1/users/{id}/resend-verification:
+    post:
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_workflow_handler.Problem'
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      summary: Resend a user's verification link
       tags:
       - auth
   /v1/workflow/definition:
@@ -3262,11 +3756,12 @@ securityDefinitions:
     name: X-Api-Token
     type: apiKey
   BearerAuth:
-    description: 'OIDC bearer token. In the Swagger Authorize dialog type "Bearer
-      <jwt>" with the Bearer prefix and a space: the value is sent verbatim as the
-      Authorization header. The engine is a resource server: the frontend completes
-      a code+PKCE flow against the provider and calls the API with the JWT. The authorization
-      URL, client id, and scopes are served by GET /v1/auth/config.'
+    description: 'Bearer token: an OIDC JWT or a locally issued one. In the Swagger
+      Authorize dialog type "Bearer <jwt>" with the Bearer prefix and a space: the
+      value is sent verbatim as the Authorization header. For OIDC the engine is a
+      resource server: the frontend completes a code+PKCE flow against the provider
+      and calls the API with the JWT. For local auth the frontend logs in over POST
+      /v1/auth/login. Which logins exist is served by GET /v1/auth/config.'
     in: header
     name: Authorization
     type: apiKey

@@ -13,8 +13,13 @@ code). Where this guide and `openapi.yaml` disagree, this guide follows code.
 ## Base URL and auth
 
 - API base path: `/`. All v1 routes live under `/v1`. Health probes under `/health`.
-- Auth: header `X-Api-Token: <token>`, required on all `/v1/*` routes only when server runs with `auth.enabled=true`.
+- Auth: header `X-Api-Token: <token>` or `Authorization: Bearer <jwt>` (an OIDC token or a locally issued one, see
+  `auth/zitadel.md` and `auth/local.md`), required on all `/v1/*` routes only when server runs with `auth.enabled=true`.
   Header name is case-insensitive (standard HTTP semantics); comparison is constant-time, so send the token exactly.
+- `GET /v1/auth/config` is public and reports which logins exist (`local_enabled`, `registration_enabled`,
+  `email_verification_enabled` for the local contract). The four local endpoints (`/v1/auth/register`, `/v1/auth/login`,
+  `/v1/auth/verify-email`, `/v1/auth/resend-verification`) are likewise public, and rate limited: past the budget they
+  answer `429` with a `Retry-After` header — back off and honor it.
 - Missing/invalid token → `401` with `application/problem+json` body.
 - `PUT /v1/workflow/instance/{id}/input` is the one exception: it is reachable with **no** token, and decides against
   the parked input node. No token on a node with `public: true` → accepted. No token on any other node → `403`. A
@@ -66,6 +71,7 @@ Status mapping:
 | 404    | Unknown id (definition, instance, occurrence, attempt beyond latest)                                                                                                                          |
 | 409    | State conflict: delete while referenced, control on terminal instance, context/input/rollback guard failed, duplicate secret key                                                              |
 | 422    | Semantic validation failure (bad enum, bad content, bad payload, missing required field)                                                                                                      |
+| 429    | Rate limit exceeded (public local-auth endpoints, failed API-token guesses): back off for the `Retry-After` seconds                                                                             |
 | 500    | Server error (includes malformed instance path ids the database rejects instead of returning zero rows)                                                                                       |
 | 503    | `GET /health/ready` only: database unreachable                                                                                                                                                  |
 

@@ -30,19 +30,127 @@ paths:
     get:
       tags: [Auth]
       operationId: getAuthConfig
-      summary: Get the OIDC login contract
+      summary: Get the login contract
       description: |
         Public by design: a frontend has to read this to learn where to log
         in, which is exactly when it holds no token yet. Reports whether OIDC
         is configured, the provider endpoints to run the flow against, the
-        claim the roles are read from, and every role name the role
-        catalog knows, so a role can be labelled before the caller has one.
+        claim the roles are read from, whether the built-in local login
+        (register/login, optional email verification) is on, and every role
+        name the role catalog knows, so a role can be labelled before the
+        caller has one.
       responses:
         "200":
           description: Login contract
           content:
             application/json:
               schema: { $ref: "#/components/schemas/AuthConfig" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /v1/auth/register:
+    post:
+      tags: [Auth]
+      operationId: registerLocalUser
+      summary: Register a local account
+      description: |
+        Public and rate limited (429 with Retry-After past the budget).
+        With registration closed the route answers 403; with email
+        verification on the account pends and the response carries no
+        token, otherwise it is a login session at once. Either way the
+        account is created, so the status is 201. A duplicate email is 409.
+        The route exists only while local auth is enabled.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RegisterRequest" }
+      responses:
+        "201":
+          description: Account created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RegisterResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /v1/auth/login:
+    post:
+      tags: [Auth]
+      operationId: loginLocalUser
+      summary: Log in with email and password
+      description: |
+        Public and rate limited (429 with Retry-After past the budget).
+        Unknown email, wrong password, and disabled account share one 401,
+        so the endpoint cannot probe for accounts; a pending account is
+        403. The route exists only while local auth is enabled.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoginRequest" }
+      responses:
+        "200":
+          description: Login session
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /v1/auth/verify-email:
+    post:
+      tags: [Auth]
+      operationId: verifyEmail
+      summary: Verify an email with its mailed token
+      description: |
+        Public and rate limited (429 with Retry-After past the budget). The
+        token is single-use and expiring: unknown is 422, expired asks for
+        a resend. Success returns a login session for the verified account.
+        The route exists only while local auth is enabled.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/VerifyEmailRequest" }
+      responses:
+        "200":
+          description: Login session
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /v1/auth/resend-verification:
+    post:
+      tags: [Auth]
+      operationId: resendVerification
+      summary: Resend a verification link
+      description: |
+        Public and rate limited (429 with Retry-After past the budget). The
+        response is always the same generic success — unknown email,
+        verified account, disabled account, and cooldown suppression
+        included — so the endpoint cannot probe for accounts. The route
+        exists only while local auth is enabled.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ResendVerificationRequest" }
+      responses:
+        "200":
+          description: Generic success
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ResendVerificationResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
         "500": { $ref: "#/components/responses/InternalError" }
   /v1/auth/me:
     get:
@@ -218,13 +326,24 @@ paths:
         - BearerAuth: []
       summary: List users, newest first
       description: |
-        One page of the users table with the total row count. Users are
-        created just in time when a caller first authenticates; this is a
-        read-only directory over those rows. The identity-cache metadata is
-        never exposed: it is debug-only and not authorization data.
+        One page of the users table with the total matching row count. OIDC
+        callers are created just in time when they first authenticate; local
+        users arrive from registration or an admin. Reads need users:read.
+        Filters combine with AND. The identity-cache metadata is never
+        exposed: it is debug-only and not authorization data, and neither
+        is the password hash.
       parameters:
         - $ref: "#/components/parameters/Page"
         - $ref: "#/components/parameters/PerPage"
+        - $ref: "#/components/parameters/UserOrder"
+        - $ref: "#/components/parameters/UserIDs"
+        - $ref: "#/components/parameters/UserRoles"
+        - $ref: "#/components/parameters/UserIssuers"
+        - $ref: "#/components/parameters/UserIsLocal"
+        - $ref: "#/components/parameters/UserEmailVerified"
+        - $ref: "#/components/parameters/UserIsActive"
+        - $ref: "#/components/parameters/UserEmail"
+        - $ref: "#/components/parameters/UserName"
       responses:
         "403": { $ref: "#/components/responses/Forbidden" }
         "200":
@@ -234,6 +353,33 @@ paths:
               schema: { $ref: "#/components/schemas/UserList" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    post:
+      tags: [Users]
+      operationId: createUser
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      summary: Create a local user
+      description: |
+        Admin-created accounts verify at write and activate at once. Writes
+        need users:write. The response never carries the credential.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UserCreate" }
+      responses:
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "201":
+          description: User created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
         "500": { $ref: "#/components/responses/InternalError" }
   /v1/users/{id}:
     get:
@@ -259,6 +405,90 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/User" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    put:
+      tags: [Users]
+      operationId: updateUser
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      summary: Update a local user
+      description: |
+        A nil field keeps the stored value. A users:write holder edits every
+        field; the account itself edits name, email, and password only,
+        proving the current password for a rotation. An email change
+        re-pends verification while it is on. OIDC rows are read-only here.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UserUpdate" }
+      responses:
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "200":
+          description: User detail
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    delete:
+      tags: [Users]
+      operationId: disableUser
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      summary: Disable a local user
+      description: |
+        Soft-delete: the row survives for the audit trail, but the
+        credential is cleared and the account can no longer authenticate;
+        outstanding tokens stop resolving at once. Writes need users:write.
+        The system user and the caller's own account refuse with 422.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "204": { description: Disabled }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /v1/users/{id}/resend-verification:
+    post:
+      tags: [Users]
+      operationId: resendUserVerification
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      summary: Resend a user's verification link
+      description: |
+        The admin variant of the public resend: unknown id is 404 and the
+        cooldown does not apply, but a verified account is still a silent
+        success. Writes need users:write.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "204": { description: Link sent (or account already verified) }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/Unprocessable" }
@@ -1366,10 +1596,12 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: |
-        OIDC bearer token. The engine is a resource server: the frontend
-        completes a code+PKCE flow against the provider and calls the API with
-        the resulting JWT. The authorization URL, client id, and scopes are
-        served by GET /v1/auth/config.
+        Bearer authentication: either an OIDC JWT or a locally issued one. For OIDC the
+        engine is a resource server: the frontend completes a code+PKCE flow
+        against the provider and calls the API with the resulting JWT. For
+        local auth the frontend logs in over POST /v1/auth/login and calls
+        the API with the returned JWT. Which logins exist is served by
+        GET /v1/auth/config.
   parameters:
     Page:
       name: page
@@ -1469,6 +1701,73 @@ components:
         enum: [date, -date]
         default: -date
         description: Runs-per-day bucket direction
+    UserOrder:
+      name: order
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [created_at, -created_at]
+        default: -created_at
+        description: Creation-time direction; newest first by default
+    UserIDs:
+      name: id
+      in: query
+      required: false
+      schema:
+        type: array
+        items: { type: string, format: uuid }
+        maxItems: 100
+        description: Comma-separated id filter
+      style: form
+      explode: false
+    UserRoles:
+      name: role
+      in: query
+      required: false
+      schema:
+        type: array
+        items: { type: string }
+        maxItems: 100
+        description: Comma-separated membership filter; only local users carry stored roles
+      style: form
+      explode: false
+    UserIssuers:
+      name: issuer
+      in: query
+      required: false
+      schema:
+        type: array
+        items: { type: string }
+        maxItems: 100
+        description: Comma-separated issuer filter ("local" for password accounts)
+      style: form
+      explode: false
+    UserIsLocal:
+      name: is_local
+      in: query
+      required: false
+      schema: { type: boolean, description: "true: only password accounts; false: only provider and system rows; omitted: both" }
+    UserEmailVerified:
+      name: email_verified
+      in: query
+      required: false
+      schema: { type: boolean, description: "true: only proven mailboxes; false: only pending ones; omitted: both" }
+    UserIsActive:
+      name: is_active
+      in: query
+      required: false
+      schema: { type: boolean, description: "true: only enabled accounts; false: only disabled ones; omitted: both" }
+    UserEmail:
+      name: email
+      in: query
+      required: false
+      schema: { type: string, description: Case-insensitive email substring }
+    UserName:
+      name: name
+      in: query
+      required: false
+      schema: { type: string, description: Case-insensitive name substring }
     DefinitionID:
       name: id
       in: path
@@ -1538,6 +1837,20 @@ components:
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
+    TooManyRequests:
+      description: >-
+        Rate limit exceeded: the client IP or email made too many requests
+        inside the window. The response carries a Retry-After header with
+        whole seconds until the block expires. The body is identical across
+        endpoints and cases, so a refusal cannot be read as an
+        account-existence oracle.
+      headers:
+        Retry-After:
+          description: Whole seconds until the block expires
+          schema: { type: integer }
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
     InternalError:
       description: Internal error
       content:
@@ -1575,8 +1888,8 @@ components:
         status: { type: string }
     AuthConfig:
       type: object
-      description: The OIDC login contract, readable without a credential.
-      required: [enabled, api_token_enabled, roles]
+      description: The login contract, readable without a credential.
+      required: [enabled, api_token_enabled, local_enabled, registration_enabled, email_verification_enabled, roles]
       properties:
         enabled:
           type: boolean
@@ -1612,6 +1925,15 @@ components:
         api_token_enabled:
           type: boolean
           description: True when the API token is configured, so a frontend can show a token login
+        local_enabled:
+          type: boolean
+          description: True when the built-in local login (POST /v1/auth/register and POST /v1/auth/login, HS256 JWTs verified as Bearer [REDACTED] is on
+        registration_enabled:
+          type: boolean
+          description: True when POST /v1/auth/register admits self-registration; otherwise users arrive from an admin only
+        email_verification_enabled:
+          type: boolean
+          description: True when a registered account stays pending until its mailed link is consumed over POST /v1/auth/verify-email
         roles:
           type: array
           items: { type: string }
@@ -1685,7 +2007,7 @@ components:
           items: { $ref: "#/components/schemas/Role" }
     User:
       type: object
-      required: [id, name, email, created_at, updated_at]
+      required: [id, name, email, roles, is_active, email_verified, is_local, created_at, updated_at]
       properties:
         id: { type: string, format: uuid, description: users.id, the audit actor for this user }
         subject:
@@ -1695,11 +2017,93 @@ components:
         issuer:
           type: string
           nullable: true
-          description: Provider issuer; null for a user with no provider identity
+          description: Provider issuer ("local" for a password account); null for a user with no provider identity
         name: { type: string }
         email: { type: string }
+        roles:
+          type: array
+          items: { type: string }
+          description: A local user's stored roles; empty for OIDC callers, who carry theirs on the live token
+        is_active:
+          type: boolean
+          description: False for a disabled (soft-deleted) account
+        email_verified:
+          type: boolean
+          description: False while a self-registered account awaits its verification link
+        is_local:
+          type: boolean
+          description: True for a password account rather than an OIDC identity
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    UserCreate:
+      type: object
+      required: [name, email, password]
+      properties:
+        name: { type: string, description: Display name; blank is 422 }
+        email: { type: string, description: Login email, stored lowercased; malformed is 422, a duplicate is 409 }
+        password: { type: string, description: 6..72 characters with at least one uppercase letter, one number, and one symbol; outside is 422. Stored as a bcrypt hash, never returned }
+        roles:
+          type: array
+          items: { type: string }
+          description: Catalog roles to assign; an unknown role is 422, an omitted list assigns none
+    UserUpdate:
+      type: object
+      properties:
+        name: { type: string, description: Omitted keeps the stored name; blank is 422 }
+        email: { type: string, description: Omitted keeps the stored email; a change re-pends verification while it is on }
+        roles:
+          type: array
+          items: { type: string }
+          description: Fully replaces the membership set; an empty list revokes every membership. users:write only
+        password: { type: string, description: Omitted or empty keeps the credential; otherwise 6..72 characters with at least one uppercase letter, one number, and one symbol. The account itself must also send current_password }
+        current_password: { type: string, description: Required when the account itself rotates its password; a mismatch is 422 }
+        is_active: { type: boolean, description: users:write only }
+        email_verified: { type: boolean, description: Explicit verdict, retiring any outstanding link. users:write only }
+    RegisterRequest:
+      type: object
+      required: [name, email, password]
+      properties:
+        name: { type: string }
+        email: { type: string }
+        password: { type: string, description: 6..72 characters with at least one uppercase letter, one number, and one symbol }
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string }
+        password: { type: string }
+    LoginResponse:
+      type: object
+      required: [access_token, token_type, expires_in, user]
+      properties:
+        access_token: { type: string, description: HS256 JWT for the Authorization header }
+        token_type: { type: string, description: Always Bearer }
+        expires_in: { type: integer, description: Whole seconds until the token expires }
+        user: { $ref: "#/components/schemas/User" }
+    RegisterResponse:
+      type: object
+      required: [user, pending_verification]
+      properties:
+        user: { $ref: "#/components/schemas/User" }
+        access_token: { type: string, description: Present only when the account activates at once }
+        token_type: { type: string, description: Always Bearer when present }
+        expires_in: { type: integer, description: Whole seconds until the token expires, when present }
+        pending_verification: { type: boolean, description: True when the account awaits its mailed link and no token was issued }
+    VerifyEmailRequest:
+      type: object
+      required: [token]
+      properties:
+        token: { type: string, description: Raw token from the mailed link; unknown is 422, expired asks for a resend }
+    ResendVerificationRequest:
+      type: object
+      required: [email]
+      properties:
+        email: { type: string }
+    ResendVerificationResponse:
+      type: object
+      required: [message]
+      properties:
+        message: { type: string, description: Identical for unknown, verified, and pending emails }
     UserList:
       type: object
       required: [items, page, per_page, total, total_pages]

@@ -335,7 +335,7 @@ func TestSeedRolesEmptyCatalogIsANoOp(t *testing.T) {
 func TestListUsersReturnsSeededUsers(t *testing.T) {
 	svc, _ := authServiceFor(t, auth.NewCatalog(nil))
 	ctx := context.Background()
-	users, total, err := svc.ListUsers(ctx, 1, 50)
+	users, total, err := svc.ListUsers(ctx, repository.UserListQuery{Page: 1, PerPage: 50})
 	if err != nil {
 		t.Fatalf("ListUsers() error = %v", err)
 	}

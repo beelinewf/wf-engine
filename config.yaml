@@ -289,6 +289,80 @@ auth:
     # the boot after this instead of hanging it.
     discovery_timeout: 10s
 
+  # Built-in local user authentication for customers without an external
+  # provider: register/login over POST /v1/auth/register|login and HS256
+  # JWTs verified as Bearer [REDACTED] No sessions and no callback; a verified
+  # JWT authenticates exactly like an OIDC one. Like OIDC, local auth is
+  # forced off while auth.enabled is false.
+  #
+  # Equivalent env vars: BEELINEWF_AUTH_LOCAL_ENABLED,
+  # BEELINEWF_AUTH_LOCAL_JWT_SECRET, BEELINEWF_AUTH_LOCAL_TOKEN_TTL,
+  # BEELINEWF_AUTH_LOCAL_ISSUER, BEELINEWF_AUTH_LOCAL_CLIENT_ID,
+  # BEELINEWF_AUTH_LOCAL_ALLOW_REGISTRATION,
+  # BEELINEWF_AUTH_LOCAL_DEFAULT_ROLE,
+  # BEELINEWF_AUTH_LOCAL_PUBLIC_BASE_URL,
+  # BEELINEWF_AUTH_LOCAL_EMAIL_VERIFICATION_ENABLED,
+  # BEELINEWF_AUTH_LOCAL_EMAIL_VERIFICATION_TOKEN_TTL,
+  # BEELINEWF_AUTH_LOCAL_EMAIL_VERIFICATION_RESEND_COOLDOWN,
+  # BEELINEWF_AUTH_LOCAL_SMTP_HOST, BEELINEWF_AUTH_LOCAL_SMTP_PORT,
+  # BEELINEWF_AUTH_LOCAL_SMTP_USERNAME, BEELINEWF_AUTH_LOCAL_SMTP_PASSWORD,
+  # BEELINEWF_AUTH_LOCAL_SMTP_FROM, BEELINEWF_AUTH_LOCAL_SMTP_USE_TLS,
+  # BEELINEWF_AUTH_LOCAL_RATE_LIMIT_ENABLED,
+  # BEELINEWF_AUTH_LOCAL_RATE_LIMIT_MAX_ATTEMPTS,
+  # BEELINEWF_AUTH_LOCAL_RATE_LIMIT_WINDOW,
+  # BEELINEWF_AUTH_LOCAL_RATE_LIMIT_BLOCK_DURATION.
+  local:
+    enabled: false
+    # Dedicated HMAC secret signing local JWTs (at least 32 bytes).
+    # Never reuse the API token or the at-rest encryption key: every
+    # replica must run with the same secret, or tokens minted on one
+    # replica are rejected by the others.
+    jwt_secret: ""
+    token_ttl: 24h
+    issuer: "beelinewf-local"
+    client_id: "beelinewf"
+    # Self-registration switch. Closed (false) means users are created by
+    # an admin over POST /v1/users; open (true) also admits POST
+    # /v1/auth/register, assigning default_role (empty assigns no roles).
+    allow_registration: false
+    default_role: ""
+    # Frontend origin used to build the email verification link
+    # ({base}/verify-email?token=...). Required only when email
+    # verification is enabled.
+    public_base_url: ""
+    # Toggled email verification. Off (false) activates a registered
+    # account immediately; on (true) the account stays pending until the
+    # mailed token is consumed over POST /v1/auth/verify-email, and login
+    # is refused until then. Enabling it requires public_base_url and the
+    # smtp settings below (host "log" selects the dev sender that logs
+    # the link instead of sending it).
+    email_verification:
+      enabled: false
+      token_ttl: 24h
+      resend_cooldown: 60s
+    smtp:
+      host: ""
+      port: 587
+      username: ""
+      password: ""
+      from: ""
+      use_tls: true
+      # Optional override for the embedded verification-mail templates:
+      # a directory holding verify_email.html and verify_email.txt with
+      # .Link and .ExpiresIn data. Empty keeps the embedded defaults.
+      template_dir: ""
+    # Throttle for the four public local-auth endpoints (register, login,
+    # resend-verification, verify-email), per client IP and per email.
+    # Per-replica in-memory state like the API-token throttle above, so
+    # add a proxy-level throttle as well when replicas sit behind one.
+    # The client IP is the direct peer unless auth.rate_limit lists the
+    # proxy in trusted_proxies.
+    rate_limit:
+      enabled: true
+      max_attempts: 10
+      window: 1m
+      block_duration: 5m
+
   # Equivalent env var: BEELINEWF_AUTH_ROLE_PERMISSIONS (JSON object). A set
   # value overrides this file section; blank falls back to it.
   # First-boot seed for the role tables: role name to the resource-actions it
@@ -302,7 +376,7 @@ auth:
   # secrets:write, forms:read, forms:write, instances:create,
   # instances:read, instances:update-context, input:deliver,
   # instances:control, instances:migrate, statistics:read, roles:read,
-  # roles:write, schedules:read, schedules:write, users:read.
+  # roles:write, schedules:read, schedules:write, users:read, users:write.
   role_permissions:
     admin:
       - "definitions:read"
@@ -323,6 +397,7 @@ auth:
       - "schedules:read"
       - "schedules:write"
       - "users:read"
+      - "users:write"
     finance:
       - "instances:read"
       - "input:deliver"

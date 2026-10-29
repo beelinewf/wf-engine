@@ -52,11 +52,47 @@ type AuthService interface {
 	RefreshCatalog(ctx context.Context) error
 	// Me returns the identity row behind a principal, for GET /v1/auth/me.
 	Me(ctx context.Context, p auth.Principal) (model.User, error)
-	// ListUsers returns one page of users, newest first, with the total
-	// row count, for GET /v1/users.
-	ListUsers(ctx context.Context, page, perPage int) ([]model.User, int64, error)
+	// ListUsers returns one page of users matching q, with the total
+	// matching row count, for GET /v1/users.
+	ListUsers(ctx context.Context, q repository.UserListQuery) ([]model.User, int64, error)
 	// GetUser returns one user by id, for GET /v1/users/{id}.
 	GetUser(ctx context.Context, id string) (model.User, error)
+	// CreateUser inserts a local user with a password credential and the
+	// given roles, for POST /v1/users. Roles must name catalog roles; a
+	// duplicate email is ErrConflict.
+	CreateUser(ctx context.Context, name, email, password string, roles []string) (model.User, error)
+	// UpdateUser replaces a local user's profile, for PUT
+	// /v1/users/{id}. A caller with users:write edits every field; the
+	// user itself edits name, email, and password only (a password
+	// rotation proves the current one) and any other change is
+	// ErrForbidden.
+	UpdateUser(ctx context.Context, actor auth.Principal, id string, upd UpdateUserParams) (model.User, error)
+	// DisableUser soft-deletes a local user, for DELETE /v1/users/{id}.
+	// The system user and the caller's own account refuse with ErrInvalid.
+	DisableUser(ctx context.Context, actor auth.Principal, id string) (model.User, error)
+	// Register creates a self-registered account, for POST
+	// /v1/auth/register. With email verification on the account stays
+	// pending and the result carries no token; otherwise it carries a
+	// login token at once.
+	Register(ctx context.Context, name, email, password string) (RegisterResult, error)
+	// Login authenticates a local user by email and password, for POST
+	// /v1/auth/login. Unknown email, wrong password, and disabled
+	// account all answer ErrInvalidCredentials; a pending account answers
+	// ErrEmailNotVerified.
+	Login(ctx context.Context, email, password string) (LoginResult, error)
+	// VerifyEmail consumes an email verification token, for POST
+	// /v1/auth/verify-email, and returns a login token for the verified
+	// account.
+	VerifyEmail(ctx context.Context, rawToken string) (LoginResult, error)
+	// ResendVerification mails a fresh verification link, for POST
+	// /v1/auth/resend-verification. It always succeeds: unknown email,
+	// verified account, disabled account, and cooldown suppression are
+	// all silent, so the endpoint cannot probe for accounts.
+	ResendVerification(ctx context.Context, email string) error
+	// ResendVerificationForUser is the admin variant, for POST
+	// /v1/users/{id}/resend-verification: unknown id is ErrNotFound and
+	// a verified account is a silent success.
+	ResendVerificationForUser(ctx context.Context, actor auth.Principal, id string) error
 }
 
 type authService struct {
@@ -65,6 +101,8 @@ type authService struct {
 	catalog *auth.Catalog
 	// systemUserID is the audit actor a service principal acts as.
 	systemUserID string
+	// local wires the local-user surface; nil disables it.
+	local *LocalAuthDeps
 	// now is injectable so tests get deterministic seed timestamps.
 	now func() time.Time
 }
@@ -76,14 +114,19 @@ func NewAuthService(
 	roles repository.RoleRepository,
 	catalog *auth.Catalog,
 	systemUserID string,
+	opts ...AuthServiceOption,
 ) AuthService {
-	return &authService{
+	s := &authService{
 		users:        users,
 		roles:        roles,
 		catalog:      catalog,
 		systemUserID: systemUserID,
 		now:          nowUTC,
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 func (s *authService) ResolvePrincipal(ctx context.Context, p auth.Principal) (auth.Principal, error) {
@@ -93,6 +136,12 @@ func (s *authService) ResolvePrincipal(ctx context.Context, p auth.Principal) (a
 		// effect.
 		p.UserID = s.systemUserID
 		return p, nil
+	}
+	if p.Issuer == model.LocalIssuer {
+		// Local JWTs resolve to their stored row instead of upserting:
+		// the account already exists, and this is where a disabled or
+		// unverified account stops an otherwise valid token.
+		return s.resolveLocalPrincipal(ctx, p)
 	}
 	// Failing closed: (subject, issuer) is the identity key, so a
 	// principal missing either cannot be persisted. Writing it anyway would
@@ -105,14 +154,19 @@ func (s *authService) ResolvePrincipal(ctx context.Context, p auth.Principal) (a
 	id, err := s.users.UpsertBySubject(ctx, model.User{
 		// The uuid is allocated before the write so a retry after a failed
 		// upsert resolves to the same row instead of forking the identity.
-		ID:        mustNewID(),
-		Subject:   p.Subject,
-		Issuer:    p.Issuer,
-		Name:      p.Name,
-		Email:     p.Email,
-		Metadata:  auth.MarshalPrincipalUser(p),
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:       mustNewID(),
+		Subject:  p.Subject,
+		Issuer:   p.Issuer,
+		Name:     p.Name,
+		Email:    p.Email,
+		Metadata: auth.MarshalPrincipalUser(p),
+		IsActive: true,
+		// An OIDC caller proved its mailbox to the provider, so the
+		// cached row verifies at write; only a pending self-registration
+		// is ever unverified.
+		EmailVerifiedAt: &now,
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	})
 	if err != nil {
 		return p, fmt.Errorf("service: resolve principal: %w", err)
@@ -374,8 +428,8 @@ func (s *authService) Me(ctx context.Context, p auth.Principal) (model.User, err
 // ListUsers is a pass-through onto the users table: unlike roles, users are
 // rows rather than catalog entries, so there is no live configuration to
 // answer from.
-func (s *authService) ListUsers(ctx context.Context, page, perPage int) ([]model.User, int64, error) {
-	return s.users.List(ctx, page, perPage)
+func (s *authService) ListUsers(ctx context.Context, q repository.UserListQuery) ([]model.User, int64, error) {
+	return s.users.List(ctx, q)
 }
 
 // GetUser returns one user by id. A malformed id is ErrInvalid rather than a

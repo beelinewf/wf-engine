@@ -54,6 +54,7 @@ const (
 	ActionRolesRead        = "roles:read"
 	ActionRolesWrite       = "roles:write"
 	ActionUsersRead        = "users:read"
+	ActionUsersWrite       = "users:write"
 	ActionSchedulesRead    = "schedules:read"
 	ActionSchedulesWrite   = "schedules:write"
 )
@@ -314,6 +315,7 @@ func KnownActions() []string {
 		ActionRolesRead,
 		ActionRolesWrite,
 		ActionUsersRead,
+		ActionUsersWrite,
 		ActionSchedulesRead,
 		ActionSchedulesWrite,
 	}

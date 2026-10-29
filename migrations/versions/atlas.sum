@@ -1,4 +1,4 @@
-h1:bg2StzDGxEPQJ/awrnJOkks4aUZ+73qvaG7aKk6FsV4=
+h1:JCF8pit3xHFtSCNM2LQ8LcBYrwtF8O9WWa/MUj2aRkg=
 20260805024728.sql h1:ZxeSqFuGsHjUG5MjmjTMpZVyBjyQ4D+hOawuglmpnWY=
 20260805035830_add_node_id.sql h1:9+YSyAmpyKdjnTYAwJz5w+/OIPrdTg5exaN4qHytWIw=
 20260810091127_add_workflow_instance_audit_actors.sql h1:LYvdHYd3oI9Jd1isln3DuZamc50xaj0iKXxkR1uDQRg=
@@ -20,3 +20,4 @@ h1:bg2StzDGxEPQJ/awrnJOkks4aUZ+73qvaG7aKk6FsV4=
 20261016162551_add_forms.sql h1:UcWhH16TzYaDsdVT9MOFci37d2eKhupyXO95hGTfSis=
 20261017014240_add_form_snapshot.sql h1:AiwuEZlAxB59dLpcrKuTUCCU8tUh8tUt5UNSskrpb3w=
 20261023061058_add_form_content_type.sql h1:2uaRdKNF0WacqzsnmqWONRgxXMonMIhbY0UQxSo18rU=
+20261029034425_add_local_users.sql h1:2J9BVnb8cEPS8YQm8xcUUqeLnm7F+z/SvUkuVXk8VKI=

@@ -1,0 +1,9 @@
+Verify your email
+
+Thanks for signing up. Open this link to confirm this address and finish creating your account:
+
+{{.Link}}
+
+The link expires in {{.ExpiresIn}}. If you did not create this account, ignore this message.
+
+- BeelineWF

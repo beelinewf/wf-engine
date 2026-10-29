@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,8 @@ import (
 
 	"github.com/beelinewf/wf-engine/internal/workflow/auth"
 	"github.com/beelinewf/wf-engine/internal/workflow/model"
+	"github.com/beelinewf/wf-engine/internal/workflow/repository"
+	"github.com/beelinewf/wf-engine/internal/workflow/service"
 	"github.com/beelinewf/wf-engine/pkg/configuration"
 	"github.com/gin-gonic/gin"
 )
@@ -158,7 +161,7 @@ func (f *fakeAuthSvc) Me(_ context.Context, p auth.Principal) (model.User, error
 	return model.User{ID: p.UserID, Name: p.Name, Email: p.Email}, nil
 }
 
-func (f *fakeAuthSvc) ListUsers(context.Context, int, int) ([]model.User, int64, error) {
+func (f *fakeAuthSvc) ListUsers(context.Context, repository.UserListQuery) ([]model.User, int64, error) {
 	return []model.User{{ID: testSystemUserID, Name: "system", Email: "system@localhost"}}, 1, nil
 }
 
@@ -167,6 +170,38 @@ func (f *fakeAuthSvc) GetUser(_ context.Context, id string) (model.User, error) 
 		return model.User{}, fmt.Errorf("%w: user %s", model.ErrNotFound, id)
 	}
 	return model.User{ID: testSystemUserID, Name: "system", Email: "system@localhost"}, nil
+}
+
+func (f *fakeAuthSvc) CreateUser(context.Context, string, string, string, []string) (model.User, error) {
+	return model.User{}, errors.New("fakeAuthSvc: CreateUser not implemented")
+}
+
+func (f *fakeAuthSvc) UpdateUser(context.Context, auth.Principal, string, service.UpdateUserParams) (model.User, error) {
+	return model.User{}, errors.New("fakeAuthSvc: UpdateUser not implemented")
+}
+
+func (f *fakeAuthSvc) DisableUser(context.Context, auth.Principal, string) (model.User, error) {
+	return model.User{}, errors.New("fakeAuthSvc: DisableUser not implemented")
+}
+
+func (f *fakeAuthSvc) Register(context.Context, string, string, string) (service.RegisterResult, error) {
+	return service.RegisterResult{}, errors.New("fakeAuthSvc: Register not implemented")
+}
+
+func (f *fakeAuthSvc) Login(context.Context, string, string) (service.LoginResult, error) {
+	return service.LoginResult{}, errors.New("fakeAuthSvc: Login not implemented")
+}
+
+func (f *fakeAuthSvc) VerifyEmail(context.Context, string) (service.LoginResult, error) {
+	return service.LoginResult{}, errors.New("fakeAuthSvc: VerifyEmail not implemented")
+}
+
+func (f *fakeAuthSvc) ResendVerification(context.Context, string) error {
+	return errors.New("fakeAuthSvc: ResendVerification not implemented")
+}
+
+func (f *fakeAuthSvc) ResendVerificationForUser(context.Context, auth.Principal, string) error {
+	return errors.New("fakeAuthSvc: ResendVerificationForUser not implemented")
 }
 
 func authConfigForTest() configuration.Auth {

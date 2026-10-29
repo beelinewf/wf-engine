@@ -1,0 +1,81 @@
+# Configuration for scripts/e2e-local.sh. Not part of the shipped default
+# deployment: it enables the built-in local auth with the log mail sender,
+# so the script extracts verification links from the app's own logs, and
+# enables the API token so the script can bootstrap the first admin over
+# POST /v1/users the way an operator would.
+infra:
+  http:
+    host: "127.0.0.1:9998"
+    swagger_enabled: false
+  postgresql:
+    dsn: "host=localhost user=gorm password=gorm dbname=beelinewf_e2e_local port=9921 sslmode=disable"
+  redis:
+    dsn: ""
+  rabbitmq:
+    dsn: ""
+
+engine:
+  default_node_timeout: 10s
+  max_node_timeout: 30s
+  condition_timeout: 5s
+  http_allowlist:
+    - "127.0.0.1"
+    - "localhost"
+  exec_allowlist: []
+
+auth:
+  # api_token is deliberately absent: the Taskfile exports BEELINEWF_API_TOKEN
+  # once and both the app (auth.api_token binds to it) and the e2e script read
+  # that one value. Spelling the credential here as well would give the two
+  # halves of the harness two answers to drift apart.
+  enabled: true
+
+  # Local auth is deliberately on with registration open: the closed-mode run
+  # overrides it per-run (BEELINEWF_AUTH_LOCAL_ALLOW_REGISTRATION=false), so
+  # one config file serves both halves of the script.
+  local:
+    enabled: true
+    # jwt_secret is deliberately absent: the Taskfile exports
+    # BEELINEWF_AUTH_LOCAL_JWT_SECRET once, like the API token above.
+    # (test-only value: 32+ bytes, no production meaning).
+    token_ttl: 1h
+    issuer: "beelinewf-local"
+    client_id: "beelinewf"
+    allow_registration: true
+    default_role: ""
+    public_base_url: "http://127.0.0.1:9998"
+    email_verification:
+      enabled: true
+      token_ttl: 1h
+      resend_cooldown: 1s
+    smtp:
+      host: "log"
+      port: 587
+      from: "noreply@example.test"
+      use_tls: false
+    rate_limit:
+      enabled: true
+      max_attempts: 10
+      window: 1m
+      block_duration: 5m
+
+  # Deliberately not the shipped catalog: the script needs an "admin" role
+  # holding users:write (for the CRUD assertions) plus roles:read (for the
+  # gated-route assertion), and a "viewer" role holding users:read only.
+  # It is a first-boot seed: the task target recreates the database every
+  # run, so the seed always applies.
+  role_permissions:
+    admin:
+      - "users:read"
+      - "users:write"
+      - "roles:read"
+    viewer:
+      - "users:read"
+
+# Secret at-rest encryption key is deliberately absent: the Taskfile exports
+# BEELINEWF_SECRET_ENCRYPTION_KEY once (mandatory, no default) and the app
+# reads it through the secrets.encryption_key binding.
+system:
+  user_id: "00000000-0000-7000-8000-000000000001"
+  name: "system"
+  email: "system@localhost.local"

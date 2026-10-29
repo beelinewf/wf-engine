@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/beelinewf/wf-engine/internal/workflow/model"
 	"github.com/beelinewf/wf-engine/pkg/ids"
@@ -13,6 +14,12 @@ import (
 
 // ErrUserNotFound is returned when no user row matches the lookup.
 var ErrUserNotFound = errors.New("repository: user not found")
+
+// ErrVerificationExpired is returned when a verification token names a
+// user but is past its expiry. It is distinct from ErrUserNotFound (an
+// unknown token) so the caller can tell "request a new link" from
+// "that link never existed".
+var ErrVerificationExpired = errors.New("repository: verification token expired")
 
 // UpsertSystemUser inserts the configured audit actor, or updates its name,
 // email, and metadata if it already exists. It never duplicates.
@@ -35,7 +42,8 @@ func UpsertSystemUser(ctx context.Context, db *gorm.DB, u model.User) error {
 	})
 }
 
-// UserRepository resolves an authenticated identity onto a users row.
+// UserRepository resolves an authenticated identity onto a users row and
+// owns local user CRUD.
 type UserRepository interface {
 	// UpsertBySubject returns the users.id uuid for a provider identity,
 	// inserting the row on first sight and refreshing the display name,
@@ -45,9 +53,40 @@ type UserRepository interface {
 	UpsertBySubject(ctx context.Context, u model.User) (string, error)
 	// GetByID returns one user.
 	GetByID(ctx context.Context, id string) (model.User, error)
-	// List returns one page of users, newest first, with the total row
-	// count.
-	List(ctx context.Context, page, perPage int) ([]model.User, int64, error)
+	// List returns one page of users matching q, with the total
+	// matching row count. An empty q lists newest first.
+	List(ctx context.Context, q UserListQuery) ([]model.User, int64, error)
+	// Create inserts a local user with its roles in one transaction. The
+	// caller supplies the id, the normalized email, the password hash,
+	// and the role set. The row is always created active; Disable is the
+	// only path to inactive. A duplicate id or local email is
+	// model.ErrConflict; an unknown role is model.ErrInvalid.
+	Create(ctx context.Context, u model.User, roles []string) (model.User, error)
+	// Update fully replaces a local user's editable fields and role set
+	// in one transaction: an empty role list revokes every membership.
+	// The user is the desired end state (loaded, then mutated by the
+	// service), so every column it carries is written. A changed email
+	// or verdict also clears the verification-token pair in the same
+	// statement; a plain profile edit leaves it untouched. An unknown
+	// id or a non-local row is ErrUserNotFound; a duplicate email is
+	// model.ErrConflict; an unknown role is model.ErrInvalid.
+	Update(ctx context.Context, u model.User, roles []string) (model.User, error)
+	// Disable soft-deletes a local user: it clears the credential and
+	// any outstanding verification token and flips is_active off, keeping
+	// the row and its roles so the audit trail and a re-enable stay
+	// intact. An unknown id or a non-local row is ErrUserNotFound.
+	Disable(ctx context.Context, id string, at time.Time) (model.User, error)
+	// GetByEmail returns the local user with a normalized email, for
+	// login. OIDC and system rows never match: they hold no password.
+	GetByEmail(ctx context.Context, email string) (model.User, error)
+	// SetVerificationToken records an outstanding verification token for
+	// a local user, replacing any previous one.
+	SetVerificationToken(ctx context.Context, id, tokenHash string, expiresAt, now time.Time) error
+	// ConsumeVerificationToken verifies a mailbox atomically: it sets
+	// email_verified_at and clears the token in one locked step, so a
+	// token is single-use. An unknown token is ErrUserNotFound; a known
+	// but expired one is ErrVerificationExpired.
+	ConsumeVerificationToken(ctx context.Context, tokenHash string, now time.Time) (model.User, error)
 }
 
 type userRepository struct {
@@ -126,34 +165,377 @@ func (r *userRepository) GetByID(ctx context.Context, id string) (model.User, er
 		}
 		return model.User{}, err
 	}
-	return UserFromModel(m), nil
+	u := UserFromModel(m)
+	if u.IsLocal() {
+		roles, err := rolesForUsers(ctx, r.db, []string{u.ID})
+		if err != nil {
+			return model.User{}, err
+		}
+		u.Roles = roles[u.ID]
+	}
+	return u, nil
 }
 
-// List returns one page of users, newest first, with the total row count.
-// The id tie-breaker keeps pages deterministic when rows share a timestamp.
-func (r *userRepository) List(ctx context.Context, page, perPage int) ([]model.User, int64, error) {
+// List returns one page of users matching q, with the total matching row
+// count. The id tie-breaker keeps pages deterministic when rows share a
+// timestamp.
+func (r *userRepository) List(ctx context.Context, q UserListQuery) ([]model.User, int64, error) {
 	query := r.db.WithContext(ctx).Model(&UserModel{})
+	if len(q.IDs) > 0 {
+		query = query.Where(`"id" IN ?`, q.IDs)
+	}
+	if len(q.Roles) > 0 {
+		// A subselect rather than a join: a member of two matching
+		// roles must count once. Only local users carry stored roles,
+		// so OIDC rows never match a role filter.
+		query = query.Where(`"id" IN (SELECT "user_id" FROM "user_roles" WHERE "role" IN ?)`, q.Roles)
+	}
+	if len(q.Issuers) > 0 {
+		query = query.Where(`"issuer" IN ?`, q.Issuers)
+	}
+	if q.IsLocal != nil {
+		if *q.IsLocal {
+			query = query.Where(`"issuer" = ?`, model.LocalIssuer)
+		} else {
+			query = query.Where(`"issuer" <> ?`, model.LocalIssuer)
+		}
+	}
+	if q.EmailVerified != nil {
+		if *q.EmailVerified {
+			query = query.Where(`"email_verified_at" IS NOT NULL`)
+		} else {
+			query = query.Where(`"email_verified_at" IS NULL`)
+		}
+	}
+	if q.IsActive != nil {
+		query = query.Where(`"is_active" = ?`, *q.IsActive)
+	}
+	if q.Email != "" {
+		query = query.Where(`"email" ILIKE ?`, likeSubstring(q.Email))
+	}
+	if q.Name != "" {
+		query = query.Where(`"name" ILIKE ?`, likeSubstring(q.Name))
+	}
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, fmt.Errorf("user count: %w", err)
 	}
+	order := userOrderSQL(q.Order)
+	if order == "" {
+		order = `"created_at" DESC`
+	}
+	page := q.Page
 	if page < 1 {
 		page = 1
 	}
+	perPage := q.PerPage
 	if perPage < 1 {
 		perPage = 50
 	}
 	var rows []UserModel
 	if err := query.
-		Order(`"created_at" DESC, "id" ASC`).
+		Order(order + `, "id" ASC`).
 		Offset((page - 1) * perPage).
 		Limit(perPage).
 		Find(&rows).Error; err != nil {
 		return nil, 0, fmt.Errorf("user list: %w", err)
 	}
 	users := make([]model.User, 0, len(rows))
+	var localIDs []string
 	for _, row := range rows {
 		users = append(users, UserFromModel(row))
+		if users[len(users)-1].IsLocal() {
+			localIDs = append(localIDs, row.ID)
+		}
+	}
+	// One query for the whole page rather than one per row: only local
+	// users carry stored roles, and OIDC callers resolve theirs from the
+	// live token.
+	if len(localIDs) > 0 {
+		roles, err := rolesForUsers(ctx, r.db, localIDs)
+		if err != nil {
+			return nil, 0, err
+		}
+		for i := range users {
+			if users[i].IsLocal() {
+				users[i].Roles = roles[users[i].ID]
+			}
+		}
 	}
 	return users, total, nil
+}
+
+// rolesForUsers returns user id to ordered role names for one batch.
+func rolesForUsers(ctx context.Context, db *gorm.DB, userIDs []string) (map[string][]string, error) {
+	var rows []UserRoleModel
+	if err := db.WithContext(ctx).
+		Where("user_id IN ?", userIDs).
+		Order("user_id, role").
+		Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("user roles: %w", err)
+	}
+	out := make(map[string][]string, len(userIDs))
+	for _, row := range rows {
+		out[row.UserID] = append(out[row.UserID], row.Role)
+	}
+	return out, nil
+}
+
+// insertRoles writes one membership row per role. The caller owns the
+// transaction; a role the catalog does not know trips the foreign key and
+// is reported as invalid input. The service validates membership against
+// the catalog first, so reaching here with one is a race rather than a
+// typo, but the mapping still beats a 500.
+func insertRoles(tx *gorm.DB, userID string, roles []string, now time.Time) error {
+	for _, role := range roles {
+		if err := tx.Create(&UserRoleModel{
+			UserID: userID, Role: role, CreatedAt: now, UpdatedAt: now,
+		}).Error; err != nil {
+			if isForeignKeyViolation(err) {
+				return fmt.Errorf("%w: role %q does not exist", model.ErrInvalid, role)
+			}
+			return err
+		}
+	}
+	return nil
+}
+
+// Create inserts a local user with its roles in one transaction.
+func (r *userRepository) Create(ctx context.Context, u model.User, roles []string) (model.User, error) {
+	if !ids.Valid(u.ID) {
+		return model.User{}, errors.New("repository: create user requires a valid uuid")
+	}
+	if u.Issuer != model.LocalIssuer || u.Subject != u.ID {
+		return model.User{}, errors.New("repository: create user requires a local identity")
+	}
+	if u.Email == "" {
+		return model.User{}, errors.New("repository: create user requires an email")
+	}
+	var out model.User
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		m := UserToModel(u)
+		if err := tx.Create(&m).Error; err != nil {
+			if isUniqueViolation(err) {
+				return fmt.Errorf("%w: user %q already exists", model.ErrConflict, u.Email)
+			}
+			return err
+		}
+		if err := insertRoles(tx, u.ID, roles, u.UpdatedAt); err != nil {
+			return err
+		}
+		out = UserFromModel(m)
+		out.Roles = append([]string(nil), roles...)
+		return nil
+	})
+	if err != nil {
+		return model.User{}, err
+	}
+	return out, nil
+}
+
+// Update fully replaces a local user's editable fields and role set. The
+// verification-token pair clears in the same statement whenever the email
+// or the verdict changes: a new address must never inherit the old link,
+// and a fresh verdict retires it, so a crash between statements cannot
+// pair a new verdict with a live old token. A plain profile edit leaves
+// the pair untouched.
+func (r *userRepository) Update(ctx context.Context, u model.User, roles []string) (model.User, error) {
+	if !ids.Valid(u.ID) {
+		return model.User{}, ErrUserNotFound
+	}
+	var out model.User
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var current UserModel
+		if err := tx.Where("id = ? AND issuer = ?", u.ID, model.LocalIssuer).First(&current).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrUserNotFound
+			}
+			return err
+		}
+		columns := map[string]any{
+			"name":              u.Name,
+			"email":             u.Email,
+			"metadata":          jsonCol(u.Metadata, "{}"),
+			"password_hash":     u.PasswordHash,
+			"is_active":         u.IsActive,
+			"email_verified_at": u.EmailVerifiedAt,
+			"updated_at":        u.UpdatedAt,
+		}
+		if u.Email != current.Email || !sameInstant(u.EmailVerifiedAt, current.EmailVerifiedAt) {
+			columns["verification_token_hash"] = ""
+			columns["verification_expires_at"] = nil
+		}
+		res := tx.Model(&UserModel{}).
+			Where("id = ? AND issuer = ?", u.ID, model.LocalIssuer).
+			Updates(columns)
+		if res.Error != nil {
+			if isUniqueViolation(res.Error) {
+				return fmt.Errorf("%w: user %q already exists", model.ErrConflict, u.Email)
+			}
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return ErrUserNotFound
+		}
+		if err := tx.Where("user_id = ?", u.ID).Delete(&UserRoleModel{}).Error; err != nil {
+			return err
+		}
+		if err := insertRoles(tx, u.ID, roles, u.UpdatedAt); err != nil {
+			return err
+		}
+		var m UserModel
+		if err := tx.Where("id = ?", u.ID).First(&m).Error; err != nil {
+			return err
+		}
+		out = UserFromModel(m)
+		out.Roles = append([]string(nil), roles...)
+		return nil
+	})
+	if err != nil {
+		return model.User{}, err
+	}
+	return out, nil
+}
+
+// Disable soft-deletes a local user. Roles stay: they describe what the
+// account may do when it is re-enabled, not what it may do now.
+func (r *userRepository) Disable(ctx context.Context, id string, at time.Time) (model.User, error) {
+	if !ids.Valid(id) {
+		return model.User{}, ErrUserNotFound
+	}
+	var out model.User
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&UserModel{}).
+			Where("id = ? AND issuer = ?", id, model.LocalIssuer).
+			Updates(map[string]any{
+				"is_active":               false,
+				"password_hash":           "",
+				"verification_token_hash": "",
+				"verification_expires_at": nil,
+				"updated_at":              at,
+			})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return ErrUserNotFound
+		}
+		var m UserModel
+		if err := tx.Where("id = ?", id).First(&m).Error; err != nil {
+			return err
+		}
+		out = UserFromModel(m)
+		roles, err := rolesForUsers(ctx, tx, []string{id})
+		if err != nil {
+			return err
+		}
+		out.Roles = roles[id]
+		return nil
+	})
+	if err != nil {
+		return model.User{}, err
+	}
+	return out, nil
+}
+
+// GetByEmail returns the local user with a normalized email. The issuer
+// predicate keeps OIDC and system rows out of the login path even if an
+// address ever collides across identity kinds.
+func (r *userRepository) GetByEmail(ctx context.Context, email string) (model.User, error) {
+	if email == "" {
+		return model.User{}, ErrUserNotFound
+	}
+	var m UserModel
+	if err := r.db.WithContext(ctx).
+		Where("email = ? AND issuer = ?", email, model.LocalIssuer).
+		First(&m).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return model.User{}, ErrUserNotFound
+		}
+		return model.User{}, err
+	}
+	u := UserFromModel(m)
+	roles, err := rolesForUsers(ctx, r.db, []string{u.ID})
+	if err != nil {
+		return model.User{}, err
+	}
+	u.Roles = roles[u.ID]
+	return u, nil
+}
+
+// SetVerificationToken records an outstanding verification token,
+// replacing any previous one: only the newest link ever works. It stamps
+// the send time the resend cooldown paces on.
+func (r *userRepository) SetVerificationToken(ctx context.Context, id, tokenHash string, expiresAt, now time.Time) error {
+	if !ids.Valid(id) || tokenHash == "" {
+		return ErrUserNotFound
+	}
+	res := r.db.WithContext(ctx).Model(&UserModel{}).
+		Where("id = ? AND issuer = ?", id, model.LocalIssuer).
+		Updates(map[string]any{
+			"verification_token_hash": tokenHash,
+			"verification_expires_at": expiresAt,
+			"verification_sent_at":    now,
+			"updated_at":              now,
+		})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrUserNotFound
+	}
+	return nil
+}
+
+// sameInstant reports whether two nullable timestamps describe the same
+// verdict: both unset, or the same instant.
+func sameInstant(a, b *time.Time) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return a.Equal(*b)
+}
+
+// ConsumeVerificationToken verifies a mailbox under a row lock, so two
+// concurrent consumptions cannot both succeed. The expiry is checked
+// inside the same transaction that clears the token.
+func (r *userRepository) ConsumeVerificationToken(ctx context.Context, tokenHash string, now time.Time) (model.User, error) {
+	if tokenHash == "" {
+		return model.User{}, ErrUserNotFound
+	}
+	var out model.User
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var m UserModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("verification_token_hash = ?", tokenHash).
+			First(&m).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrUserNotFound
+			}
+			return err
+		}
+		if m.VerificationExpiresAt == nil || !now.Before(*m.VerificationExpiresAt) {
+			return ErrVerificationExpired
+		}
+		if err := tx.Model(&UserModel{}).Where("id = ?", m.ID).Updates(map[string]any{
+			"email_verified_at":       now,
+			"verification_token_hash": "",
+			"verification_expires_at": nil,
+			"updated_at":              now,
+		}).Error; err != nil {
+			return err
+		}
+		out = UserFromModel(m)
+		out.EmailVerifiedAt = &now
+		roles, err := rolesForUsers(ctx, tx, []string{m.ID})
+		if err != nil {
+			return err
+		}
+		out.Roles = roles[m.ID]
+		return nil
+	})
+	if err != nil {
+		return model.User{}, err
+	}
+	return out, nil
 }

@@ -12,26 +12,61 @@ import (
 // UserModel persists model.User. Subject and Issuer hold the OIDC provider
 // identity, so a just-in-time upsert can find the row again on the caller's
 // next request. Both are empty for a user with no provider identity (the
-// system user, and every locally created user), which is why the uniqueness
-// index is partial: a plain composite unique would allow exactly one such
-// row in the whole table and fail the second insert.
+// system user), which is why the uniqueness index is partial: a plain
+// composite unique would allow exactly one such row in the whole table and
+// fail the second insert. Local users carry issuer 'local' and their uuid
+// as the subject, so they resolve through the same index.
 //
 // Both tags must carry the same predicate. GORM derives one index from the
 // pair, and a mismatch in uniqueIndex or where between the two columns emits
 // a non-unique index, which would silently stop protecting the upsert.
 type UserModel struct {
-	ID        string         `gorm:"column:id;type:uuid;primaryKey"`
-	Subject   string         `gorm:"column:subject;not null;default:'';uniqueIndex:uq_users_subject_issuer,where:subject <> '',priority:1"`
-	Issuer    string         `gorm:"column:issuer;not null;default:'';uniqueIndex:uq_users_subject_issuer,where:subject <> '',priority:2"`
-	Name      string         `gorm:"column:name;not null"`
-	Email     string         `gorm:"column:email;not null"`
-	Metadata  datatypes.JSON `gorm:"column:metadata;type:jsonb;not null;default:'{}'"`
-	CreatedAt time.Time      `gorm:"column:created_at;not null"`
-	UpdatedAt time.Time      `gorm:"column:updated_at;not null"`
+	ID       string         `gorm:"column:id;type:uuid;primaryKey"`
+	Subject  string         `gorm:"column:subject;not null;default:'';uniqueIndex:uq_users_subject_issuer,where:subject <> '',priority:1"`
+	Issuer   string         `gorm:"column:issuer;not null;default:'';uniqueIndex:uq_users_subject_issuer,where:subject <> '',priority:2"`
+	Name     string         `gorm:"column:name;not null"`
+	Email    string         `gorm:"column:email;not null;uniqueIndex:uq_users_local_email,where:issuer = 'local'"`
+	Metadata datatypes.JSON `gorm:"column:metadata;type:jsonb;not null;default:'{}'"`
+	// PasswordHash is the bcrypt hash of a local user's password. Empty
+	// for users without a local credential (OIDC callers, the system
+	// user, and disabled accounts). It is never returned by any API.
+	PasswordHash string `gorm:"column:password_hash;not null;default:''"`
+	// IsActive is the soft-delete flag. A disabled user keeps its row
+	// (audit foreign keys point at it) but can no longer authenticate.
+	IsActive bool `gorm:"column:is_active;not null;default:true"`
+	// EmailVerifiedAt marks a proven mailbox. NULL while a registered
+	// account awaits verification; every other user (OIDC callers, the
+	// system user, admin-created locals) is verified at write time.
+	EmailVerifiedAt *time.Time `gorm:"column:email_verified_at"`
+	// VerificationTokenHash is the SHA-256 hex of the outstanding email
+	// verification token. The raw token exists only in the email, never
+	// at rest. Cleared on consume, so a token is single-use.
+	VerificationTokenHash string `gorm:"column:verification_token_hash;not null;default:'';index:idx_users_verification_token"`
+	// VerificationExpiresAt bounds the outstanding token. NULL when no
+	// token is outstanding.
+	VerificationExpiresAt *time.Time `gorm:"column:verification_expires_at"`
+	// VerificationSentAt records the last verification send, pacing
+	// resends through the resend cooldown.
+	VerificationSentAt *time.Time `gorm:"column:verification_sent_at"`
+	CreatedAt          time.Time  `gorm:"column:created_at;not null"`
+	UpdatedAt          time.Time  `gorm:"column:updated_at;not null"`
 }
 
 // TableName is the users table.
 func (UserModel) TableName() string { return "users" }
+
+// UserRoleModel persists one local user's membership in a catalog role.
+// Unlike OIDC callers, whose roles arrive on the live token, a local
+// user's roles are stored rows read at login and embedded in the JWT.
+type UserRoleModel struct {
+	UserID    string    `gorm:"column:user_id;type:uuid;primaryKey"`
+	Role      string    `gorm:"column:role;type:text;primaryKey"`
+	CreatedAt time.Time `gorm:"column:created_at;not null"`
+	UpdatedAt time.Time `gorm:"column:updated_at;not null"`
+}
+
+// TableName is the user_roles table.
+func (UserRoleModel) TableName() string { return "user_roles" }
 
 // RoleModel persists model.Role. Roles are seeded from configuration on a
 // first boot and managed over the roles API afterwards.

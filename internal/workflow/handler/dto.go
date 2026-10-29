@@ -196,6 +196,7 @@ type FormUsageInstanceResponse struct {
 // contract a frontend needs to start a code+PKCE flow; it carries no secret.
 // When Enabled is false the deployment has no OIDC login, and ApiTokenEnabled
 // says whether the X-Api-Token service credential is the only way in.
+// LocalEnabled reports the built-in register/login JWT contract alongside.
 type AuthConfigResponse struct {
 	Enabled  bool   `json:"enabled"`
 	Issuer   string `json:"issuer,omitempty"`
@@ -210,6 +211,17 @@ type AuthConfigResponse struct {
 	RolesClaim       string   `json:"roles_claim,omitempty"`
 	Scopes           []string `json:"scopes,omitempty"`
 	ApiTokenEnabled  bool     `json:"api_token_enabled"`
+	// LocalEnabled reports the built-in local login: POST
+	// /v1/auth/register and POST /v1/auth/login with HS256 JWTs verified
+	// as Bearer [REDACTED]
+	LocalEnabled bool `json:"local_enabled"`
+	// RegistrationEnabled says whether POST /v1/auth/register admits
+	// self-registration, or users arrive from an admin only.
+	RegistrationEnabled bool `json:"registration_enabled"`
+	// EmailVerificationEnabled says whether a registered account stays
+	// pending until its mailed link is consumed over POST
+	// /v1/auth/verify-email.
+	EmailVerificationEnabled bool `json:"email_verification_enabled"`
 	// Roles is every role name the role catalog knows, so a frontend
 	// can label a role before the caller has one.
 	Roles []string `json:"roles"`
@@ -263,17 +275,105 @@ type UpdateRoleRequest struct {
 	Permissions []string `json:"permissions,omitempty"`
 }
 
-// UserResponse is one row of the users table as served by GET /v1/users and
-// GET /v1/users/{id}. Metadata is deliberately absent: it is a debug-only
+// UserResponse is one row of the users table as served by the /v1/users
+// routes. Metadata is deliberately absent: it is a debug-only
 // identity cache, never authorization data, and the API must not leak it.
+// The password hash and verification token likewise never appear here.
 type UserResponse struct {
-	ID        string    `json:"id"`
-	Subject   *string   `json:"subject"`
-	Issuer    *string   `json:"issuer"`
-	Name      string    `json:"name"`
-	Email     string    `json:"email"`
+	ID      string  `json:"id"`
+	Subject *string `json:"subject"`
+	Issuer  *string `json:"issuer"`
+	Name    string  `json:"name"`
+	Email   string  `json:"email"`
+	// Roles are a local user's stored roles. OIDC callers carry theirs
+	// on the live token, so this is empty for them.
+	Roles []string `json:"roles"`
+	// IsActive is false for a disabled (soft-deleted) account.
+	IsActive bool `json:"is_active"`
+	// EmailVerified is false while a self-registered account awaits its
+	// verification link.
+	EmailVerified bool `json:"email_verified"`
+	// IsLocal reports a password account rather than an OIDC identity.
+	IsLocal   bool      `json:"is_local"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// CreateUserRequest is the POST /v1/users body. Roles must name catalog
+// roles; an omitted list assigns none.
+type CreateUserRequest struct {
+	Name     string   `json:"name"`
+	Email    string   `json:"email"`
+	Password string   `json:"password"`
+	Roles    []string `json:"roles,omitempty"`
+}
+
+// UpdateUserRequest is the PUT /v1/users/{id} body. A nil field keeps the
+// stored value; a non-nil Roles replaces the membership set (an empty
+// list revokes every membership), and a non-empty Password rotates the
+// credential. The account itself edits name, email, and password only and
+// proves CurrentPassword for a rotation.
+type UpdateUserRequest struct {
+	Name            *string   `json:"name,omitempty"`
+	Email           *string   `json:"email,omitempty"`
+	Roles           *[]string `json:"roles,omitempty"`
+	Password        *string   `json:"password,omitempty"`
+	CurrentPassword *string   `json:"current_password,omitempty"`
+	IsActive        *bool     `json:"is_active,omitempty"`
+	EmailVerified   *bool     `json:"email_verified,omitempty"`
+}
+
+// RegisterRequest is the POST /v1/auth/register body.
+type RegisterRequest struct {
+	Name     string `json:"name"`
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+// LoginRequest is the POST /v1/auth/login body.
+type LoginRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+// LoginResponse is the POST /v1/auth/login and POST /v1/auth/verify-email
+// body: a Bearer [REDACTED] for the Authorization header plus the account it
+// authenticates.
+type LoginResponse struct {
+	AccessToken string       `json:"access_token"`
+	TokenType   string       `json:"token_type"`
+	ExpiresIn   int64        `json:"expires_in"`
+	User        UserResponse `json:"user"`
+}
+
+// RegisterResponse is the POST /v1/auth/register body. With email
+// verification on the account pends and no token is issued; otherwise it
+// is a login session at once.
+type RegisterResponse struct {
+	User                UserResponse `json:"user"`
+	AccessToken         string       `json:"access_token,omitempty"`
+	TokenType           string       `json:"token_type,omitempty"`
+	ExpiresIn           int64        `json:"expires_in,omitempty"`
+	PendingVerification bool         `json:"pending_verification"`
+}
+
+// VerifyEmailRequest is the POST /v1/auth/verify-email body: the raw
+// token from the mailed link.
+type VerifyEmailRequest struct {
+	Token string `json:"token"`
+}
+
+// ResendVerificationRequest is the POST /v1/auth/resend-verification
+// body. The response is always a generic success, whatever the email.
+type ResendVerificationRequest struct {
+	Email string `json:"email"`
+}
+
+// ResendVerificationResponse is the generic resend body. It says the same
+// thing for an unknown email, a verified account, and a fresh send, so
+// the endpoint cannot probe for accounts.
+type ResendVerificationResponse struct {
+	Message string `json:"message"`
 }
 
 // -- instances ----------------------------------------------------------------

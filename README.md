@@ -259,40 +259,41 @@ and defaults, and `on_failure` payload shape.
 `config.yaml` holds infra, worker pool, engine limits, auth, and the
 system audit user. Key settings:
 
-| Key                                                      | Default                | Notes                                                                                                           |
-| -------------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `infra.http.host`                                        | `localhost:9999`       | Compose overrides to `0.0.0.0:8080`                                                                             |
-| `infra.http.swagger_enabled`                             | `true`                 | Serves UI at `/swagger/index.html`                                                                              |
-| `infra.http.metrics_enabled`                             | `true`                 | Serves Prometheus exposition at `/metrics` (`BEELINEWF_INFRA_HTTP_METRICS_ENABLED`; `false` answers 404)        |
-| `infra.http.max_body_bytes`                              | `1048576` (1 MiB)      | JSON body cap for context replace + input delivery; breach answers 413 (`BEELINEWF_INFRA_HTTP_MAX_BODY_BYTES`)  |
-| `infra.http.read_header_timeout`                         | `10s`                  | Max wait for request headers; closes slow-header connections (`BEELINEWF_INFRA_HTTP_READ_HEADER_TIMEOUT`)       |
-| `infra.http.idle_timeout`                                | `60s`                  | Idle keep-alive cleanup; no write timeout so SSE streams are never cut (`BEELINEWF_INFRA_HTTP_IDLE_TIMEOUT`)    |
-| `infra.http.cors.allowed_origins`                        | `"*" (allow all)`      | Origin list to restrict; empty file value disables (`BEELINEWF_INFRA_HTTP_CORS_ALLOWED_ORIGINS`)                |
-| `infra.http.cors.allowed_methods`                        | `GET, POST, ...`       | PUT, DELETE, OPTIONS also allowed by default (`BEELINEWF_INFRA_HTTP_CORS_ALLOWED_METHODS`)                      |
-| `infra.http.cors.allowed_headers`                        | `Authorization, ...`   | Content-Type and X-Api-Token also allowed by default (`BEELINEWF_INFRA_HTTP_CORS_ALLOWED_HEADERS`)              |
-| `infra.http.cors.exposed_headers`                        | `[]`                   | Response headers browsers may read (`BEELINEWF_INFRA_HTTP_CORS_EXPOSED_HEADERS`)                                |
-| `infra.http.cors.allow_credentials`                      | `false`                | Credentialed requests; needs explicit origins (`BEELINEWF_INFRA_HTTP_CORS_ALLOW_CREDENTIALS`)                   |
-| `infra.http.cors.max_age`                                | `12h`                  | Preflight cache lifetime (`BEELINEWF_INFRA_HTTP_CORS_MAX_AGE`)                                                  |
-| `infra.postgresql.dsn`                                   | local `gorm` DSN       | pgx/postgres wire format                                                                                        |
-| `infra.postgresql.max_open_conns`                        | `25`                   | Per-replica pool ceiling; exhaustion queues (`BEELINEWF_INFRA_POSTGRESQL_MAX_OPEN_CONNS`)                          |
-| `infra.postgresql.max_idle_conns`                        | `25`                   | Warm idle cap per replica (`BEELINEWF_INFRA_POSTGRESQL_MAX_IDLE_CONNS`)                                            |
-| `infra.postgresql.conn_max_lifetime`                     | `5m`                   | Max connection age before recycle (`BEELINEWF_INFRA_POSTGRESQL_CONN_MAX_LIFETIME`); `0` = unlimited                |
-| `infra.postgresql.conn_max_idle_time`                    | `5m`                   | Max idle time before eviction (`BEELINEWF_INFRA_POSTGRESQL_CONN_MAX_IDLE_TIME`); `0` = unlimited                   |
-| `infra.postgresql.connect_timeout`                       | `15s`                  | Startup ping budget; a blackhole DSN fails the boot fast (`BEELINEWF_INFRA_POSTGRESQL_CONNECT_TIMEOUT`)            |
-| `infra.redis.dsn`                                        | `""` (disabled)        | e.g. `redis://localhost:6379/0`; unreachable broker fails startup                                               |
-| `infra.rabbitmq.dsn`                                     | `""` (disabled)        | e.g. `amqp://beelinewf:beelinewf@localhost:5672/`; queues default to `beelinewf.input`, `beelinewf.output`, `beelinewf.status` |
-| `engine.default_node_timeout` / `max_node_timeout`       | `30s` / `5m`           | Caps script, `external_call`, and `output` nodes                                                                |
-| `engine.condition_timeout`                               | `5s`                   | Fixed budget for conditions, input validation, poller predicates, join scripts                                  |
-| `engine.parallel.max_depth`                              | `4`                    | Max parallel nesting depth (groups add no depth)                                                                |
-| `engine.parallel.max_branches_per_parallel`              | `32`                   | Max branches on one `parallel_start` (min 2)                                                                    |
-| `engine.parallel.max_active_branches_per_instance`       | `128`                  | Max live branches per instance across all executions                                                            |
-| `engine.http_allowlist`                                  | loopback + examples    | `"*"` allows any target (development only, logs a warning)                                                      |
-| `engine.exec_allowlist`                                  | `/bin/echo`, `/bin/ls` | Absolute paths only (bare names fail startup); direct argv, never a shell                                       |
-| `engine.http_max_in_flight`                              | `128`                  | Process-wide outbound HTTP cap shared by nodes, pollers, publishers, custom nodes                               |
-| `engine.http_max_in_flight_per_host`                     | `16`                   | Per-host outbound HTTP cap; fleet-wide concurrency is replicas x this                                           |
-| `auth.enabled` / `api_token`                             | `false`                | When enabled, `/v1` requires `X-Api-Token` (the service principal)                                              |
-| `auth.oidc.*`                                            | disabled               | OIDC resource server; needs `issuer` and `client_id`                                                            |
-| `auth.role_permissions` / `BEELINEWF_AUTH_ROLE_PERMISSIONS` | file / `{}`            | First-boot seed for the role tables as YAML map or JSON object; env overrides file; invalid JSON fails startup  |
+| Key                                                         | Default                | Notes                                                                                                                          |
+| ----------------------------------------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `infra.http.host`                                           | `localhost:9999`       | Compose overrides to `0.0.0.0:8080`                                                                                            |
+| `infra.http.swagger_enabled`                                | `true`                 | Serves UI at `/swagger/index.html`                                                                                             |
+| `infra.http.metrics_enabled`                                | `true`                 | Serves Prometheus exposition at `/metrics` (`BEELINEWF_INFRA_HTTP_METRICS_ENABLED`; `false` answers 404)                       |
+| `infra.http.max_body_bytes`                                 | `1048576` (1 MiB)      | JSON body cap for context replace + input delivery; breach answers 413 (`BEELINEWF_INFRA_HTTP_MAX_BODY_BYTES`)                 |
+| `infra.http.read_header_timeout`                            | `10s`                  | Max wait for request headers; closes slow-header connections (`BEELINEWF_INFRA_HTTP_READ_HEADER_TIMEOUT`)                      |
+| `infra.http.idle_timeout`                                   | `60s`                  | Idle keep-alive cleanup; no write timeout so SSE streams are never cut (`BEELINEWF_INFRA_HTTP_IDLE_TIMEOUT`)                   |
+| `infra.http.cors.allowed_origins`                           | `"*" (allow all)`      | Origin list to restrict; empty file value disables (`BEELINEWF_INFRA_HTTP_CORS_ALLOWED_ORIGINS`)                               |
+| `infra.http.cors.allowed_methods`                           | `GET, POST, ...`       | PUT, DELETE, OPTIONS also allowed by default (`BEELINEWF_INFRA_HTTP_CORS_ALLOWED_METHODS`)                                     |
+| `infra.http.cors.allowed_headers`                           | `Authorization, ...`   | Content-Type and X-Api-Token also allowed by default (`BEELINEWF_INFRA_HTTP_CORS_ALLOWED_HEADERS`)                             |
+| `infra.http.cors.exposed_headers`                           | `[]`                   | Response headers browsers may read (`BEELINEWF_INFRA_HTTP_CORS_EXPOSED_HEADERS`)                                               |
+| `infra.http.cors.allow_credentials`                         | `false`                | Credentialed requests; needs explicit origins (`BEELINEWF_INFRA_HTTP_CORS_ALLOW_CREDENTIALS`)                                  |
+| `infra.http.cors.max_age`                                   | `12h`                  | Preflight cache lifetime (`BEELINEWF_INFRA_HTTP_CORS_MAX_AGE`)                                                                 |
+| `infra.postgresql.dsn`                                      | local `gorm` DSN       | pgx/postgres wire format                                                                                                       |
+| `infra.postgresql.max_open_conns`                           | `25`                   | Per-replica pool ceiling; exhaustion queues (`BEELINEWF_INFRA_POSTGRESQL_MAX_OPEN_CONNS`)                                      |
+| `infra.postgresql.max_idle_conns`                           | `25`                   | Warm idle cap per replica (`BEELINEWF_INFRA_POSTGRESQL_MAX_IDLE_CONNS`)                                                        |
+| `infra.postgresql.conn_max_lifetime`                        | `5m`                   | Max connection age before recycle (`BEELINEWF_INFRA_POSTGRESQL_CONN_MAX_LIFETIME`); `0` = unlimited                            |
+| `infra.postgresql.conn_max_idle_time`                       | `5m`                   | Max idle time before eviction (`BEELINEWF_INFRA_POSTGRESQL_CONN_MAX_IDLE_TIME`); `0` = unlimited                               |
+| `infra.postgresql.connect_timeout`                          | `15s`                  | Startup ping budget; a blackhole DSN fails the boot fast (`BEELINEWF_INFRA_POSTGRESQL_CONNECT_TIMEOUT`)                        |
+| `infra.redis.dsn`                                           | `""` (disabled)        | e.g. `redis://localhost:6379/0`; unreachable broker fails startup                                                              |
+| `infra.rabbitmq.dsn`                                        | `""` (disabled)        | e.g. `amqp://beelinewf:beelinewf@localhost:5672/`; queues default to `beelinewf.input`, `beelinewf.output`, `beelinewf.status` |
+| `engine.default_node_timeout` / `max_node_timeout`          | `30s` / `5m`           | Caps script, `external_call`, and `output` nodes                                                                               |
+| `engine.condition_timeout`                                  | `5s`                   | Fixed budget for conditions, input validation, poller predicates, join scripts                                                 |
+| `engine.parallel.max_depth`                                 | `4`                    | Max parallel nesting depth (groups add no depth)                                                                               |
+| `engine.parallel.max_branches_per_parallel`                 | `32`                   | Max branches on one `parallel_start` (min 2)                                                                                   |
+| `engine.parallel.max_active_branches_per_instance`          | `128`                  | Max live branches per instance across all executions                                                                           |
+| `engine.http_allowlist`                                     | loopback + examples    | `"*"` allows any target (development only, logs a warning)                                                                     |
+| `engine.exec_allowlist`                                     | `/bin/echo`, `/bin/ls` | Absolute paths only (bare names fail startup); direct argv, never a shell                                                      |
+| `engine.http_max_in_flight`                                 | `128`                  | Process-wide outbound HTTP cap shared by nodes, pollers, publishers, custom nodes                                              |
+| `engine.http_max_in_flight_per_host`                        | `16`                   | Per-host outbound HTTP cap; fleet-wide concurrency is replicas x this                                                          |
+| `auth.enabled` / `api_token`                                | `false`                | When enabled, `/v1` requires a credential: `X-Api-Token`, OIDC, or local (at least one must be configured)                     |
+| `auth.oidc.*`                                               | disabled               | OIDC resource server; needs `issuer` and `client_id`                                                                           |
+| `auth.local.*`                                              | disabled               | Built-in register/login with HS256 JWTs; needs `jwt_secret` (≥32 bytes, `BEELINEWF_AUTH_LOCAL_JWT_SECRET`)                     |
+| `auth.role_permissions` / `BEELINEWF_AUTH_ROLE_PERMISSIONS` | file / `{}`            | First-boot seed for the role tables as YAML map or JSON object; env overrides file; invalid JSON fails startup                 |
 
 List-valued keys accept comma-separated env values, e.g.
 `BEELINEWF_ENGINE_HTTP_ALLOWLIST="api.example.com,jsonplaceholder.typicode.com"`,
@@ -314,7 +315,7 @@ credentialed responses must name the origin.
 
 ## Authentication and authorization
 
-Two independent credentials, and a role catalog on top of them.
+Three independent credentials, and a role catalog on top of them.
 
 ### Authenticating
 
@@ -324,7 +325,8 @@ issues tokens, never redirects, and holds no client secret. A frontend reads
 `GET /v1/auth/config` (public, since that is exactly the request made before
 holding a token) to learn the issuer, client id, endpoints, and roles claim,
 then runs authorization-code + PKCE against the provider and calls the API
-with `Authorization: Bearer <jwt>`.
+with `Authorization: Bearer <jwt>`. OIDC and local logins coexist: a token
+is routed to its verifier by issuer, so one deployment serves both.
 
 The engine validates each token itself: discovery from the issuer, JWKS
 signature check, `iss`, `aud`, and `exp` with a configurable
@@ -339,6 +341,73 @@ startup validation.
 curl http://localhost:9999/v1/auth/config
 curl -H "Authorization: Bearer $TOKEN" http://localhost:9999/v1/auth/me
 ```
+
+**Local login (humans without a provider).** Set `auth.local.enabled` and
+`auth.local.jwt_secret` (a dedicated HMAC secret of at least 32 bytes, via
+`BEELINEWF_AUTH_LOCAL_JWT_SECRET`; never the API token or the at-rest
+encryption key, and identical on every replica). Users register over
+`POST /v1/auth/register` — while `auth.local.allow_registration` is false
+(the default) only an admin creates accounts over `POST /v1/users` — and
+log in over `POST /v1/auth/login`, which returns an HS256 JWT for the
+`Authorization` header. A verified JWT authenticates exactly like an OIDC
+one: same gates, same `/v1/auth/me`, same audit actor.
+| GET        | `/v1/users`                                      | User directory, newest first (paged, needs `users:read`)                                                         |
+| POST       | `/v1/users`                                      | Create local user (201, needs `users:write`)                                                                     |
+| GET/PUT    | `/v1/users/{id}`                                 | Get user / update profile (PUT: `users:write` edits all, self edits name/email/password)                         |
+| DELETE     | `/v1/users/{id}`                                 | Disable user (204, needs `users:write`)                                                                          |
+| POST       | `/v1/users/{id}/resend-verification`             | Admin resend of the verification link (204, needs `users:write`)                                                 |
+| POST       | `/v1/auth/register`                              | Self-register (201; pending with no token while verification is on)                                              |
+| POST       | `/v1/auth/login`                                 | Log in, HS256 JWT (200; generic 401, 403 while pending)                                                          |
+| POST       | `/v1/auth/verify-email`                          | Consume a verification link, returns a session (200)                                                             |
+| POST       | `/v1/auth/resend-verification`                   | Resend a verification link (200, always generic)                                                                 |
+
+```bash
+curl http://localhost:9999/v1/auth/config   # local_enabled, registration_enabled, ...
+curl -s -X POST http://localhost:9999/v1/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Ada","email":"ada@example.test","password":"correct horse battery staple"}'
+TOKEN=$(curl -s -X POST http://localhost:9999/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"ada@example.test","password":"correct horse battery staple"}' | jq -r .access_token)
+curl -H "Authorization: Bearer $TOKEN" http://localhost:9999/v1/auth/me
+```
+
+Passwords are stored as bcrypt hashes and never returned by any API;
+unknown email, wrong password, and disabled account share one generic 401
+so login cannot probe for accounts.
+
+The first admin is bootstrapped with the API token, the way any operator
+would:
+
+```bash
+curl -s -X POST http://localhost:9999/v1/users \
+  -H "X-Api-Token: $BEELINEWF_API_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"name":"Root","email":"root@example.test","password":"...","roles":["admin"]}'
+```
+
+*Email verification (optional).* With
+`auth.local.email_verification.enabled`, registration creates a pending
+account that cannot log in (403) until its mailed link is consumed over
+`POST /v1/auth/verify-email`, which returns a login session at once.
+Enabling it requires `auth.local.public_base_url` (the frontend origin the
+link points at: `{base}/verify-email?token=...`) and the
+`auth.local.smtp.*` relay settings; the boot fails fast without them.
+Tokens are single-use, expire after `token_ttl` (default 24h), and are
+stored hashed — the raw token exists only in the email. Resends
+(`POST /v1/auth/resend-verification`, or
+`POST /v1/users/{id}/resend-verification` for an admin) pace per email
+through `resend_cooldown`, and the public resend always answers the same
+generic success. Admin-created accounts verify at write.
+
+*Rate limits.* The four public endpoints — register, login,
+resend-verification, verify-email — share one throttle
+(`auth.local.rate_limit`, default 10/min, blocked 5m) pairing each
+endpoint with the client IP and, except verify-email, the normalized
+email. Only failures count on login, so good traffic never burns the
+budget; past it the answer is 429 with `Retry-After`. Like the API-token
+throttle it is per-replica in-memory state using the shared
+`auth.rate_limit.trusted_proxies` list, so put a proxy-level throttle in
+front of multi-replica deployments.
 
 **API token (the service principal).** `auth.enabled` + `auth.api_token`
 accepts `X-Api-Token`. This principal bypasses every authorization gate —
@@ -356,6 +425,12 @@ arrays, a single string, and space-delimited strings all work), never from
 the database. A verified `(issuer, subject)` is just-in-time upserted into
 `users` on first sight, so a token for someone the instance has never seen
 still resolves to a stable `users.id` that later shows up in attribution.
+
+Local users resolve differently: their roles live in `user_roles` rows,
+read at login and embedded in the JWT, so a role change takes effect at
+the next login. The resolve step still consults live state on every
+request: a disabled account — or, while verification is on, an unverified
+one — stops an otherwise valid token at once.
 
 ### Authorizing
 
@@ -393,6 +468,7 @@ Each route declares the one action it needs:
 | `statistics:read`                | the statistics summary                           |
 | `roles:read`                     | the role catalog                                 |
 | `roles:write`                    | role creation, replacement, and deletion         |
+| `users:read` / `users:write`     | user directory reads / local user CRUD           |
 
 A role the token carries that is absent from the catalog grants nothing, so
 unknown roles deny by default.
@@ -410,6 +486,10 @@ or via `"*"`: stripping it from the last holder, or deleting that role, is
 **409** and leaves the role unchanged. A deployment seeded before
 `roles:write` existed grants it with one API-key write adding `roles:write`
 to `admin`.
+
+A deployment seeded before `users:write` existed grants it the same
+way, adding `users:write` to `admin` — otherwise user CRUD stays 403
+for every role but the service principal.
 
 ### Input delivery is gated by permission, user, then role
 
@@ -523,39 +603,39 @@ The authoritative contract is [api/openapi.yaml](api/openapi.yaml)
 (Swagger UI served from the app; regenerate committed `docs/` with
 `task swagger` after annotation changes).
 
-| Method     | Path                                             | Purpose                                                                                                    |
-| ---------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| GET        | `/health/live`, `/health/ready`                      | Liveness / readiness (always public)                                                                       |
-| GET        | `/metrics`                                           | Prometheus exposition (see Metrics)                                                                        |
-| GET        | `/v1/auth/config`                                  | Public OIDC login contract                                                                                 |
-| GET        | `/v1/auth/me`                                      | The authenticated caller (identity, roles, effective permissions)                                          |
-| GET        | `/v1/roles`                                        | Role catalog (needs `roles:read`)                                                                            |
-| GET        | `/v1/roles/{name}`                                 | One role and its permissions                                                                               |
-| POST       | `/v1/roles`                                        | Create role (201, needs `roles:write`)                                                                       |
-| PUT        | `/v1/roles/{name}`                                 | Replace role permissions (200; 409 on last-holder strip)                                                     |
-| DELETE     | `/v1/roles/{name}`                                 | Delete role (204; 409 on last-holder delete)                                                                 |
-| POST       | `/v1/node/definition`                              | Create immutable node definition (201)                                                                     |
-| GET        | `/v1/node/definition`                              | List (paged, `latest_only`, `type`, ...)                                                                       |
-| GET/DELETE | `/v1/node/definition/{id}`                         | Get / delete (fails if referenced)                                                                         |
-| GET        | `/v1/node/types`                                   | Node type catalog (builtins + registered customs, each with its schema)                                        |
-| POST       | `/v1/workflow/definition`                          | Create immutable workflow definition (201)                                                                 |
-| GET        | `/v1/workflow/definition`                          | List (paged, `latest_only`, ...)                                                                             |
-| GET/DELETE | `/v1/workflow/definition/{id}`                     | Get / delete (fails if referenced)                                                                         |
-| POST       | `/v1/secrets`                                      | Create secret (201; plaintext omitted)                                                                     |
-| GET        | `/v1/secrets`                                      | List masked secrets (paged, ordered by key)                                                                |
-| GET/DELETE | `/v1/secrets/{key}`                                | Get masked secret / delete; duplicate create returns 409                                                   |
-| PUT        | `/v1/secrets/{key}`                                | Replace secret value (404 unless the key exists)                                                           |
-| POST       | `/v1/workflow/instance`                            | Start instance (202)                                                                                       |
-| GET        | `/v1/workflow/instance`                            | List compact summaries (paged, `id`/`workflow_definition_id`/`status` filters)                                   |
-| GET        | `/v1/workflow/instance/{id}/status`                | Status, counters, cursor, per-node `nodes` map, audit actors                                                 |
-| GET/PUT    | `/v1/workflow/instance/{id}/context`               | Get full context / replace it (paused only, 409 on race)                                                   |
-| GET        | `/v1/workflow/instance/{id}/status/node/{node_id}` | Node debug (`?attempt=N`; `not_started` for never-run nodes)                                                   |
-| GET        | `/v1/workflow/instance/{id}/debug/context`         | Debug context as TypeScript (debug runs only, `?node_id=`/`?attempt=N`)                                            |
+| Method     | Path                                               | Purpose                                                                                                             |
+| ---------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| GET        | `/health/live`, `/health/ready`                    | Liveness / readiness (always public)                                                                                |
+| GET        | `/metrics`                                         | Prometheus exposition (see Metrics)                                                                                 |
+| GET        | `/v1/auth/config`                                  | Public login contract (OIDC + local)                                                                                |
+| GET        | `/v1/auth/me`                                      | The authenticated caller (identity, roles, effective permissions)                                                   |
+| GET        | `/v1/roles`                                        | Role catalog (needs `roles:read`)                                                                                   |
+| GET        | `/v1/roles/{name}`                                 | One role and its permissions                                                                                        |
+| POST       | `/v1/roles`                                        | Create role (201, needs `roles:write`)                                                                              |
+| PUT        | `/v1/roles/{name}`                                 | Replace role permissions (200; 409 on last-holder strip)                                                            |
+| DELETE     | `/v1/roles/{name}`                                 | Delete role (204; 409 on last-holder delete)                                                                        |
+| POST       | `/v1/node/definition`                              | Create immutable node definition (201)                                                                              |
+| GET        | `/v1/node/definition`                              | List (paged, `latest_only`, `type`, ...)                                                                            |
+| GET/DELETE | `/v1/node/definition/{id}`                         | Get / delete (fails if referenced)                                                                                  |
+| GET        | `/v1/node/types`                                   | Node type catalog (builtins + registered customs, each with its schema)                                             |
+| POST       | `/v1/workflow/definition`                          | Create immutable workflow definition (201)                                                                          |
+| GET        | `/v1/workflow/definition`                          | List (paged, `latest_only`, ...)                                                                                    |
+| GET/DELETE | `/v1/workflow/definition/{id}`                     | Get / delete (fails if referenced)                                                                                  |
+| POST       | `/v1/secrets`                                      | Create secret (201; plaintext omitted)                                                                              |
+| GET        | `/v1/secrets`                                      | List masked secrets (paged, ordered by key)                                                                         |
+| GET/DELETE | `/v1/secrets/{key}`                                | Get masked secret / delete; duplicate create returns 409                                                            |
+| PUT        | `/v1/secrets/{key}`                                | Replace secret value (404 unless the key exists)                                                                    |
+| POST       | `/v1/workflow/instance`                            | Start instance (202)                                                                                                |
+| GET        | `/v1/workflow/instance`                            | List compact summaries (paged, `id`/`workflow_definition_id`/`status` filters)                                      |
+| GET        | `/v1/workflow/instance/{id}/status`                | Status, counters, cursor, per-node `nodes` map, audit actors                                                        |
+| GET/PUT    | `/v1/workflow/instance/{id}/context`               | Get full context / replace it (paused only, 409 on race)                                                            |
+| GET        | `/v1/workflow/instance/{id}/status/node/{node_id}` | Node debug (`?attempt=N`; `not_started` for never-run nodes)                                                        |
+| GET        | `/v1/workflow/instance/{id}/debug/context`         | Debug context as TypeScript (debug runs only, `?node_id=`/`?attempt=N`)                                             |
 | PUT        | `/v1/workflow/instance/{id}/input`                 | Deliver input (`Idempotency-Key` required, 202; 403 by permission or node gates, or anonymous on a non-public node) |
-| POST       | `/v1/workflow/instance/{id}/pause`                 | Pause (200 immediate / 202 deferred)                                                                       |
-| POST       | `/v1/workflow/instance/{id}/resume`                | Resume                                                                                                     |
-| POST       | `/v1/workflow/instance/{id}/stop`                  | Terminal stop (fences workers, cancels in-flight execution)                                                |
-| POST       | `/v1/workflow/instance/{id}/rollback`              | Roll back paused/failed instance to a prior occurrence (lands paused)                                      |
+| POST       | `/v1/workflow/instance/{id}/pause`                 | Pause (200 immediate / 202 deferred)                                                                                |
+| POST       | `/v1/workflow/instance/{id}/resume`                | Resume                                                                                                              |
+| POST       | `/v1/workflow/instance/{id}/stop`                  | Terminal stop (fences workers, cancels in-flight execution)                                                         |
+| POST       | `/v1/workflow/instance/{id}/rollback`              | Roll back paused/failed instance to a prior occurrence (lands paused)                                               |
 
 Instance statuses: `waiting`, `running`, `paused`, `finished`, `failed`,
 `stopped`. Errors follow RFC 7807 `problem+json`. A missing or invalid
@@ -794,7 +874,19 @@ Good first checks on any PR: the gofumpt check prints nothing,
   it.
 - `GET /v1/auth/config` is intentionally public and returns no secret: it
   carries only the issuer, client id, endpoints, and roles claim, which the
-  provider publishes anyway.
+  provider publishes anyway, plus which local logins exist.
+- `auth.local.jwt_secret` and `auth.local.smtp.password` are secrets: ship
+  them via env (`BEELINEWF_AUTH_LOCAL_JWT_SECRET`,
+  `BEELINEWF_AUTH_LOCAL_SMTP_PASSWORD`), never in a committed file. The JWT
+  secret signs every local session — rotate it and every outstanding token
+  dies; the SMTP password authenticates the verification relay.
+- Local passwords are stored as bcrypt hashes and are never returned by any
+  API; verification tokens are stored hashed too, and the raw token exists
+  only in the email. Login and resend answers are generic by design, so a
+  refusal cannot be read as an account-existence oracle.
+- Keep `auth.local.allow_registration` closed unless the deployment is
+  meant to be self-service; an open registration is an account for anyone
+  who can reach the port.
 - `public: true` on an input node is the one place the API serves an
   unauthenticated **write**, so treat it as a public endpoint you own. Anyone
   holding the instance id can deliver to it, the payload is stored as-is, and
