@@ -96,7 +96,8 @@ func (h *WorkflowDefinitionHandler) List(c *gin.Context) {
 	})
 }
 
-// Get handles GET /v1/workflow/definition/{id}.
+// Get handles GET /v1/workflow/definition/{id}. Anonymous callers receive
+// the public projection instead of the full definition.
 //
 // @Summary Get workflow definition
 // @Tags workflow-definitions
@@ -104,6 +105,7 @@ func (h *WorkflowDefinitionHandler) List(c *gin.Context) {
 // @Param id path string true "Definition ID"
 // @Success 200 {object} WorkflowDefinitionResponse
 // @Failure 401,403,400,404,500 {object} Problem
+// @Description A credentialed caller with definitions:read receives the full definition; a request with no credential receives the public projection (metadata and graph only, scripts and internals removed).
 // @Security ApiKeyAuth
 // @Security BearerAuth
 // @Router /v1/workflow/definition/{id} [get]
@@ -111,6 +113,13 @@ func (h *WorkflowDefinitionHandler) Get(c *gin.Context) {
 	id := c.Param("id")
 	if !ids.Valid(id) {
 		WriteProblem(c, http.StatusBadRequest, "id must be a valid uuid")
+		return
+	}
+	// Anonymous callers reach this handler through optional auth and
+	// receive the allowlisted public projection; authenticated callers
+	// keep the full definition below.
+	if AnonymousFrom(c) {
+		h.getPublic(c, id)
 		return
 	}
 	def, err := h.svc.Get(c.Request.Context(), id)

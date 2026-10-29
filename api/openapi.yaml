@@ -671,10 +671,16 @@ paths:
     get:
       tags: [Forms]
       operationId: getForm
-      security:
-        - ApiKeyAuth: []
-        - BearerAuth: []
+      # Deliberately empty: this route serves anonymous callers, so the
+      # usual requirement does not apply to it. A presented credential is
+      # still verified against forms:read, which is why 401 and 403 remain
+      # documented responses.
+      security: []
       summary: Get a form
+      description: |
+        Public by design alongside the filtered workflow-definition read: a
+        public-input frontend fetches the render contract with no credential.
+        The body is the same for anonymous and authenticated callers.
       parameters:
         - $ref: "#/components/parameters/FormID"
       responses:
@@ -922,19 +928,32 @@ paths:
     get:
       tags: [Workflow Definitions]
       operationId: getWorkflowDefinition
-      security:
-        - ApiKeyAuth: []
-        - BearerAuth: []
+      # Deliberately empty: this route serves anonymous callers, so the
+      # usual requirement does not apply to it. A presented credential is
+      # still verified against definitions:read, which is why 401 and 403
+      # remain documented responses.
+      security: []
       summary: Get a workflow definition by id
+      description: |
+        A credentialed caller with definitions:read receives the full
+        definition. A request with no credential receives the public
+        projection instead: metadata and graph only, with scripts,
+        conditions, validation, hooks, outbound configs, authorization
+        gates, and audit fields removed. The anonymous response carries
+        Cache-Control: no-store and Vary on the credential headers, since
+        the same path serves both bodies.
       parameters:
         - $ref: "#/components/parameters/DefinitionID"
       responses:
         "403": { $ref: "#/components/responses/Forbidden" }
         "200":
-          description: Workflow definition
+          description: Workflow definition (full for authenticated callers, public projection for anonymous ones)
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/WorkflowDefinition" }
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/WorkflowDefinition"
+                  - $ref: "#/components/schemas/PublicWorkflowDefinition"
         "404": { $ref: "#/components/responses/NotFound" }
         "401": { $ref: "#/components/responses/Unauthorized" }
     delete:
@@ -1040,19 +1059,31 @@ paths:
     get:
       tags: [Workflow Instances]
       operationId: getWorkflowStatus
-      security:
-        - ApiKeyAuth: []
-        - BearerAuth: []
+      # Deliberately empty: this route serves anonymous callers parked on a
+      # public input node, so the usual requirement does not apply to it. A
+      # presented credential is still verified against instances:read, which
+      # is why 401 and 403 remain documented responses.
+      security: []
       summary: Get workflow instance status
+      description: |
+        A credentialed caller with instances:read receives the full status.
+        A request with no credential receives the public projection instead
+        (ids and the pending delivery contract), and only while the instance
+        waits on a public input node; any other anonymous state answers 403.
+        The anonymous response carries Cache-Control: no-store and Vary on
+        the credential headers, since the same path serves both bodies.
       parameters:
         - $ref: "#/components/parameters/InstanceID"
       responses:
         "403": { $ref: "#/components/responses/Forbidden" }
         "200":
-          description: Instance status
+          description: Instance status (full for authenticated callers, public projection for anonymous ones)
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/InstanceStatus" }
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/InstanceStatus"
+                  - $ref: "#/components/schemas/PublicInstanceStatus"
         "404": { $ref: "#/components/responses/NotFound" }
         "401": { $ref: "#/components/responses/Unauthorized" }
   /v1/workflow/instance/{id}/status/stream:
@@ -1250,14 +1281,16 @@ paths:
         constraints fail with 413 or 422, and every failure deletes the
         objects the request already uploaded.
 
-        This is the only endpoint that serves an anonymous caller, and only
-        when the waiting input node sets public: true. A request with no
-        credential reaches this route unauthenticated and is admitted only on
-        a public node; a private node answers 403. Because the status and
-        forms-library reads stay authenticated, an anonymous caller has to
-        learn the payload contract out-of-band, so share the instance id and
-        the shape deliberately. A credential that is present but invalid is
-        still 401,
+        This route serves an anonymous caller only when the waiting input
+        node sets public: true. A request with no credential reaches this
+        route unauthenticated and is admitted only on a public node; a
+        private node answers 403. Context reads stay authenticated, but the
+        status, form, and workflow-definition reads an anonymous caller needs
+        in order to learn the payload contract are public (the filtered GET
+        .../status while parked on a public node, GET /v1/forms/{id}, and the
+        filtered GET /v1/workflow/definition/{id}), so share the instance id
+        deliberately and let the caller fetch the shape itself. A credential
+        that is present but invalid is still 401,
         including on a public node: a caller that proved the wrong thing never
         degrades to an accepted anonymous delivery. An authenticated caller
         on a public node is authorized exactly as on a private one, and its
@@ -2246,6 +2279,54 @@ components:
         updated_by: { type: string, format: uuid }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    PublicWorkflowDefinition:
+      type: object
+      required: [id, name, version, content]
+      description: |
+        Anonymous GET /v1/workflow/definition/{id} body: the metadata and
+        graph a public-input frontend needs. Nodes carry identity, graph
+        edges, and — on input nodes only — the delivery contract (form_id,
+        channel, output_property, accept, public, upload constraints).
+        Scripts, conditions, validation, hooks, outbound configs, custom
+        configs, metadata, authorization gates, audit actors, and schemas
+        are never included.
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        version: { type: integer }
+        content: { $ref: "#/components/schemas/PublicWorkflowContent" }
+    PublicWorkflowContent:
+      type: object
+      required: [start_node_id, nodes]
+      properties:
+        start_node_id: { type: string, format: uuid }
+        keys: { type: object, additionalProperties: { type: string } }
+        nodes: { type: array, items: { $ref: "#/components/schemas/PublicWorkflowNode" } }
+    PublicWorkflowNode:
+      type: object
+      required: [id, type]
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string }
+        name: { type: string }
+        node_definition_id: { type: string, format: uuid }
+        form_id: { type: string, format: uuid }
+        channel: { type: string }
+        output_property: { type: string }
+        accept: { type: array, items: { type: string } }
+        public: { type: boolean }
+        storage:
+          type: object
+          description: Upload constraints only; bucket and prefix stay server-side.
+          properties:
+            allowed_mime_types: { type: array, items: { type: string } }
+            max_file_bytes: { type: integer }
+        next_node: { type: string, format: uuid }
+        start_node_id: { type: string, format: uuid }
+        keys: { type: object, additionalProperties: { type: string } }
+        branches: { type: object, additionalProperties: { type: string } }
+        parallel_end_node_id: { type: string, format: uuid }
+        nodes: { type: array, items: { $ref: "#/components/schemas/PublicWorkflowNode" } }
     WorkflowDefinitionList:
       type: object
       required: [items, page, per_page, total, total_pages]
@@ -2372,9 +2453,9 @@ components:
             input node). The frontend renders pending_input.form when
             present (frozen bytes from an instance created with
             snapshot_forms), else fetches the form named by
-            pending_input.form_id via GET /v1/forms/{form_id}, renders it,
-            then delivers the payload. form_id is absent when the input
-            node references no form.
+            pending_input.form_id via the public GET /v1/forms/{form_id},
+            renders it, then delivers the payload. form_id is absent when
+            the input node references no form.
         parallel:
           type: array
           nullable: true
@@ -2483,6 +2564,65 @@ components:
             and the flag only exists on input nodes. An
             anonymous delivery is written as the bare payload and marked
             delivered_by anonymous in the delivery history.
+    PublicInstanceStatus:
+      type: object
+      required: [id, workflow_definition_id, status, waiting_reason, pending_input]
+      description: |
+        Anonymous GET /v1/workflow/instance/{id}/status body: the ids a
+        public-input frontend needs to fetch the definition and the form,
+        plus the pending delivery contract. Serves only while the instance
+        waits on a public input node; any other anonymous state answers
+        403. Context, counters, lease, node, parallel, error, and audit
+        fields are never included.
+      properties:
+        id: { type: string, format: uuid }
+        workflow_definition_id: { type: string, format: uuid }
+        status: { type: string, enum: [waiting, running, paused, finished, failed, stopped] }
+        waiting_reason: { type: string, nullable: true }
+        current_node_id: { type: string, format: uuid, nullable: true }
+        pending_input: { $ref: "#/components/schemas/PublicPendingInput" }
+    PublicPendingInput:
+      type: object
+      required: [node_id, channel, output_property, accept, public]
+      description: |
+        Anonymous delivery contract: what to render and where to deliver.
+        The frontend renders form when present (frozen bytes from an
+        instance created with snapshot_forms), else fetches the form named
+        by form_id via the public GET /v1/forms/{form_id}. form_id is
+        absent when the node references no form.
+      properties:
+        node_id: { type: string, format: uuid }
+        channel: { type: string }
+        output_property:
+          type: string
+          description: Bare top-level key the accepted payload is written to; empty when the node sets none, in which case the node id is used
+        form_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Forms-library id the frontend fetches to render (absent when the node references no form)
+        form:
+          type: object
+          nullable: true
+          description: Frozen form bytes served when the instance was created with snapshot_forms (absent for live instances and formless nodes)
+          properties:
+            schema:
+              type: object
+              description: JSON Schema (draft 2020-12) render contract, as frozen at instance start
+            ui:
+              type: object
+              nullable: true
+              description: Opaque frontend render hints (label, order, widget), as frozen at instance start
+        accept:
+          type: array
+          items: { type: string }
+          description: |
+            Request media types the node delivers. application/json is always
+            a JSON body; multipart/form-data additionally admits a file
+            upload. Nodes that predate the field report application/json only.
+        public:
+          type: boolean
+          description: Always true; the projection serves only on a public input node.
     ParallelExecution:
       type: object
       required: [id, depth, start_node_id, end_node_id, status, branch_count, completed_count, branches]

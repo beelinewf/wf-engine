@@ -528,6 +528,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Public by design: a request with no credential receives the same render contract a public-input frontend fetches before delivering.",
                 "produces": [
                     "application/json"
                 ],
@@ -2580,6 +2581,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "A credentialed caller with definitions:read receives the full definition; a request with no credential receives the public projection (metadata and graph only, scripts and internals removed).",
                 "produces": [
                     "application/json"
                 ],
@@ -3130,7 +3132,7 @@ const docTemplate = `{
         },
         "/v1/workflow/instance/{id}/input": {
             "put": {
-                "description": "This is the only endpoint that serves an anonymous caller, and only when the waiting input node sets public: true. No credential at all is admitted on a public node; a private node answers 403. A credential that is present but invalid is still 401, including on a public node, and never degrades to an accepted anonymous delivery. Status and form reads stay authenticated, so share the payload contract with an anonymous caller out-of-band.",
+                "description": "This endpoint serves an anonymous caller only when the waiting input node sets public: true. No credential at all is admitted on a public node; a private node answers 403. A credential that is present but invalid is still 401, including on a public node, and never degrades to an accepted anonymous delivery. Instance status reads are public while the instance waits on a public input node, and the single form and workflow-definition reads are public, so an anonymous caller fetches the payload contract itself.",
                 "consumes": [
                     "application/json",
                     "multipart/form-data"
@@ -3576,6 +3578,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "A credentialed caller with instances:read receives the full status; a request with no credential receives the public projection (ids and pending delivery contract) while the instance waits on a public input node, and 403 otherwise.",
                 "produces": [
                     "application/json"
                 ],
@@ -5332,7 +5335,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "public": {
-                    "description": "Public reports that the node accepts anonymous deliveries over HTTP\nwith no credential, even when auth is on. Status and form reads stay\nauthenticated, so an anonymous caller learns the shape out-of-band.",
+                    "description": "Public reports that the node accepts anonymous deliveries over HTTP\nwith no credential, even when auth is on. While the instance parks\nhere, anonymous callers also read this contract from the public\nstatus projection and the form from the public form read.",
                     "type": "boolean"
                 },
                 "record_actor": {

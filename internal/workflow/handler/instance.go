@@ -132,7 +132,9 @@ func (h *InstanceHandler) List(c *gin.Context) {
 	})
 }
 
-// Status handles GET /v1/workflow/instance/{id}/status.
+// Status handles GET /v1/workflow/instance/{id}/status. Anonymous callers
+// receive the public projection while the instance waits on a public
+// input node, and 403 otherwise.
 //
 // @Summary Get workflow instance status
 // @Tags workflow-instances
@@ -140,10 +142,18 @@ func (h *InstanceHandler) List(c *gin.Context) {
 // @Param id path string true "Instance ID"
 // @Success 200 {object} InstanceStatusResponse
 // @Failure 401,403,404,500 {object} Problem
+// @Description A credentialed caller with instances:read receives the full status; a request with no credential receives the public projection (ids and pending delivery contract) while the instance waits on a public input node, and 403 otherwise.
 // @Security ApiKeyAuth
 // @Security BearerAuth
 // @Router /v1/workflow/instance/{id}/status [get]
 func (h *InstanceHandler) Status(c *gin.Context) {
+	// Anonymous callers reach this handler through optional auth and
+	// receive the allowlisted public projection while parked on a public
+	// input node; authenticated callers keep the full status below.
+	if AnonymousFrom(c) {
+		h.getPublicStatus(c, c.Param("id"))
+		return
+	}
 	d, err := h.svc.GetStatusDetail(c.Request.Context(), c.Param("id"), requestPrincipalValue(c))
 	if err != nil {
 		WriteError(c, err)
@@ -493,7 +503,7 @@ func (h *InstanceHandler) DebugContext(c *gin.Context) {
 // @Param field formData string false "Text field for multipart/form-data (repeatable; field name becomes the context key)"
 // @Success 202 {object} InputDeliveryResponse
 // @Failure 401,403,400,404,409,413,415,422,500 {object} Problem
-// @Description This is the only endpoint that serves an anonymous caller, and only when the waiting input node sets public: true. No credential at all is admitted on a public node; a private node answers 403. A credential that is present but invalid is still 401, including on a public node, and never degrades to an accepted anonymous delivery. Status and form reads stay authenticated, so share the payload contract with an anonymous caller out-of-band.
+// @Description This endpoint serves an anonymous caller only when the waiting input node sets public: true. No credential at all is admitted on a public node; a private node answers 403. A credential that is present but invalid is still 401, including on a public node, and never degrades to an accepted anonymous delivery. Instance status reads are public while the instance waits on a public input node, and the single form and workflow-definition reads are public, so an anonymous caller fetches the payload contract itself.
 // @Router /v1/workflow/instance/{id}/input [put]
 func (h *InstanceHandler) Input(c *gin.Context) {
 	mediaType, err := inputMediaType(c.GetHeader("Content-Type"))

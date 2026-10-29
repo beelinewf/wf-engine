@@ -97,7 +97,14 @@ Same params as node list except `order` allowlist drops `type` (`id`, `name`, `v
 
 ### `GET /v1/workflow/definition/{id}` → `200`
 
-Malformed UUID → `400`. Unknown → `404`.
+Public alongside the input-delivery route: a request with no credential
+succeeds and receives the filtered projection (`id`, `name`, `version`, and
+`content` with `start_node_id`, `keys`, and per-node identity, graph edges,
+plus `form_id`/`channel`/`output_property`/`accept`/`public`/upload
+constraints on input nodes only — no scripts, configs, gates, or audit
+fields). A credentialed caller with `definitions:read` receives the full
+definition; without it → `403`. A bad credential is `401` and never degrades
+to the projection. Malformed UUID → `400`. Unknown → `404`.
 
 ### `DELETE /v1/workflow/definition/{id}` → `204`
 
@@ -155,7 +162,10 @@ Envelope `{items, page, per_page, total, total_pages}`.
 
 ### `GET /v1/forms/{id}` → `200`
 
-Malformed UUID → `400`. Unknown → `404`. Returns one form.
+Public: a request with no credential receives the same render contract. A
+credentialed caller needs `forms:read` (else `403`); a bad credential is
+`401` and never degrades to anonymous. Malformed UUID → `400`. Unknown → `404`.
+Returns one form.
 
 ### `PUT /v1/forms/{id}` → `200`
 
@@ -208,9 +218,14 @@ the `debug` step-through flag. Nullables
 
 ### `GET /v1/workflow/instance/{id}/status` → `200`
 
+Public while the instance waits on a public input node: a request with no credential receives the filtered projection
+(`id`, `workflow_definition_id`, `status`, `waiting_reason`, `current_node_id`, and `pending_input` with `node_id`,
+`channel`, `output_property`, `form_id`, `form`, `accept`, `public` — no gates, attribution, context, counters, nodes,
+parallel, error, or audit fields). Any other anonymous state → `403`. A credentialed caller needs `instances:read`
+(else `403`); a bad credential is `401` and never degrades to the projection.
 Unknown id → `404`. No UUID format check on this route: any shape that matches no row is `404` (a malformed UUID can
 surface as `500` if the database rejects the literal instead of returning zero rows, so only send ids the API gave you).
-Response:
+Response (authenticated callers):
 
 - Identity, `status` enum, `context_mode` (`full`/`lean`, snapshotted at creation), `debug` (step-through flag,
   immutable after create), `waiting_reason` (`null` = runnable, `"input"` = parked, `"parallel"` = parked on a join,
@@ -230,7 +245,7 @@ Response:
 - `pending_input`: present only when parked on an input node (`waiting_reason == "input"`): `{node_id, channel,
   output_property, form_id, form, allowed_roles, allowed_users, record_actor, public, accept}`. `form_id` is absent
   when the node references no form. `form` carries the frozen `{schema, ui}` bytes when the instance was created with
-  `"snapshot_forms": true`; the frontend renders it when present, else fetches `GET /v1/forms/{form_id}`. Live
+  `"snapshot_forms": true`; the frontend renders it when present, else fetches the public `GET /v1/forms/{form_id}`. Live
   instances serve `form_id` only: the bytes never ride on status except on a snapshot run. `allowed_users` lists the
   `{id}` entries admitted regardless of roles, and the two gates are a union: when both are non-empty a listed
   `allowed_roles` entry is an admission too, so a frontend must treat a caller matching either list as admitted.

@@ -189,6 +189,30 @@ func NewRouter(deps Deps) *gin.Engine {
 		if deps.Instances != nil {
 			v1.PUT("/workflow/instance/:id/input", TryAuth(authCfg), NewInstanceHandler(deps.Instances).WithMaxBodyBytes(deps.MaxBodyBytes).Input)
 		}
+		// GET one form and GET one definition serve anonymous callers too:
+		// a public-input frontend fetches the render contract and the
+		// filtered graph with no credential. They are registered before
+		// the Use below for the same reason as PUT input, each carrying
+		// optional auth that enforces its own read permission for
+		// credentialed callers. Anonymous definition reads receive the
+		// allowlisted public projection from the handler; anonymous form
+		// reads receive the same body, which is already frontend-only.
+		if deps.Forms != nil {
+			v1.GET("/forms/:id", TryAuthForAction(auth.ActionFormsRead, authCfg), NewFormHandler(deps.Forms).Get)
+		}
+		if deps.WorkflowDefinitions != nil {
+			v1.GET("/workflow/definition/:id", TryAuthForAction(auth.ActionDefinitionsRead, authCfg), NewWorkflowDefinitionHandler(deps.WorkflowDefinitions).Get)
+		}
+		// GET one instance status serves anonymous callers too, but only
+		// while the instance waits on a public input node: a public-input
+		// frontend holding just an instance id resolves the definition and
+		// form ids from it. It is registered before the Use below for the
+		// same reason as the reads above, carrying optional auth that
+		// enforces its own read permission for credentialed callers. The
+		// handler refuses any other anonymous state with 403.
+		if deps.Instances != nil {
+			v1.GET("/workflow/instance/:id/status", TryAuthForAction(auth.ActionInstancesRead, authCfg), NewInstanceHandler(deps.Instances).Status)
+		}
 		v1.Use(RequireAuth(authCfg))
 	}
 
@@ -252,7 +276,12 @@ func NewRouter(deps Deps) *gin.Engine {
 		group := v1.Group("/workflow/definition")
 		gate(group, auth.ActionDefinitionsWrite, http.MethodPost, "", workflowDefs.Create)
 		gate(group, auth.ActionDefinitionsRead, http.MethodGet, "", workflowDefs.List)
-		gate(group, auth.ActionDefinitionsRead, http.MethodGet, "/:id", workflowDefs.Get)
+		// GET /:id is registered earlier, outside the global gate, when
+		// auth is enabled, so anonymous callers can read the filtered
+		// projection; with auth off this line is the only registration.
+		if !enabled {
+			group.GET("/:id", workflowDefs.Get)
+		}
 		gate(group, auth.ActionDefinitionsWrite, http.MethodDelete, "/:id", workflowDefs.Delete)
 	}
 
@@ -271,7 +300,12 @@ func NewRouter(deps Deps) *gin.Engine {
 		group := v1.Group("/forms")
 		gate(group, auth.ActionFormsWrite, http.MethodPost, "", forms.Create)
 		gate(group, auth.ActionFormsRead, http.MethodGet, "", forms.List)
-		gate(group, auth.ActionFormsRead, http.MethodGet, "/:id", forms.Get)
+		// GET /:id is registered earlier, outside the global gate, when
+		// auth is enabled, so anonymous callers can fetch the render
+		// contract; with auth off this line is the only registration.
+		if !enabled {
+			group.GET("/:id", forms.Get)
+		}
 		gate(group, auth.ActionFormsRead, http.MethodGet, "/:id/usage", forms.Usage)
 		gate(group, auth.ActionFormsWrite, http.MethodPut, "/:id", forms.Update)
 		gate(group, auth.ActionFormsWrite, http.MethodDelete, "/:id", forms.Delete)
@@ -282,7 +316,13 @@ func NewRouter(deps Deps) *gin.Engine {
 		group := v1.Group("/workflow/instance")
 		gate(group, auth.ActionInstancesCreate, http.MethodPost, "", instances.Create)
 		gate(group, auth.ActionInstancesRead, http.MethodGet, "", instances.List)
-		gate(group, auth.ActionInstancesRead, http.MethodGet, "/:id/status", instances.Status)
+		// GET /:id/status is registered earlier, outside the global gate,
+		// when auth is enabled, so anonymous callers can resolve a
+		// public-parked instance; with auth off this line is the only
+		// registration.
+		if !enabled {
+			group.GET("/:id/status", instances.Status)
+		}
 		gate(group, auth.ActionInstancesRead, http.MethodGet, "/:id/status/stream", instances.StatusStream)
 		gate(group, auth.ActionInstancesRead, http.MethodGet, "/:id/status/node/:node_id", instances.NodeDebug)
 		gate(group, auth.ActionInstancesRead, http.MethodGet, "/:id/debug/context", instances.DebugContext)

@@ -17,8 +17,9 @@
 #   * an API token bypasses both gates and is recorded as the system user;
 #   * a public: true node accepts a delivery carrying no credential at all,
 #     while a private node refuses the same anonymous request with 403, a
-#     refused credential stays 401 even on a public node, and an anonymous
-#     status read stays 401.
+#     refused credential stays 401 even on a public node, status is public
+#     only while parked on a public node (403 otherwise), and context
+#     stays 401.
 #
 # The app must be started with auth.oidc.enabled, the issuer below, and a role
 # catalog whose "finance" role grants input:deliver (see config.yaml).
@@ -386,12 +387,23 @@ code=$(curl -sS -o /dev/null -w '%{http_code}' -X PUT "$APP_BASE_URL/v1/workflow
 [[ "$code" == "403" ]] || fail "anonymous delivery to a private node -> $code, want 403"
 pass "anonymous delivery is refused on a private node"
 
-# Exempting PUT input must not exempt anything else: the reads an anonymous
-# caller would use to discover the shape stay authenticated.
+# Status is public only while the instance waits on a public input node:
+# a parked public instance serves the filtered projection, any other
+# anonymous state is 403, and context stays authenticated (401). (The
+# single form and workflow-definition reads are intentionally public so an
+# anonymous caller can fetch the shape itself.)
+anon_status=$(curl -fsS "$APP_BASE_URL/v1/workflow/instance/$PUB_INST2/status") \
+  || fail "anonymous status read on a parked public instance"
+[[ "$(printf '%s' "$anon_status" | jq -r '.pending_input.public')" == "true" ]] \
+  || fail "anonymous status does not report the public node: $anon_status"
+[[ "$(printf '%s' "$anon_status" | jq -r '.workflow_definition_id')" == "$PUB_WF" ]] \
+  || fail "anonymous status does not resolve the definition id: $anon_status"
+pass "anonymous status read serves the public projection while parked on a public node"
+
 code=$(curl -sS -o /dev/null -w '%{http_code}' "$APP_BASE_URL/v1/workflow/instance/$PUB_INST/status")
-[[ "$code" == "401" ]] || fail "anonymous status read on a public instance -> $code, want 401"
+[[ "$code" == "403" ]] || fail "anonymous status read on an advanced public instance -> $code, want 403"
 code=$(curl -sS -o /dev/null -w '%{http_code}' "$APP_BASE_URL/v1/workflow/instance/$PUB_INST/context")
 [[ "$code" == "401" ]] || fail "anonymous context read on a public instance -> $code, want 401"
-pass "anonymous status and context reads stay 401 even on a public instance"
+pass "anonymous status is 403 once advanced and context stays 401"
 
 echo "e2e-oidc: ALL CHECKS PASSED"

@@ -183,9 +183,9 @@ type PendingInput struct {
 	// the follow-up form against the right shape.
 	RecordActor bool
 	// Public reports that the node accepts anonymous deliveries over HTTP
-	// with no credential, even when auth is on. The form still stays
-	// behind authentication, so an anonymous caller learns the shape
-	// out-of-band rather than from this contract.
+	// with no credential, even when auth is on. While the instance parks
+	// here, anonymous callers read this contract from the public status
+	// projection and the form from the public form read.
 	Public bool
 	// Accept lists the request media types the node delivers, so a
 	// frontend knows whether multipart is welcome. It is never empty:

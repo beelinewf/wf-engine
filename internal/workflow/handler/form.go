@@ -85,7 +85,8 @@ func (h *FormHandler) List(c *gin.Context) {
 	})
 }
 
-// Get handles GET /v1/forms/{id}.
+// Get handles GET /v1/forms/{id}. The render contract is the same for
+// anonymous and authenticated callers.
 //
 // @Summary Get form
 // @Tags forms
@@ -93,6 +94,7 @@ func (h *FormHandler) List(c *gin.Context) {
 // @Param id path string true "Form ID"
 // @Success 200 {object} FormResponse
 // @Failure 401,403,400,404,500 {object} Problem
+// @Description Public by design: a request with no credential receives the same render contract a public-input frontend fetches before delivering.
 // @Security ApiKeyAuth
 // @Security BearerAuth
 // @Router /v1/forms/{id} [get]
