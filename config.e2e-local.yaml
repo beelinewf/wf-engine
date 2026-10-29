@@ -22,6 +22,14 @@ engine:
     - "127.0.0.1"
     - "localhost"
   exec_allowlist: []
+  # Workflow-mail relay (see config.yaml). The log sender matches this
+  # harness's log mail posture: sends log recipients and subject instead
+  # of delivering. Distinct from auth.local.smtp (verification mail only).
+  smtp:
+    host: "log"
+    port: 587
+    from: "noreply@example.test"
+    use_tls: false
 
 auth:
   # api_token is deliberately absent: the Taskfile exports BEELINEWF_API_TOKEN

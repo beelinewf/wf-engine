@@ -1,8 +1,8 @@
 // Package objectstore is the streaming port multipart input uploads write
-// through: file parts flow part-by-part into S3-compatible storage while
-// the workflow context receives only references. The MinIO implementation
-// is built once at startup from global config; service tests substitute a
-// fake Store.
+// through and workflow mail file bodies read through: file parts flow
+// part-by-part into S3-compatible storage while the workflow context
+// receives only references. The MinIO implementation is built once at
+// startup from global config; service tests substitute a fake Store.
 package objectstore
 
 import (
@@ -25,6 +25,9 @@ type Store interface {
 	Put(ctx context.Context, bucket, key string, r io.Reader, size int64, contentType string, userMetadata map[string]string) error
 	// Delete removes bucket/key. Deleting a missing key succeeds.
 	Delete(ctx context.Context, bucket, key string) error
+	// Get opens bucket/key for reading. The caller closes the reader and
+	// caps how much it reads.
+	Get(ctx context.Context, bucket, key string) (io.ReadCloser, error)
 }
 
 // NewMinioStore builds the S3-compatible Store. The endpoint is a bare
@@ -57,6 +60,7 @@ type minioAPI interface {
 	BucketExists(ctx context.Context, bucketName string) (bool, error)
 	MakeBucket(ctx context.Context, bucketName string, opts minio.MakeBucketOptions) error
 	RemoveObject(ctx context.Context, bucketName, objectName string, opts minio.RemoveObjectOptions) error
+	GetObject(ctx context.Context, bucketName, objectName string, opts minio.GetObjectOptions) (*minio.Object, error)
 }
 
 // minioStore adapts a minioAPI to Store.
@@ -104,4 +108,12 @@ func (m *minioStore) Delete(ctx context.Context, bucket, key string) error {
 		return fmt.Errorf("objectstore: delete %s/%s: %w", bucket, key, err)
 	}
 	return nil
+}
+
+func (m *minioStore) Get(ctx context.Context, bucket, key string) (io.ReadCloser, error) {
+	obj, err := m.c.GetObject(ctx, bucket, key, minio.GetObjectOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("objectstore: get %s/%s: %w", bucket, key, err)
+	}
+	return obj, nil
 }

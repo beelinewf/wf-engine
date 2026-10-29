@@ -85,6 +85,16 @@ func (f *fakeStore) Delete(_ context.Context, bucket, key string) error {
 	return nil
 }
 
+func (f *fakeStore) Get(_ context.Context, bucket, key string) (io.ReadCloser, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	o, ok := f.objects[bucket+"/"+key]
+	if !ok {
+		return nil, errors.New("object not found")
+	}
+	return io.NopCloser(bytes.NewReader(o.data)), nil
+}
+
 func (f *fakeStore) object(bucket, key string) (fakeObject, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

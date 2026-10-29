@@ -173,7 +173,7 @@ func TestNodeSchemaConditionsConstraints(t *testing.T) {
 
 func TestNodeSchemaOneOfPerType(t *testing.T) {
 	cases := map[string][]string{
-		"external_call": {"http_config", "execution_config"},
+		"external_call": {"http_config", "execution_config", "smtp_config"},
 		"poller":        {"http", "redis", "rabbitmq"},
 	}
 	for nodeType, want := range cases {
@@ -189,6 +189,33 @@ func TestNodeSchemaOneOfPerType(t *testing.T) {
 			if len(got) != 1 || got[0] != want[i] {
 				t.Errorf("%s: oneOf[%d] requires %v, want [%s]", nodeType, i, got, want[i])
 			}
+		}
+	}
+}
+
+// TestNodeSchemaExternalCallSMTPArm pins the smtp_config property and its
+// file-body contract on the served external_call schema.
+func TestNodeSchemaExternalCallSMTPArm(t *testing.T) {
+	raw, _ := model.NodeSchema("external_call")
+	props := decodeSchema(t, raw)["properties"].(map[string]any)
+	smtp, ok := props["smtp_config"].(map[string]any)
+	if !ok {
+		t.Fatal("external_call schema missing smtp_config property")
+	}
+	smtpProps, _ := smtp["properties"].(map[string]any)
+	for _, field := range []string{"to", "cc", "bcc", "from", "reply_to", "subject", "text", "html", "file"} {
+		if _, present := smtpProps[field]; !present {
+			t.Errorf("smtp_config schema missing %q", field)
+		}
+	}
+	file, _ := smtpProps["file"].(map[string]any)
+	if file == nil {
+		t.Fatal("smtp_config schema missing file object")
+	}
+	fileProps, _ := file["properties"].(map[string]any)
+	for _, field := range []string{"path", "data"} {
+		if _, present := fileProps[field]; !present {
+			t.Errorf("smtp_config.file schema missing %q", field)
 		}
 	}
 }

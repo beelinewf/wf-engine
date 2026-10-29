@@ -261,6 +261,137 @@ func TestParseExternalCallRejectsInvalid(t *testing.T) {
 	}
 }
 
+func TestParseExternalCallSMTP(t *testing.T) {
+	nc := mustParseContent(t, `{
+		"type": "external_call",
+		"smtp_config": {
+			"to": ["ops@example.com"],
+			"cc": ["team@example.com"],
+			"bcc": ["audit@example.com"],
+			"from": "sender@example.com",
+			"reply_to": "reply@example.com",
+			"subject": "Order confirmed",
+			"text": "Hi.",
+			"html": "<p>Hi.</p>"
+		},
+		"timeout": "30s"
+	}`)
+	if nc.SMTP == nil {
+		t.Fatal("smtp_config not parsed")
+	}
+	smtp := nc.SMTP
+	if len(smtp.To) != 1 || smtp.To[0] != "ops@example.com" {
+		t.Errorf("to = %v", smtp.To)
+	}
+	if len(smtp.Cc) != 1 || smtp.Cc[0] != "team@example.com" {
+		t.Errorf("cc = %v", smtp.Cc)
+	}
+	if len(smtp.Bcc) != 1 || smtp.Bcc[0] != "audit@example.com" {
+		t.Errorf("bcc = %v", smtp.Bcc)
+	}
+	if smtp.From != "sender@example.com" || smtp.ReplyTo != "reply@example.com" {
+		t.Errorf("from/reply_to = %q/%q", smtp.From, smtp.ReplyTo)
+	}
+	if smtp.Subject != "Order confirmed" || smtp.Text != "Hi." || smtp.HTML != "<p>Hi.</p>" {
+		t.Errorf("subject/text/html mismatch: %+v", smtp)
+	}
+	if smtp.File != nil {
+		t.Errorf("file = %+v, want nil", smtp.File)
+	}
+	if nc.HTTP != nil || nc.Execution != nil {
+		t.Error("http and execution configs should be nil for smtp node")
+	}
+}
+
+func TestParseExternalCallSMTPDynamic(t *testing.T) {
+	nc := mustParseContent(t, `{
+		"type": "external_call",
+		"smtp_config": {
+			"to": ["{{ user.email }}"],
+			"subject": "Order {{ order.id }} confirmed",
+			"text": "Hi {{ user.name }}, total {{ order.total }}.",
+			"html": "<p>Hi {{ user.name }}</p>"
+		}
+	}`)
+	if nc.SMTP == nil {
+		t.Fatal("smtp_config not parsed")
+	}
+	if len(nc.SMTP.To) != 1 || nc.SMTP.To[0] != "{{ user.email }}" {
+		t.Errorf("to = %v, want template preserved", nc.SMTP.To)
+	}
+	if nc.SMTP.Subject != "Order {{ order.id }} confirmed" {
+		t.Errorf("subject = %q, want template preserved", nc.SMTP.Subject)
+	}
+}
+
+func TestParseExternalCallSMTPRejectsInvalid(t *testing.T) {
+	bad := []string{
+		`{"type":"external_call","http_config":{"url":"https://example.com"},"smtp_config":{"to":["a@example.com"],"text":"x"}}`,                                              // http+smtp
+		`{"type":"external_call","execution_config":{"command":["/bin/echo"]},"smtp_config":{"to":["a@example.com"],"text":"x"}}`,                                             // smtp+execution
+		`{"type":"external_call","http_config":{"url":"https://example.com"},"execution_config":{"command":["/bin/echo"]},"smtp_config":{"to":["a@example.com"],"text":"x"}}`, // all three
+		`{"type":"external_call","smtp_config":{"text":"x"}}`,                                                                                                                 // missing to
+		`{"type":"external_call","smtp_config":{"to":[],"text":"x"}}`,                                                                                                         // empty to
+		`{"type":"external_call","smtp_config":{"to":["a@example.com"]}}`,                                                                                                     // missing body
+		`{"type":"external_call","smtp_config":{"to":["not-an-address"],"text":"x"}}`,                                                                                         // bad static address
+		`{"type":"external_call","smtp_config":{"to":[""],"text":"x"}}`,                                                                                                       // blank address
+		`{"type":"external_call","smtp_config":{"to":["a@example.com"],"from":"bad","text":"x"}}`,                                                                             // bad static from
+		"{\"type\":\"external_call\",\"smtp_config\":{\"to\":[\"a@example.com\"],\"subject\":\"a\\nb\",\"text\":\"x\"}}",                                                      // multi-line subject
+		`{"type":"external_call","smtp_config":{"to":["a@example.com"],"html":"<p>x</p>","file":{"path":"t.html"}}}`,                                                          // file + inline html
+		`{"type":"external_call","smtp_config":{"to":["a@example.com"],"file":{"path":""}}}`,                                                                                  // empty file path
+		`{"type":"external_call","smtp_config":{"to":["a@example.com"],"file":{"path":"t.txt"}}}`,                                                                             // unknown static extension
+		`{"type":"external_call","smtp_config":{"to":["a@example.com"],"file":{"path":"t.html","data":[1,2]}}}`,                                                               // non-object data
+		`{"type":"external_call","smtp_config":{"to":["a@example.com"],"file":{"path":"t.html","data":"x"}}}`,                                                                 // non-object data
+		`{"type":"external_call","smtp_config":{"to":["a@example.com"],"file":{"path":"t.html","data":{"bad-key":1}}}}`,                                                       // invalid data key
+	}
+	for _, raw := range bad {
+		if _, err := model.ParseNodeContent([]byte(raw), testLimits); err == nil {
+			t.Errorf("ParseNodeContent(%s) error = nil, want error", raw)
+		}
+	}
+}
+
+func TestParseExternalCallSMTPFile(t *testing.T) {
+	// File-only body parses, with data preserved raw.
+	nc := mustParseContent(t, `{
+		"type": "external_call",
+		"smtp_config": {
+			"to": ["a@example.com"],
+			"subject": "s",
+			"file": {"path": "s3://mail-templates/order.html", "data": {"name": "{{ user.name }}"}}
+		}
+	}`)
+	if nc.SMTP.File == nil || nc.SMTP.File.Path != "s3://mail-templates/order.html" {
+		t.Fatalf("file = %+v, want s3 path", nc.SMTP.File)
+	}
+	if string(nc.SMTP.File.Data) != `{"name": "{{ user.name }}"}` {
+		t.Errorf("data = %s, want raw JSON preserved", nc.SMTP.File.Data)
+	}
+	// File + inline text parses, and the extension check is case-insensitive.
+	nc = mustParseContent(t, `{
+		"type": "external_call",
+		"smtp_config": {"to": ["a@example.com"], "text": "t", "file": {"path": "local/order.HTML"}}
+	}`)
+	if nc.SMTP.File == nil || nc.SMTP.Text != "t" {
+		t.Errorf("file+text = %+v, want both", nc.SMTP)
+	}
+	// A templated path defers the extension check to execution time.
+	nc = mustParseContent(t, `{
+		"type": "external_call",
+		"smtp_config": {"to": ["a@example.com"], "file": {"path": "{{ template.path }}"}}
+	}`)
+	if nc.SMTP.File == nil || nc.SMTP.File.Path != "{{ template.path }}" {
+		t.Errorf("file = %+v, want template preserved", nc.SMTP.File)
+	}
+	// Data may be omitted for a placeholder-free file.
+	nc = mustParseContent(t, `{
+		"type": "external_call",
+		"smtp_config": {"to": ["a@example.com"], "file": {"path": "notice.htm"}}
+	}`)
+	if nc.SMTP.File == nil || len(nc.SMTP.File.Data) != 0 {
+		t.Errorf("file = %+v, want path with no data", nc.SMTP.File)
+	}
+}
+
 func TestParseGroupNode(t *testing.T) {
 	nc := mustParseContent(t, `{
 		"type": "group",

@@ -3,8 +3,8 @@
 # This YAML is the source a workflow builder would save as the workflow
 # definition content (JSON). Every node id is a UUIDv7 and must be unique.
 # Accepted node types: script, conditions, input, group, output,
-# external_call (http_config or execution_config), poller (one of
-# http, redis, or rabbitmq), parallel_start, and parallel_end.
+# external_call (http_config, execution_config, or smtp_config), poller
+# (one of http, redis, or rabbitmq), parallel_start, and parallel_end.
 # Docs-only draft 2020-12 JSON Schemas, per type, are served on the
 # read paths: `schema` on node definition reads, `schemas` (used types
 # only) on workflow definition reads.
@@ -21,9 +21,9 @@
 #     node id); input nodes write the accepted payload to output_property
 #     (bare key, blank = node id); external calls write a result object ({Status, Headers, Body} for
 #     http_config, {ExitCode, Stdout, Stderr, TimedOut, Truncated} for
-#     execution_config); output nodes write a
-#     {Channel, Destination, MessageID} receipt; conditions
-#     nodes do not write output.
+#     execution_config, {To, Cc, Bcc, From, Subject} for smtp_config);
+#     output nodes write a {Channel, Destination, MessageID} receipt;
+#     conditions nodes do not write output.
 #   - input nodes park the instance with waiting reason "input"; clients
 #     deliver a payload with an Idempotency-Key. The channel picks the
 #     transport: "http" -> PUT /v1/workflow/instance/{id}/input,
@@ -204,8 +204,10 @@ nodes:
   # boundaries are generated automatically; file fields are not supported.
   # The sibling variant execution_config runs an allowlisted command instead
   # (direct argv, never a shell; command[0] must be an absolute path in
-  # engine.exec_allowlist); see the commented example below the poller
-  # block. Exactly one of http_config / execution_config is required.
+  # engine.exec_allowlist), and smtp_config sends one templated email
+  # through the engine.smtp relay; see the commented examples below the
+  # poller block. Exactly one of http_config / execution_config /
+  # smtp_config is required.
   - type: external_call
     id: "11111111-1111-7111-8111-111111111105"
     name: "Notify"
@@ -351,6 +353,51 @@ nodes:
 #     command: ["/usr/bin/convert", "{{ job.source }}", "-resize", "200x200", "{{ job.target }}"]
 #     stdin: "{{ job.label }}"
 #   output_property: thumbnail
+#   next_node: "11111111-1111-7111-8111-111111111109"
+
+# ---------------------------------------------------------------------------
+# External-call smtp_config example (commented). Sends one templated email
+# through the engine.smtp relay: every string field renders {{ path }}
+# placeholders against the workflow context. A lone-placeholder recipient
+# element splices a typed string list; relay host, port, and credentials
+# live in server config, never here. The node output is
+# {To, Cc, Bcc, From, Subject} (bodies never echoed). Delivery failures
+# fail the node with reason smtp (on_failure routing when set instead).
+# SMTP has no idempotency: a retry or recovery requeue can deliver twice.
+# ---------------------------------------------------------------------------
+#
+# - type: external_call
+#   id: "22222222-2222-7222-8222-222222222230"
+#   name: "Confirm order"
+#   timeout: 30s
+#   smtp_config:
+#     to: ["{{ user.email }}"]
+#     subject: "Order {{ order.id }} confirmed"
+#     text: "Hi {{ user.name }}, total {{ order.total }}."
+#     html: "<p>Hi {{ user.name }}</p>"
+#   output_property: mail
+#   next_node: "11111111-1111-7111-8111-111111111109"
+#
+# File-body variant (commented): file supplies the HTML part instead of
+# inline html (mutually exclusive; text may accompany either). The rendered
+# path must end .html/.htm. Local paths resolve under the operator root
+# engine.smtp.template_dir; s3:// paths read via the global object store.
+# File contents render {{ path }} placeholders against data alone, and
+# every data string leaf renders against workflow context first.
+#
+# - type: external_call
+#   id: "22222222-2222-7222-8222-222222222231"
+#   name: "Confirm order from file"
+#   timeout: 30s
+#   smtp_config:
+#     to: ["{{ user.email }}"]
+#     subject: "Order {{ order.id }} confirmed"
+#     file:
+#       path: "order.html"   # or "s3://mail-templates/order.html"
+#       data:
+#         name: "{{ user.name }}"
+#         total: "{{ order.total }}"
+#   output_property: mail
 #   next_node: "11111111-1111-7111-8111-111111111109"
 
 # ---------------------------------------------------------------------------

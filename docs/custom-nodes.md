@@ -98,7 +98,7 @@ custom type. Other builtins reject it at parse.
 - Bad `config` → `node type %q: invalid config: <node error>`, at
   definition/workflow parse time, never runtime.
 - Builtin executable field on custom node (`script`, `http_config`,
-  `http`, `nodes`, …) → `does not support that field; custom nodes
+  `smtp_config`, `http`, `nodes`, …) → `does not support that field; custom nodes
   carry only type and config`.
 - Duplicate registration / builtin collision → startup panic naming
   type. Facade rolls back model entry on executor conflict so no

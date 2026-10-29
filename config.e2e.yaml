@@ -139,12 +139,25 @@ engine:
   exec_allowlist:
     - "/bin/echo"
     - "/bin/ls"
+  # Workflow-mail relay serving smtp external_call nodes (see config.yaml).
+  # Disabled here: an empty host means definitions still parse but sends
+  # fail at execution time. Distinct from auth.local.smtp (verification
+  # mail only).
+  smtp:
+    host: ""
+    port: 587
+    username: ""
+    password: ""
+    from: ""
+    use_tls: true
+    template_dir: ""
   # Env snapshot deny list. At instance creation, BEELINEWF_* process env is
   # snapshotted into the instance context under the reserved env root, and
   # these patterns are the credentials that never enter a workflow template:
   # BEELINEWF_API_TOKEN, BEELINEWF_AUTH_*, BEELINEWF_SYSTEM_*, BEELINEWF_INFRA_*,
-  # and any BEELINEWF_*_DSN (PostgreSQL, Redis, RabbitMQ). A denied name is
-  # dropped from the snapshot and {{ env.<denied> }} resolves as "path not found".
+  # BEELINEWF_ENGINE_SMTP_PASSWORD, and any BEELINEWF_*_DSN (PostgreSQL,
+  # Redis, RabbitMQ). A denied name is dropped from the snapshot and
+  # {{ env.<denied> }} resolves as "path not found".
   #
   # Operator overrides: BEELINEWF_ENGINE_ENV_DENY_EXTRA,
   # BEELINEWF_ENGINE_ENV_ALLOW_EXCEPTIONS (comma-separated globs). These only

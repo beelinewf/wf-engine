@@ -10,7 +10,7 @@ import (
 	"github.com/beelinewf/wf-engine/pkg/jsfunc"
 )
 
-var errMissingExternalConfig = errors.New("external_call node has neither http nor execution config")
+var errMissingExternalConfig = errors.New("external_call node has neither http, execution, nor smtp config")
 
 func errConditionNotBoolean(i int) error {
 	return fmt.Errorf("condition %d must return a boolean", i)
@@ -142,11 +142,12 @@ func (e *DelayExecutor) Execute(_ context.Context, _ Request) (*Result, error) {
 	return &Result{Output: nil}, nil
 }
 
-// ExternalCallExecutor dispatches external_call nodes to the HTTP or command
-// executor based on which configuration the node carries.
+// ExternalCallExecutor dispatches external_call nodes to the HTTP, command,
+// or SMTP executor based on which configuration the node carries.
 type ExternalCallExecutor struct {
 	http *HTTPExecutor
 	cmd  *CommandExecutor
+	smtp *SMTPExecutor
 }
 
 func (e *ExternalCallExecutor) Execute(ctx context.Context, req Request) (*Result, error) {
@@ -155,6 +156,8 @@ func (e *ExternalCallExecutor) Execute(ctx context.Context, req Request) (*Resul
 		return e.http.Execute(ctx, req)
 	case req.Node.Execution != nil:
 		return e.cmd.Execute(ctx, req)
+	case req.Node.SMTP != nil:
+		return e.smtp.Execute(ctx, req)
 	default:
 		return nil, &NodeError{Node: req.Node, Reason: "external-call", Err: errMissingExternalConfig}
 	}

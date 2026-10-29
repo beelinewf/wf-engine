@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/mail"
 	"net/url"
 	"strings"
 	"time"
@@ -157,6 +158,7 @@ type NodeContent struct {
 	Storage        *InputStorageRef // input: multipart uploads, required exactly then
 	HTTP           *HTTPConfig      // external_call
 	Execution      *ExecutionConfig // external_call
+	SMTP           *SMTPConfig      // external_call
 	OutputProperty string
 	NextNode       string
 	// OnFailure routes execution failures on external_call, poller, and
@@ -318,6 +320,35 @@ type ExecutionConfig struct {
 	Stdin   string
 }
 
+// SMTPConfig describes one templated email sent through the operator relay.
+// Every string field renders {{ path }} placeholders against the request
+// template data at execution time; the relay host, port, and credentials
+// live in server config, never here.
+type SMTPConfig struct {
+	To      []string
+	Cc      []string
+	Bcc     []string
+	From    string
+	ReplyTo string
+	Subject string
+	Text    string
+	HTML    string
+	// File is the alternative HTML source to inline HTML; the two are
+	// mutually exclusive while Text may accompany either.
+	File *SMTPFileConfig
+}
+
+// SMTPFileConfig is the file HTML-body source of an SMTP message: the
+// rendered Path selects a template (s3://bucket/key via global storage,
+// otherwise a relative path under the operator template root) and Data
+// scopes the file's own {{ path }} placeholders.
+type SMTPFileConfig struct {
+	Path string
+	// Data is the raw JSON object whose string leaves render against
+	// workflow context first; the file then renders against it alone.
+	Data json.RawMessage
+}
+
 // PollerHTTPConfig describes repeated outbound HTTP calls. The first
 // request starts immediately; delay applies between attempts. until is
 // evaluated against the normalized response.
@@ -389,6 +420,7 @@ type rawNode struct {
 	Storage           *rawInputStorage         `json:"storage"`
 	HTTPConfig        *rawHTTPConfig           `json:"http_config"`
 	ExecutionConfig   *rawExecutionConfig      `json:"execution_config"`
+	SMTPConfig        *rawSMTPConfig           `json:"smtp_config"`
 	PollerHTTP        *rawPollerHTTPConfig     `json:"http"`
 	PollerRedis       *rawPollerRedisConfig    `json:"redis"`
 	PollerRabbitMQ    *rawPollerRabbitMQConfig `json:"rabbitmq"`
@@ -435,6 +467,23 @@ type rawHTTPConfig struct {
 type rawExecutionConfig struct {
 	Command []string `json:"command"`
 	Stdin   string   `json:"stdin"`
+}
+
+type rawSMTPConfig struct {
+	To      []string           `json:"to"`
+	Cc      []string           `json:"cc"`
+	Bcc     []string           `json:"bcc"`
+	From    string             `json:"from"`
+	ReplyTo string             `json:"reply_to"`
+	Subject string             `json:"subject"`
+	Text    string             `json:"text"`
+	HTML    string             `json:"html"`
+	File    *rawSMTPFileConfig `json:"file"`
+}
+
+type rawSMTPFileConfig struct {
+	Path string          `json:"path"`
+	Data json.RawMessage `json:"data"`
 }
 
 // rawPollerHTTPConfig mirrors the top-level http block of a poller node.
@@ -573,7 +622,7 @@ func parseReferencedNode(nc *NodeContent, r *rawNode) (*NodeContent, error) {
 	if r.ContextPath != nil {
 		return nil, errors.New("input node does not support context_path; use output_property")
 	}
-	if r.Script != nil || r.Conditions != nil || r.Channel != nil || r.FormID != nil || r.HTTPConfig != nil || r.ExecutionConfig != nil || r.Nodes != nil ||
+	if r.Script != nil || r.Conditions != nil || r.Channel != nil || r.FormID != nil || r.HTTPConfig != nil || r.ExecutionConfig != nil || r.SMTPConfig != nil || r.Nodes != nil ||
 		r.PollerHTTP != nil || r.PollerRedis != nil || r.PollerRabbitMQ != nil || len(r.Config) > 0 ||
 		len(r.Branches) > 0 || r.ParallelEndNodeID != nil || r.CombiningScript != nil || len(r.Delay) > 0 ||
 		// allowed_roles, allowed_users, record_actor, and public are the
@@ -781,15 +830,20 @@ func parseOutputNode(nc *NodeContent, r *rawNode, limits NodeLimits) error {
 	return nil
 }
 
-// parseExternalCallNode parses the http_config or execution_config of an
-// external_call node.
+// parseExternalCallNode parses the http_config, execution_config, or
+// smtp_config of an external_call node.
 func parseExternalCallNode(nc *NodeContent, r *rawNode, limits NodeLimits) error {
-	hasHTTP := r.HTTPConfig != nil
-	hasExec := r.ExecutionConfig != nil
-	if hasHTTP == hasExec {
-		return errors.New("external_call node requires exactly one of http_config or execution_config")
+	transports := 0
+	for _, present := range []bool{r.HTTPConfig != nil, r.ExecutionConfig != nil, r.SMTPConfig != nil} {
+		if present {
+			transports++
+		}
 	}
-	if hasHTTP {
+	if transports != 1 {
+		return errors.New("external_call node requires exactly one of http_config, execution_config, or smtp_config")
+	}
+	switch {
+	case r.HTTPConfig != nil:
 		cfg := r.HTTPConfig
 		if strings.TrimSpace(cfg.URL) == "" {
 			return errors.New("http_config.url is required")
@@ -798,7 +852,7 @@ func parseExternalCallNode(nc *NodeContent, r *rawNode, limits NodeLimits) error
 			return err
 		}
 		nc.HTTP = &HTTPConfig{URL: cfg.URL, Method: normalizeHTTPMethod(cfg.Method), Headers: cfg.Headers, Body: cfg.Body}
-	} else {
+	case r.ExecutionConfig != nil:
 		cmd := r.ExecutionConfig.Command
 		if len(cmd) == 0 {
 			return errors.New("execution_config.command must be non-empty")
@@ -809,6 +863,12 @@ func parseExternalCallNode(nc *NodeContent, r *rawNode, limits NodeLimits) error
 			}
 		}
 		nc.Execution = &ExecutionConfig{Command: cmd, Stdin: r.ExecutionConfig.Stdin}
+	default:
+		smtp, err := parseSMTPConfig(r.SMTPConfig)
+		if err != nil {
+			return err
+		}
+		nc.SMTP = smtp
 	}
 	d, err := nodeTimeout(r.Timeout, limits)
 	if err != nil {
@@ -816,6 +876,113 @@ func parseExternalCallNode(nc *NodeContent, r *rawNode, limits NodeLimits) error
 	}
 	nc.Timeout = d
 	return nil
+}
+
+// parseSMTPConfig validates the smtp_config message block. Fields holding a
+// {{ path }} placeholder defer value validation to execution time, when they
+// render against the request template data; static values fail fast here. No
+// file I/O happens: definitions must parse on hosts where the template may
+// not exist.
+func parseSMTPConfig(cfg *rawSMTPConfig) (*SMTPConfig, error) {
+	if len(cfg.To) == 0 {
+		return nil, errors.New("smtp_config.to is required")
+	}
+	for i, addr := range cfg.To {
+		if err := validateStaticAddress(addr, fmt.Sprintf("smtp_config.to[%d]", i)); err != nil {
+			return nil, err
+		}
+	}
+	for i, addr := range cfg.Cc {
+		if err := validateStaticAddress(addr, fmt.Sprintf("smtp_config.cc[%d]", i)); err != nil {
+			return nil, err
+		}
+	}
+	for i, addr := range cfg.Bcc {
+		if err := validateStaticAddress(addr, fmt.Sprintf("smtp_config.bcc[%d]", i)); err != nil {
+			return nil, err
+		}
+	}
+	if strings.TrimSpace(cfg.From) != "" {
+		if err := validateStaticAddress(cfg.From, "smtp_config.from"); err != nil {
+			return nil, err
+		}
+	}
+	if strings.TrimSpace(cfg.ReplyTo) != "" {
+		if err := validateStaticAddress(cfg.ReplyTo, "smtp_config.reply_to"); err != nil {
+			return nil, err
+		}
+	}
+	if !contextpath.HasTemplate(cfg.Subject) && strings.ContainsAny(cfg.Subject, "\r\n") {
+		return nil, errors.New("smtp_config.subject must be a single line")
+	}
+	if cfg.File != nil && cfg.HTML != "" {
+		return nil, errors.New("smtp_config.file and smtp_config.html are mutually exclusive")
+	}
+	if cfg.Text == "" && cfg.HTML == "" && cfg.File == nil {
+		return nil, errors.New("smtp_config requires one of text, html, or file")
+	}
+	out := &SMTPConfig{
+		To: cfg.To, Cc: cfg.Cc, Bcc: cfg.Bcc,
+		From: cfg.From, ReplyTo: cfg.ReplyTo,
+		Subject: cfg.Subject, Text: cfg.Text, HTML: cfg.HTML,
+	}
+	if cfg.File != nil {
+		file, err := parseSMTPFileConfig(cfg.File)
+		if err != nil {
+			return nil, err
+		}
+		out.File = file
+	}
+	return out, nil
+}
+
+// validateStaticAddress requires a static address to be a parseable,
+// single-line mailbox. Templated values render at execution time and are
+// kept as authored.
+func validateStaticAddress(addr, field string) error {
+	if contextpath.HasTemplate(addr) {
+		return nil
+	}
+	trimmed := strings.TrimSpace(addr)
+	if trimmed == "" {
+		return fmt.Errorf("%s must be a non-empty email address", field)
+	}
+	if strings.ContainsAny(trimmed, "\r\n") {
+		return fmt.Errorf("%s must be a single line", field)
+	}
+	if _, err := mail.ParseAddress(trimmed); err != nil {
+		return fmt.Errorf("%s %q is not a valid email address", field, addr)
+	}
+	return nil
+}
+
+// parseSMTPFileConfig validates the file HTML-body source: a non-empty path
+// with an .html/.htm extension when untemplated, and an optional data object
+// whose keys are the bare context keys the file placeholders resolve against.
+func parseSMTPFileConfig(cfg *rawSMTPFileConfig) (*SMTPFileConfig, error) {
+	if strings.TrimSpace(cfg.Path) == "" {
+		return nil, errors.New("smtp_config.file.path is required")
+	}
+	if !contextpath.HasTemplate(cfg.Path) {
+		lower := strings.ToLower(cfg.Path)
+		if !strings.HasSuffix(lower, ".html") && !strings.HasSuffix(lower, ".htm") {
+			return nil, fmt.Errorf("smtp_config.file.path %q must end in .html or .htm", cfg.Path)
+		}
+	}
+	var data json.RawMessage
+	if len(cfg.Data) > 0 && strings.TrimSpace(string(cfg.Data)) != "null" {
+		var obj map[string]any
+		if err := json.Unmarshal(cfg.Data, &obj); err != nil {
+			return nil, fmt.Errorf("smtp_config.file.data must be a JSON object: %w", err)
+		}
+		for key := range obj {
+			if !contextpath.ValidKey(key) {
+				return nil, fmt.Errorf("smtp_config.file.data key %q must be a bare context key", key)
+			}
+		}
+		data = cfg.Data
+	}
+	return &SMTPFileConfig{Path: cfg.Path, Data: data}, nil
 }
 
 // validateStaticHTTPURL requires a static URL to be absolute http(s).
@@ -1399,7 +1566,7 @@ func parseAllowedMIMETypes(raw []string) ([]string, error) {
 // were already parsed by the caller.
 func parseCustomNode(nc *NodeContent, r *rawNode, limits NodeLimits) (*NodeContent, error) {
 	if r.Script != nil || r.Conditions != nil || r.Channel != nil || r.Validation != nil ||
-		r.FormID != nil || r.HTTPConfig != nil || r.ExecutionConfig != nil ||
+		r.FormID != nil || r.HTTPConfig != nil || r.ExecutionConfig != nil || r.SMTPConfig != nil ||
 		r.PollerHTTP != nil || r.PollerRedis != nil || r.PollerRabbitMQ != nil ||
 		len(r.Branches) > 0 || r.ParallelEndNodeID != nil || r.CombiningScript != nil ||
 		r.Nodes != nil || r.StartNodeID != nil || r.ContextPath != nil || len(r.Delay) > 0 ||

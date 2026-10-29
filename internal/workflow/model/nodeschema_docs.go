@@ -166,7 +166,7 @@ const groupNodeSchemaJSON = `{
 
 const externalCallNodeSchemaJSON = `{
   "title": "beelinewf external_call node",
-  "description": "Makes exactly one outbound HTTP call or executes an allowlisted command. Go parsers stay authoritative.",
+  "description": "Makes exactly one outbound HTTP call, executes an allowlisted command, or sends one templated email. Go parsers stay authoritative.",
   "type": "object",
   "properties": {
     "type": { "const": "external_call" },
@@ -192,6 +192,32 @@ const externalCallNodeSchemaJSON = `{
       "required": ["command"],
       "additionalProperties": false
     },
+    "smtp_config": {
+      "type": "object",
+      "description": "Templated email sent through the operator relay (engine.smtp). Every string field renders {{ path }} placeholders against workflow context. SMTP has no idempotency: a recovery requeue or retry_on_recovery can deliver twice; a deterministic Message-ID aids downstream dedup.",
+      "properties": {
+        "to": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 }, "description": "Recipients. A lone-placeholder element expands a typed string list from context." },
+        "cc": { "type": "array", "items": { "type": "string" } },
+        "bcc": { "type": "array", "items": { "type": "string" } },
+        "from": { "type": "string", "description": "Sender override; blank defaults to the relay from." },
+        "reply_to": { "type": "string" },
+        "subject": { "type": "string", "description": "Must render to a single line." },
+        "text": { "type": "string" },
+        "html": { "type": "string", "description": "Inline HTML part; mutually exclusive with file." },
+        "file": {
+          "type": "object",
+          "description": "Alternative HTML source to inline html, mutually exclusive with it. The rendered path must end .html/.htm; s3://bucket/key reads via global storage, any other relative path reads under engine.smtp.template_dir. Contents render {{ path }} placeholders against data alone, never the full workflow context.",
+          "properties": {
+            "path": { "type": "string", "minLength": 1 },
+            "data": { "type": "object", "description": "Keys must be bare context keys; every string leaf renders against workflow context first." }
+          },
+          "required": ["path"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["to"],
+      "additionalProperties": false
+    },
     "timeout": { "$ref": "#/$defs/duration" },
     "output_property": { "$ref": "#/$defs/contextKey" },
     "next_node": { "$ref": "#/$defs/nodeId" },
@@ -199,7 +225,7 @@ const externalCallNodeSchemaJSON = `{
     ` + commonNodeSchemaFields + `
   },
   "required": ["type"],
-  "oneOf": [{ "required": ["http_config"] }, { "required": ["execution_config"] }],
+  "oneOf": [{ "required": ["http_config"] }, { "required": ["execution_config"] }, { "required": ["smtp_config"] }],
   "additionalProperties": false
 }`
 

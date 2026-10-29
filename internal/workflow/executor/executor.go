@@ -39,6 +39,14 @@ type Limits struct {
 	// Values <= 0 fall back to DefaultHTTPMaxInFlightPerHost. Ignored
 	// when HTTPBulkhead is non-nil.
 	HTTPMaxInFlightPerHost int
+	// SMTPFrom is the default sender address for workflow mail, used when
+	// the node sets no from of its own. It mirrors the relay from in
+	// server config.
+	SMTPFrom string
+	// SMTPTemplateDir roots local smtp file bodies: a file path that is
+	// not s3:// resolves under this directory. Empty disables local
+	// files; definitions still parse.
+	SMTPTemplateDir string
 }
 
 // Request is the input to a node execution.
@@ -135,6 +143,16 @@ type CommandResult struct {
 	Truncated bool
 }
 
+// SMTPResult is the output of a workflow mail send: the recipients, the
+// sender, and the subject. Bodies are never echoed back into context.
+type SMTPResult struct {
+	To      []string
+	Cc      []string
+	Bcc     []string
+	From    string
+	Subject string
+}
+
 // Dependencies carries the optional infrastructure the executors need.
 type Dependencies struct {
 	// Output is optional: when nil, output nodes fail with "output publisher
@@ -146,6 +164,12 @@ type Dependencies struct {
 	// RabbitPoller is optional: when nil, rabbitmq poller nodes fail with a
 	// missing-transport error.
 	RabbitPoller RabbitPollerClient
+	// SMTPSender is optional: when nil, smtp external_call nodes fail
+	// with "smtp is not configured" instead of executing.
+	SMTPSender SMTPSender
+	// SMTPObjects is optional: when nil, smtp file bodies with s3://
+	// paths fail instead of executing.
+	SMTPObjects SMTPObjectReader
 }
 
 // NewExecutors builds the executor set for every node type, merging
@@ -162,7 +186,7 @@ func NewExecutors(limits Limits, funcs *jsfunc.Registry, deps Dependencies) map[
 		model.NodeTypeScript:       &ScriptExecutor{funcs: funcs},
 		model.NodeTypeConditions:   &ConditionExecutor{funcs: funcs},
 		model.NodeTypeInput:        &InputExecutor{funcs: funcs},
-		model.NodeTypeExternalCall: &ExternalCallExecutor{http: httpEx, cmd: NewCommandExecutor(limits.ExecAllowlist, limits.MaxOutputBytes)},
+		model.NodeTypeExternalCall: &ExternalCallExecutor{http: httpEx, cmd: NewCommandExecutor(limits.ExecAllowlist, limits.MaxOutputBytes), smtp: NewSMTPExecutor(limits, deps)},
 		model.NodeTypeOutput:       &OutputExecutor{publisher: deps.Output},
 		model.NodeTypePoller:       pollerEx,
 		model.NodeTypeDelay:        &DelayExecutor{},

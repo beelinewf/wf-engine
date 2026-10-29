@@ -1636,6 +1636,161 @@ func TestLoadRejectsNonPositiveMultipartLimits(t *testing.T) {
 	}
 }
 
+// Workflow mail stays disabled until a host is set; the port and TLS
+// defaults keep every key env-addressable.
+func TestLoadEngineSMTPDefaultsToDisabled(t *testing.T) {
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+
+	cfg, err := configuration.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	smtp := cfg.Engine.SMTP
+	if smtp.Enabled() {
+		t.Errorf("smtp = %+v, want disabled by default", smtp)
+	}
+	if smtp.Port != 587 || !smtp.UseTLS || smtp.TemplateDir != "" {
+		t.Errorf("smtp = %+v, want port 587 / TLS / no template dir", smtp)
+	}
+}
+
+// Every relay key rides the BEELINEWF_ENGINE_SMTP_* environment contract,
+// so compose wires Mailpit without rewriting config files.
+func TestLoadEngineSMTPFromEnv(t *testing.T) {
+	dir := t.TempDir()
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+	setenv(t, "BEELINEWF_ENGINE_SMTP_HOST", "mailpit")
+	setenv(t, "BEELINEWF_ENGINE_SMTP_PORT", "1025")
+	setenv(t, "BEELINEWF_ENGINE_SMTP_USERNAME", "user")
+	setenv(t, "BEELINEWF_ENGINE_SMTP_PASSWORD", "pass")
+	setenv(t, "BEELINEWF_ENGINE_SMTP_FROM", "noreply@example.test")
+	setenv(t, "BEELINEWF_ENGINE_SMTP_USE_TLS", "false")
+	setenv(t, "BEELINEWF_ENGINE_SMTP_TEMPLATE_DIR", dir)
+
+	cfg, err := configuration.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	smtp := cfg.Engine.SMTP
+	if !smtp.Enabled() {
+		t.Error("smtp is disabled, want the env relay enabled")
+	}
+	if smtp.Host != "mailpit" || smtp.Port != 1025 || smtp.Username != "user" ||
+		smtp.Password != "pass" || smtp.From != "noreply@example.test" || smtp.UseTLS || smtp.TemplateDir != dir {
+		t.Errorf("smtp = %+v, want the env values", smtp)
+	}
+}
+
+// Relay settings without a host are a misconfiguration, not a disabled
+// relay: a typo'd host must fail the boot instead of silently disabling
+// workflow mail.
+func TestLoadRejectsPartialEngineSMTP(t *testing.T) {
+	cases := map[string]map[string]string{
+		"from without host": {
+			"BEELINEWF_ENGINE_SMTP_FROM": "noreply@example.test",
+		},
+		"password without host": {
+			"BEELINEWF_ENGINE_SMTP_PASSWORD": "pass",
+		},
+		"template dir without host": {
+			"BEELINEWF_ENGINE_SMTP_TEMPLATE_DIR": t.TempDir(),
+		},
+	}
+	for name, env := range cases {
+		t.Run(name, func(t *testing.T) {
+			setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+			for k, v := range env {
+				setenv(t, k, v)
+			}
+			_, err := configuration.Load()
+			if err == nil {
+				t.Fatal("Load() error = nil, want the partial relay rejected")
+			}
+			if !strings.Contains(err.Error(), "engine.smtp") {
+				t.Errorf("error = %q, want it to name engine.smtp", err)
+			}
+		})
+	}
+}
+
+func TestLoadRejectsBadEngineSMTP(t *testing.T) {
+	dir := t.TempDir()
+	file, err := os.Create(filepath.Join(dir, "not-a-dir"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = file.Close()
+	cases := map[string]map[string]string{
+		"host without from": {
+			"BEELINEWF_ENGINE_SMTP_HOST": "relay.example.test",
+		},
+		"bad port": {
+			"BEELINEWF_ENGINE_SMTP_HOST": "relay.example.test",
+			"BEELINEWF_ENGINE_SMTP_FROM": "noreply@example.test",
+			"BEELINEWF_ENGINE_SMTP_PORT": "0",
+		},
+		"missing template dir": {
+			"BEELINEWF_ENGINE_SMTP_HOST":         "relay.example.test",
+			"BEELINEWF_ENGINE_SMTP_FROM":         "noreply@example.test",
+			"BEELINEWF_ENGINE_SMTP_TEMPLATE_DIR": filepath.Join(dir, "does-not-exist"),
+		},
+		"template dir is a file": {
+			"BEELINEWF_ENGINE_SMTP_HOST":         "relay.example.test",
+			"BEELINEWF_ENGINE_SMTP_FROM":         "noreply@example.test",
+			"BEELINEWF_ENGINE_SMTP_TEMPLATE_DIR": file.Name(),
+		},
+	}
+	for name, env := range cases {
+		t.Run(name, func(t *testing.T) {
+			setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+			for k, v := range env {
+				setenv(t, k, v)
+			}
+			_, err := configuration.Load()
+			if err == nil {
+				t.Fatalf("Load() error = nil, want rejection of %s", name)
+			}
+			if !strings.Contains(err.Error(), "engine.smtp") {
+				t.Errorf("error = %q, want it to name engine.smtp", err)
+			}
+		})
+	}
+}
+
+// The log sender needs no sender address, mirroring auth.local.smtp.
+func TestLoadEngineSMTPLogHostNeedsNoFrom(t *testing.T) {
+	setenv(t, "BEELINEWF_INFRA_POSTGRESQL_DSN", testDSN)
+	setenv(t, "BEELINEWF_ENGINE_SMTP_HOST", "log")
+
+	cfg, err := configuration.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !cfg.Engine.SMTP.Enabled() {
+		t.Error("smtp is disabled, want the log relay enabled")
+	}
+}
+
+// The shipped configs document the relay disabled, so a fresh checkout
+// boots and the keys stay greppable.
+func TestShippedConfigsDisableEngineSMTP(t *testing.T) {
+	setenv(t, "BEELINEWF_API_TOKEN", "e2e-service-token")
+	for _, name := range []string{"config.yaml", "config.e2e.yaml"} {
+		path := filepath.Join("..", "..", name)
+		if _, err := os.Stat(path); err != nil {
+			t.Skipf("%s not available: %v", name, err)
+		}
+		cfg, err := configuration.Load(configuration.WithConfigFile(path))
+		if err != nil {
+			t.Errorf("Load(%s) error = %v", name, err)
+			continue
+		}
+		if cfg.Engine.SMTP.Enabled() {
+			t.Errorf("%s: smtp is enabled, want the shipped config disabled", name)
+		}
+	}
+}
+
 // The shipped configs document the storage section disabled plus the
 // multipart limits, so a fresh checkout boots and the keys stay greppable.
 func TestShippedConfigsCarryStorageAndMultipart(t *testing.T) {

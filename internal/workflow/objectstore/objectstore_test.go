@@ -1,6 +1,9 @@
 package objectstore_test
 
 import (
+	"context"
+	"io"
+	"strings"
 	"testing"
 
 	"github.com/beelinewf/wf-engine/internal/workflow/objectstore"
@@ -37,5 +40,32 @@ func TestNewMinioStoreBuildsClient(t *testing.T) {
 		if st == nil {
 			t.Errorf("NewMinioStore(%q) = nil, want a store", endpoint)
 		}
+	}
+}
+
+// Get opens a lazy reader: against a dead endpoint the open succeeds and
+// the read fails, so callers must cap and handle read errors.
+func TestMinioStoreGetReadsThroughClient(t *testing.T) {
+	st, err := objectstore.NewMinioStore("127.0.0.1:1", "", "ak", "sk", false)
+	if err != nil {
+		t.Fatalf("NewMinioStore() error = %v", err)
+	}
+	rc, err := st.Get(context.Background(), "bucket", "key")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	defer func() { _ = rc.Close() }()
+	if _, err := io.ReadAll(rc); err == nil {
+		t.Fatal("read error = nil, want the dead endpoint to fail")
+	}
+}
+
+func TestMinioStoreGetRejectsBadBucket(t *testing.T) {
+	st, err := objectstore.NewMinioStore("127.0.0.1:1", "", "ak", "sk", false)
+	if err != nil {
+		t.Fatalf("NewMinioStore() error = %v", err)
+	}
+	if _, err := st.Get(context.Background(), "", "key"); err == nil || !strings.Contains(err.Error(), "objectstore: get") {
+		t.Errorf("Get() error = %v, want wrapped get failure", err)
 	}
 }
