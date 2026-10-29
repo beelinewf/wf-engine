@@ -27,31 +27,43 @@ func nullableJSONCol(raw json.RawMessage) datatypes.JSON {
 	return datatypes.JSON(raw)
 }
 
-// UserToModel maps a domain user to its persistence model.
+// UserToModel maps a domain user to its persistence model. It carries
+// no verification-token columns: those live below the domain, so a write
+// built from this mapping must name its columns explicitly (never Save)
+// or it clears an outstanding token and its pacing timestamp.
 func UserToModel(u model.User) UserModel {
 	return UserModel{
-		ID:        u.ID,
-		Subject:   u.Subject,
-		Issuer:    u.Issuer,
-		Name:      u.Name,
-		Email:     u.Email,
-		Metadata:  jsonCol(u.Metadata, "{}"),
-		CreatedAt: u.CreatedAt,
-		UpdatedAt: u.UpdatedAt,
+		ID:              u.ID,
+		Subject:         u.Subject,
+		Issuer:          u.Issuer,
+		Name:            u.Name,
+		Email:           u.Email,
+		Metadata:        jsonCol(u.Metadata, "{}"),
+		PasswordHash:    u.PasswordHash,
+		IsActive:        u.IsActive,
+		EmailVerifiedAt: u.EmailVerifiedAt,
+		CreatedAt:       u.CreatedAt,
+		UpdatedAt:       u.UpdatedAt,
 	}
 }
 
-// UserFromModel maps a persistence user back to the domain.
+// UserFromModel maps a persistence user back to the domain. Roles are
+// left for the repository to fill: they live in user_roles, not on this
+// row.
 func UserFromModel(m UserModel) model.User {
 	return model.User{
-		ID:        m.ID,
-		Subject:   m.Subject,
-		Issuer:    m.Issuer,
-		Name:      m.Name,
-		Email:     m.Email,
-		Metadata:  json.RawMessage(m.Metadata),
-		CreatedAt: m.CreatedAt,
-		UpdatedAt: m.UpdatedAt,
+		ID:                 m.ID,
+		Subject:            m.Subject,
+		Issuer:             m.Issuer,
+		Name:               m.Name,
+		Email:              m.Email,
+		Metadata:           json.RawMessage(m.Metadata),
+		PasswordHash:       m.PasswordHash,
+		IsActive:           m.IsActive,
+		EmailVerifiedAt:    m.EmailVerifiedAt,
+		VerificationSentAt: m.VerificationSentAt,
+		CreatedAt:          m.CreatedAt,
+		UpdatedAt:          m.UpdatedAt,
 	}
 }
 

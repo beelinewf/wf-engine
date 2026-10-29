@@ -23,6 +23,7 @@ func setupTestDB(t *testing.T) *gorm.DB {
 		&repository.UserModel{},
 		&repository.RoleModel{},
 		&repository.RolePermissionModel{},
+		&repository.UserRoleModel{},
 		&repository.SecretModel{},
 		&repository.FormModel{},
 		&repository.NodeDefinitionModel{},
@@ -45,23 +46,31 @@ func setupTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("AutoMigrate() error = %v", err)
 	}
 
-	// AutoMigrate creates tables but not the fk_role_permissions_role
-	// foreign key the production migration declares, so add it here to keep
-	// the test schema faithful. Test-only: production owns this constraint
-	// via Atlas. The guard keeps per-test setup idempotent.
+	// AutoMigrate creates tables but not the foreign keys the production
+	// migration declares, so add them here to keep the test schema
+	// faithful. Test-only: production owns these constraints via Atlas.
+	// The guards keep per-test setup idempotent.
 	if err := db.Exec(`DO $$ BEGIN
 		IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_role_permissions_role') THEN
 			ALTER TABLE role_permissions ADD CONSTRAINT fk_role_permissions_role
 				FOREIGN KEY (role) REFERENCES roles (name) ON UPDATE RESTRICT ON DELETE RESTRICT;
 		END IF;
+		IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_user_roles_user') THEN
+			ALTER TABLE user_roles ADD CONSTRAINT fk_user_roles_user
+				FOREIGN KEY (user_id) REFERENCES users (id) ON UPDATE RESTRICT ON DELETE RESTRICT;
+		END IF;
+		IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_user_roles_role') THEN
+			ALTER TABLE user_roles ADD CONSTRAINT fk_user_roles_role
+				FOREIGN KEY (role) REFERENCES roles (name) ON UPDATE RESTRICT ON DELETE RESTRICT;
+		END IF;
 	END $$`).Error; err != nil {
-		t.Fatalf("add fk_role_permissions_role: %v", err)
+		t.Fatalf("add role foreign keys: %v", err)
 	}
 
 	// Truncate all tables in one statement so foreign-key ordering never
 	// blocks the reset.
 	if err := db.Exec(`TRUNCATE TABLE
-		role_permissions, roles,
+		user_roles, role_permissions, roles,
 		secrets, forms, workflow_definition_form_refs, node_definition_form_refs,
 		status_update_outbox, node_context_history, input_deliveries, workflow_instance_events, node_instances,
 		workflow_instances, workflow_requests, cron_schedules, schedule_fires, workflow_definition_node_refs,
@@ -71,7 +80,7 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	}
 
 	// Seed the system user; definition rows carry created_by foreign keys.
-	system := model.User{ID: "11111111-1111-7111-8111-111111111111", Name: "system", Email: "system@localhost"}
+	system := model.User{ID: "11111111-1111-7111-8111-111111111111", Name: "system", Email: "system@localhost", IsActive: true}
 	if err := repository.UpsertSystemUser(ctx, db, system); err != nil {
 		t.Fatalf("seed system user: %v", err)
 	}
@@ -82,7 +91,7 @@ func TestUpsertSystemUserCreatesThenUpdates(t *testing.T) {
 	db := setupTestDB(t)
 	ctx := context.Background()
 
-	u := model.User{ID: "11111111-1111-7111-8111-111111111111", Name: "system", Email: "system@localhost"}
+	u := model.User{ID: "11111111-1111-7111-8111-111111111111", Name: "system", Email: "system@localhost", IsActive: true}
 	if err := repository.UpsertSystemUser(ctx, db, u); err != nil {
 		t.Fatalf("UpsertSystemUser() error = %v", err)
 	}

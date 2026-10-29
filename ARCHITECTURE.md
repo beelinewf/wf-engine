@@ -42,9 +42,10 @@ behind narrow interfaces.
 | `internal/workflow/inputtransport` | Broker input consumers: Redis pattern subscriber (`workflow:input:*`, envelope decode) and RabbitMQ queue consumer (`NodeInstanceId` + `IdempotencyKey` headers, `message_id` fallback, manual ack/requeue), both delivering through `InstanceService.DeliverInput` with the matching source channel.                                                                                                                                                                                                                                                                                                                                                                                      |
 | `internal/workflow/statusupdate`   | Status-notification dispatcher: claims the oldest unresolved outbox event per instance/transport, loads the immutable per-definition config, publishes through the transport's publisher (http/redis/rabbitmq), retries with the transport's `retry_delay` and dead-letters past its `max_retry`.                                                                                                                                                                                                                                                                                                                                                                                    |
 | `internal/workflow/form`           | Draft 2020-12 sanity check (`CheckSchema`) for forms-library schema documents before they are stored. Payloads are never validated against a form backend-side; input delivery is gated solely by the node's validation script.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `internal/workflow/auth`          | Framework-free authentication and authorization: the OIDC discovery + JWKS verifier, the claim-to-`Principal` mapping, the `Principal` carried on the request context, the shared in-memory role catalog, and the resource-action constants every route gates on. Knows nothing about Gin or GORM.                                                                                                                                                                                                                                                                                                                                                                                       |
+| `internal/workflow/auth`          | Framework-free authentication and authorization: the OIDC discovery + JWKS verifier, the local HS256 issuer/verifier plus the chain that routes between them, the claim-to-`Principal` mapping, the `Principal` carried on the request context, the shared in-memory role catalog, and the resource-action constants every route gates on. Knows nothing about Gin or GORM.                                                                                                                                                                                                                                                                                                                                                                                       |
 | `internal/workflow/service`        | Use-case orchestration: definitions, secrets validation, instance create/status/context/input (source channel must match the input node channel; the two-gate authorization check, then script-only enforcement on delivery), node debug, pause/resume/stop controls (events + local cancellation signal), rollback of paused/failed instances to a prior occurrence (context restore, recomputed group stack), and identity resolution (JIT user upsert, role seeding, role CRUD). Instance creation snapshots all secrets under reserved `secret`; read views redact that root and rendered secret values. |
-| `internal/workflow/handler`        | Gin routes, HTTP DTOs, query parsing, RFC 7807 problem+json, the CORS middleware (allowlisted origins, preflights answered before auth), the authentication middleware (API token → service principal, OIDC bearer → user) and the per-route permission middleware.                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `internal/workflow/handler`        | Gin routes, HTTP DTOs, query parsing, RFC 7807 problem+json, the CORS middleware (allowlisted origins, preflights answered before auth), the authentication middleware (API token → service principal, OIDC/local bearer → user), the public-endpoint rate limiters, and the per-route permission middleware.                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `internal/workflow/mail`           | Verification-mail senders (stdlib SMTP, log sender for dev): the only mail-sending boundary. |
 | `pkg/*`                            | Configuration (Viper), database (GORM over the Postgres driver with the pgx wire format), UUIDv7 ids, context paths + typed rendering, host-function registry. No `internal` imports.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `migrations/`                      | Atlas config + immutable versioned SQL + `atlas.sum`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 
@@ -366,11 +367,13 @@ flag, and the resolved `UserID` (`users.id`). It is a value, not a pointer,
 and never comes from the request body — a caller cannot claim a role in a
 parameter.
 
-Two things produce one:
+Three things produce one:
 
 - **The API token** (`auth.enabled`) is the *service principal*: `Service`
   true, no subject, the system user's id, and the wildcard role `*`.
 - **A verified OIDC token** carries the identity and its roles.
+- **A verified local JWT** carries the users.id subject, the `local` issuer
+  marker, and the stored roles embedded at login.
 
 Handlers put the principal on Gin's request context;
 `service.InstanceService` takes it as an explicit argument rather than
@@ -395,6 +398,22 @@ single string, or a space-delimited string. `GET /v1/auth/config` publishes
 issuer, client id, the effective audience, endpoints, and the claim name,
 and is deliberately outside the authentication middleware: a frontend needs
 it precisely when it has no token yet.
+
+### Local auth
+
+For deployments without a provider, `internal/workflow/auth` also mints and
+verifies the API's own HS256 JWTs (`LocalAuthenticator`), and a chain
+verifier routes each token to the OIDC or local verifier by its unverified
+issuer before doing any crypto — the middleware never learns which side
+minted the token. Local users live in `users` with issuer `local` and their
+own id as the subject; passwords are bcrypt hashes, roles are `user_roles`
+rows read at login and embedded in the JWT, and the resolve step gates every
+request on live state (active, and verified while email verification is on),
+so a disable or un-verification revokes outstanding tokens at once. The four
+public endpoints (register, login, verify-email, resend-verification) sit
+before the authentication gate, each behind the local-auth rate limiter.
+`internal/workflow/mail` is the only mail-sending boundary (SMTP, or the log
+sender for dev).
 
 ### Identity, just in time
 

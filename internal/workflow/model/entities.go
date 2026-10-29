@@ -7,20 +7,48 @@ import (
 	"time"
 )
 
+// LocalIssuer is the issuer of users that authenticate with a local
+// password rather than through an external provider.
+const LocalIssuer = "local"
+
 // User is an audit actor. Authentication is a separate concern: this row
 // records who acted, and for an OIDC caller it also caches the provider
 // identity so the same human resolves to the same uuid across requests.
 // Subject and Issuer are the provider identity and are unique together;
-// both are empty for the configured system user.
+// both are empty for the configured system user. A local user carries
+// issuer "local" and its own id as the subject, plus a password hash and
+// stored roles; PasswordHash never leaves the service/repository boundary.
 type User struct {
-	ID        string
-	Subject   string
-	Issuer    string
-	Name      string
-	Email     string
-	Metadata  json.RawMessage
+	ID              string
+	Subject         string
+	Issuer          string
+	Name            string
+	Email           string
+	Metadata        json.RawMessage
+	PasswordHash    string
+	IsActive        bool
+	EmailVerifiedAt *time.Time
+	// VerificationSentAt records the last verification send, for the
+	// resend cooldown. Repository/service eyes only, never serialized.
+	VerificationSentAt *time.Time
+	// Roles are a local user's stored roles. They are populated only by
+	// the reads that need them (login, user CRUD); OIDC callers carry
+	// their roles on the live token instead.
+	Roles     []string
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+// IsLocal reports whether the user authenticates with a local password
+// rather than through an external provider.
+func (u User) IsLocal() bool {
+	return u.Issuer == LocalIssuer
+}
+
+// EmailVerified reports whether the mailbox is proven. Only a pending
+// self-registration is unverified; every other user verifies at write.
+func (u User) EmailVerified() bool {
+	return u.EmailVerifiedAt != nil && !u.EmailVerifiedAt.IsZero()
 }
 
 // Role is a named bundle of resource-action permissions. The tables are the

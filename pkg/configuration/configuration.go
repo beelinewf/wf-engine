@@ -258,7 +258,8 @@ type System struct {
 }
 
 // Auth holds the authentication settings: the optional API token service
-// principal and the optional OIDC resource-server settings.
+// principal, the optional OIDC resource-server settings, and the optional
+// built-in local user authentication.
 type Auth struct {
 	Enabled  bool   `mapstructure:"enabled"`
 	APIToken string `mapstructure:"api_token"`
@@ -266,6 +267,9 @@ type Auth struct {
 	// The engine keeps no sessions and no callback: the frontend runs
 	// code+PKCE against the provider and calls the API with the JWT.
 	OIDC OIDC `mapstructure:"oidc"`
+	// Local enables built-in user authentication (register/login/JWT) for
+	// customers without an external provider.
+	Local LocalAuth `mapstructure:"local"`
 	// RolePermissions is the first-boot seed for the role tables: role name
 	// to the resource-action permissions it grants. It applies only while
 	// the roles table is empty; once seeded, the database is the source of
@@ -310,6 +314,94 @@ type OIDC struct {
 	// so a blackhole issuer fails the boot fast instead of hanging it.
 	// Zero means no timeout. Default 10s.
 	DiscoveryTimeout time.Duration `mapstructure:"discovery_timeout"`
+}
+
+// LocalAuth holds the built-in local user authentication settings. When
+// enabled, the API issues HS256 JWTs on login and verifies them as Bearer
+// tokens alongside (or instead of) OIDC tokens. Every replica must run
+// with the same jwt_secret, or tokens minted on one replica are rejected
+// by the others.
+type LocalAuth struct {
+	Enabled bool `mapstructure:"enabled"`
+	// JWTSecret is the HMAC key signing local JWTs. It is a dedicated
+	// secret (never the API token or the at-rest encryption key) of at
+	// least 32 bytes. Exposed as BEELINEWF_AUTH_LOCAL_JWT_SECRET.
+	JWTSecret string `mapstructure:"jwt_secret"`
+	// TokenTTL is the lifetime of an issued JWT. Default 24h.
+	TokenTTL time.Duration `mapstructure:"token_ttl"`
+	// Issuer is the iss claim of local JWTs. Default "beelinewf-local".
+	Issuer string `mapstructure:"issuer"`
+	// ClientID is the aud claim local JWTs carry and the API requires.
+	// Default "beelinewf".
+	ClientID string `mapstructure:"client_id"`
+	// AllowRegistration opens POST /v1/auth/register. Default false: with
+	// registration closed, users are created by an admin over POST
+	// /v1/users.
+	AllowRegistration bool `mapstructure:"allow_registration"`
+	// DefaultRole is the role assigned to a self-registered user. Empty
+	// (the default) assigns no roles. It must name a role the role tables
+	// know; an unknown name fails registration at runtime, not the boot.
+	DefaultRole string `mapstructure:"default_role"`
+	// PublicBaseURL is the frontend origin used to build the email
+	// verification link ({base}/verify-email?token=...). Required only
+	// when email verification is enabled.
+	PublicBaseURL string `mapstructure:"public_base_url"`
+	// EmailVerification optionally gates new accounts on proof of mailbox.
+	EmailVerification LocalEmailVerification `mapstructure:"email_verification"`
+	// SMTP delivers verification mail. Inert unless email verification is
+	// enabled.
+	SMTP LocalSMTP `mapstructure:"smtp"`
+	// RateLimit throttles the four public local-auth endpoints
+	// (register, login, resend-verification, verify-email) per client IP
+	// and per email. Like the API-token throttle it is per-replica
+	// in-memory state; a proxy-level throttle is the stronger
+	// multi-replica control.
+	RateLimit LocalRateLimit `mapstructure:"rate_limit"`
+}
+
+// LocalEmailVerification gates self-registration on proof of mailbox.
+type LocalEmailVerification struct {
+	// Enabled creates pending accounts on register that cannot log in
+	// until POST /v1/auth/verify-email consumes the mailed token.
+	// Default false.
+	Enabled bool `mapstructure:"enabled"`
+	// TokenTTL is how long a verification token stays consumable.
+	// Default 24h.
+	TokenTTL time.Duration `mapstructure:"token_ttl"`
+	// ResendCooldown is the per-email quiet period between verification
+	// sends. Default 60s.
+	ResendCooldown time.Duration `mapstructure:"resend_cooldown"`
+}
+
+// LocalSMTP holds the verification-mail sender settings. A Host of "log"
+// selects the dev/e2e sender that logs the link instead of sending it.
+type LocalSMTP struct {
+	Host     string `mapstructure:"host"`
+	Port     int    `mapstructure:"port"`
+	Username string `mapstructure:"username"`
+	Password string `mapstructure:"password"`
+	From     string `mapstructure:"from"`
+	UseTLS   bool   `mapstructure:"use_tls"`
+	// TemplateDir overrides the embedded verification-mail templates
+	// with verify_email.html and verify_email.txt from this directory.
+	// Empty selects the embedded defaults. Exposed as
+	// BEELINEWF_AUTH_LOCAL_SMTP_TEMPLATE_DIR.
+	TemplateDir string `mapstructure:"template_dir"`
+}
+
+// LocalRateLimit holds the public local-auth endpoint throttle.
+type LocalRateLimit struct {
+	// Enabled turns the throttle on. Default true.
+	Enabled bool `mapstructure:"enabled"`
+	// MaxAttempts is the requests one client IP (or one email, where an
+	// email dimension applies) may make within Window before further
+	// attempts answer 429. Default 10.
+	MaxAttempts int `mapstructure:"max_attempts"`
+	// Window is the fixed window the count accumulates in. Default 1m.
+	Window time.Duration `mapstructure:"window"`
+	// BlockDuration is how long a throttled key keeps answering 429.
+	// Default 5m.
+	BlockDuration time.Duration `mapstructure:"block_duration"`
 }
 
 // RateLimit holds the API-token failure throttle: per-source-IP,
@@ -402,6 +494,35 @@ func Load(opts ...Option) (*Config, error) {
 	} {
 		_ = v.BindEnv("auth.rate_limit."+key, "BEELINEWF_AUTH_RATE_LIMIT_"+strings.ToUpper(key))
 	}
+	// auth.local.* is exposed as BEELINEWF_AUTH_LOCAL_* (the default
+	// mapping), bound explicitly so the keys resolve without a config
+	// file.
+	for key, env := range map[string]string{
+		"auth.local.enabled":                            "BEELINEWF_AUTH_LOCAL_ENABLED",
+		"auth.local.jwt_secret":                         "BEELINEWF_AUTH_LOCAL_JWT_SECRET",
+		"auth.local.token_ttl":                          "BEELINEWF_AUTH_LOCAL_TOKEN_TTL",
+		"auth.local.issuer":                             "BEELINEWF_AUTH_LOCAL_ISSUER",
+		"auth.local.client_id":                          "BEELINEWF_AUTH_LOCAL_CLIENT_ID",
+		"auth.local.allow_registration":                 "BEELINEWF_AUTH_LOCAL_ALLOW_REGISTRATION",
+		"auth.local.default_role":                       "BEELINEWF_AUTH_LOCAL_DEFAULT_ROLE",
+		"auth.local.public_base_url":                    "BEELINEWF_AUTH_LOCAL_PUBLIC_BASE_URL",
+		"auth.local.email_verification.enabled":         "BEELINEWF_AUTH_LOCAL_EMAIL_VERIFICATION_ENABLED",
+		"auth.local.email_verification.token_ttl":       "BEELINEWF_AUTH_LOCAL_EMAIL_VERIFICATION_TOKEN_TTL",
+		"auth.local.email_verification.resend_cooldown": "BEELINEWF_AUTH_LOCAL_EMAIL_VERIFICATION_RESEND_COOLDOWN",
+		"auth.local.smtp.host":                          "BEELINEWF_AUTH_LOCAL_SMTP_HOST",
+		"auth.local.smtp.port":                          "BEELINEWF_AUTH_LOCAL_SMTP_PORT",
+		"auth.local.smtp.username":                      "BEELINEWF_AUTH_LOCAL_SMTP_USERNAME",
+		"auth.local.smtp.password":                      "BEELINEWF_AUTH_LOCAL_SMTP_PASSWORD",
+		"auth.local.smtp.from":                          "BEELINEWF_AUTH_LOCAL_SMTP_FROM",
+		"auth.local.smtp.use_tls":                       "BEELINEWF_AUTH_LOCAL_SMTP_USE_TLS",
+		"auth.local.smtp.template_dir":                  "BEELINEWF_AUTH_LOCAL_SMTP_TEMPLATE_DIR",
+		"auth.local.rate_limit.enabled":                 "BEELINEWF_AUTH_LOCAL_RATE_LIMIT_ENABLED",
+		"auth.local.rate_limit.max_attempts":            "BEELINEWF_AUTH_LOCAL_RATE_LIMIT_MAX_ATTEMPTS",
+		"auth.local.rate_limit.window":                  "BEELINEWF_AUTH_LOCAL_RATE_LIMIT_WINDOW",
+		"auth.local.rate_limit.block_duration":          "BEELINEWF_AUTH_LOCAL_RATE_LIMIT_BLOCK_DURATION",
+	} {
+		_ = v.BindEnv(key, env)
+	}
 	// Lean settings are operator toggles and must override config.yaml.
 	_ = v.BindEnv("engine.lean_context_default", "BEELINEWF_ENGINE_LEAN_CONTEXT_DEFAULT")
 	_ = v.BindEnv("engine.lean_anchor_every", "BEELINEWF_ENGINE_LEAN_ANCHOR_EVERY")
@@ -481,10 +602,16 @@ func Load(opts ...Option) (*Config, error) {
 		}
 		cfg.Auth.RolePermissions = catalog
 	}
-	// auth.enabled is the master switch: with it off, OIDC is forced off so
-	// a stray auth.oidc.enabled cannot protect /v1 or trip OIDC validation.
+	// auth.enabled is the master switch: with it off, OIDC and local
+	// auth are forced off so a stray setting cannot protect /v1 or trip
+	// validation.
 	if !cfg.Auth.Enabled {
 		cfg.Auth.OIDC.Enabled = false
+		cfg.Auth.Local.Enabled = false
+		cfg.Auth.Local.EmailVerification.Enabled = false
+	}
+	if !cfg.Auth.Local.Enabled {
+		cfg.Auth.Local.EmailVerification.Enabled = false
 	}
 	if err := cfg.validate(); err != nil {
 		return nil, err
@@ -523,6 +650,30 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("auth.rate_limit.window", "1m")
 	v.SetDefault("auth.rate_limit.block_duration", "1m")
 	v.SetDefault("auth.rate_limit.trusted_proxies", []string{})
+	// Local auth stays inert until enabled; the defaults keep every key
+	// env-addressable so validation stays meaningful.
+	v.SetDefault("auth.local.enabled", false)
+	v.SetDefault("auth.local.jwt_secret", "")
+	v.SetDefault("auth.local.token_ttl", "24h")
+	v.SetDefault("auth.local.issuer", "beelinewf-local")
+	v.SetDefault("auth.local.client_id", "beelinewf")
+	v.SetDefault("auth.local.allow_registration", false)
+	v.SetDefault("auth.local.default_role", "")
+	v.SetDefault("auth.local.public_base_url", "")
+	v.SetDefault("auth.local.email_verification.enabled", false)
+	v.SetDefault("auth.local.email_verification.token_ttl", "24h")
+	v.SetDefault("auth.local.email_verification.resend_cooldown", "60s")
+	v.SetDefault("auth.local.smtp.host", "")
+	v.SetDefault("auth.local.smtp.port", 587)
+	v.SetDefault("auth.local.smtp.username", "")
+	v.SetDefault("auth.local.smtp.password", "")
+	v.SetDefault("auth.local.smtp.from", "")
+	v.SetDefault("auth.local.smtp.use_tls", true)
+	v.SetDefault("auth.local.smtp.template_dir", "")
+	v.SetDefault("auth.local.rate_limit.enabled", true)
+	v.SetDefault("auth.local.rate_limit.max_attempts", 10)
+	v.SetDefault("auth.local.rate_limit.window", "1m")
+	v.SetDefault("auth.local.rate_limit.block_duration", "5m")
 	v.SetDefault("infra.postgresql.dsn", "")
 	v.SetDefault("infra.postgresql.max_open_conns", 25)
 	v.SetDefault("infra.postgresql.max_idle_conns", 25)
@@ -752,8 +903,12 @@ func (c *Config) validate() error {
 	if c.Engine.Multipart.MaxTextBytes <= 0 {
 		return errors.New("configuration: engine.multipart.max_text_bytes must be > 0")
 	}
-	if c.Auth.Enabled && strings.TrimSpace(c.Auth.APIToken) == "" {
-		return errors.New("configuration: auth.api_token is required when auth.enabled is true")
+	// auth.enabled requires at least one credential: the API token, an
+	// OIDC provider, or local auth. Enabled with none of them would
+	// otherwise serve the whole API unauthenticated or fail every request
+	// with a confusing credential error.
+	if c.Auth.Enabled && strings.TrimSpace(c.Auth.APIToken) == "" && !c.Auth.OIDC.Enabled && !c.Auth.Local.Enabled {
+		return errors.New("configuration: auth.enabled requires at least one credential: auth.api_token, auth.oidc, or auth.local")
 	}
 	if c.Auth.RateLimit.Enabled {
 		if c.Auth.RateLimit.MaxAttempts <= 0 {
@@ -784,6 +939,71 @@ func (c *Config) validate() error {
 		}
 		if c.Auth.OIDC.DiscoveryTimeout <= 0 {
 			return errors.New("configuration: auth.oidc.discovery_timeout must be > 0")
+		}
+	}
+	if c.Auth.Local.Enabled {
+		if len(c.Auth.Local.JWTSecret) < 32 {
+			return errors.New("configuration: auth.local.jwt_secret must be at least 32 bytes when auth.local.enabled is true")
+		}
+		if c.Auth.Local.TokenTTL <= 0 {
+			return errors.New("configuration: auth.local.token_ttl must be > 0")
+		}
+		if strings.TrimSpace(c.Auth.Local.Issuer) == "" {
+			return errors.New("configuration: auth.local.issuer is required when auth.local.enabled is true")
+		}
+		if strings.TrimSpace(c.Auth.Local.ClientID) == "" {
+			return errors.New("configuration: auth.local.client_id is required when auth.local.enabled is true")
+		}
+		// The chain verifier routes on the unverified iss claim with
+		// local checked first, so a shared issuer would hand OIDC
+		// tokens to the local key. Distinct issuers keep the routes
+		// unambiguous.
+		if c.Auth.OIDC.Enabled && strings.TrimSpace(c.Auth.Local.Issuer) == strings.TrimSpace(c.Auth.OIDC.Issuer) {
+			return errors.New("configuration: auth.local.issuer must differ from auth.oidc.issuer")
+		}
+		if c.Auth.Local.DefaultRole != "" && strings.TrimSpace(c.Auth.Local.DefaultRole) == "" {
+			return errors.New("configuration: auth.local.default_role must be non-blank when set")
+		}
+		if c.Auth.Local.RateLimit.Enabled {
+			if c.Auth.Local.RateLimit.MaxAttempts <= 0 {
+				return errors.New("configuration: auth.local.rate_limit.max_attempts must be > 0")
+			}
+			if c.Auth.Local.RateLimit.Window <= 0 {
+				return errors.New("configuration: auth.local.rate_limit.window must be > 0")
+			}
+			if c.Auth.Local.RateLimit.BlockDuration <= 0 {
+				return errors.New("configuration: auth.local.rate_limit.block_duration must be > 0")
+			}
+		}
+		if c.Auth.Local.EmailVerification.Enabled {
+			if c.Auth.Local.EmailVerification.TokenTTL <= 0 {
+				return errors.New("configuration: auth.local.email_verification.token_ttl must be > 0")
+			}
+			if c.Auth.Local.EmailVerification.ResendCooldown <= 0 {
+				return errors.New("configuration: auth.local.email_verification.resend_cooldown must be > 0")
+			}
+			if strings.TrimSpace(c.Auth.Local.PublicBaseURL) == "" {
+				return errors.New("configuration: auth.local.public_base_url is required when email verification is enabled")
+			}
+			// The link is mailed to strangers, so it must be an absolute
+			// web origin: a bare host would join into a relative path,
+			// and a javascript: scheme into an XSS payload.
+			base, err := url.Parse(strings.TrimSpace(c.Auth.Local.PublicBaseURL))
+			if err != nil {
+				return fmt.Errorf("configuration: auth.local.public_base_url: %w", err)
+			}
+			if (base.Scheme != "http" && base.Scheme != "https") || base.Host == "" {
+				return errors.New("configuration: auth.local.public_base_url must be an absolute http(s) URL with a host")
+			}
+			if strings.TrimSpace(c.Auth.Local.SMTP.Host) == "" {
+				return errors.New("configuration: auth.local.smtp.host is required when email verification is enabled")
+			}
+			if strings.TrimSpace(c.Auth.Local.SMTP.From) == "" && strings.TrimSpace(c.Auth.Local.SMTP.Host) != "log" {
+				return errors.New("configuration: auth.local.smtp.from is required when email verification is enabled")
+			}
+			if c.Auth.Local.SMTP.Port <= 0 || c.Auth.Local.SMTP.Port > 65535 {
+				return errors.New("configuration: auth.local.smtp.port must be 1..65535")
+			}
 		}
 	}
 	for role := range c.Auth.RolePermissions {

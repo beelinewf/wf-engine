@@ -291,6 +291,102 @@ func TestWriteProblem(t *testing.T) {
 	}
 }
 
+func mustParseUser(t *testing.T, target string) *UserListQuery {
+	t.Helper()
+	c, _ := makeCtx(target)
+	q, err := ParseUserListQuery(c)
+	if err != nil {
+		t.Fatalf("ParseUserListQuery(%s) error = %v", target, err)
+	}
+	return q
+}
+
+func TestParseUserListQueryDefaults(t *testing.T) {
+	q := mustParseUser(t, "/v1/users")
+	if q.Page != 1 || q.PerPage != 50 || q.Order != "-created_at" {
+		t.Errorf("defaults = page %d per_page %d order %q, want 1/50/-created_at", q.Page, q.PerPage, q.Order)
+	}
+	if len(q.IDs) != 0 || len(q.Roles) != 0 || len(q.Issuers) != 0 {
+		t.Errorf("multi filters = %v/%v/%v, want empty", q.IDs, q.Roles, q.Issuers)
+	}
+	if q.IsLocal != nil || q.EmailVerified != nil || q.IsActive != nil {
+		t.Errorf("bool filters = %v/%v/%v, want nil", q.IsLocal, q.EmailVerified, q.IsActive)
+	}
+	if q.Email != "" || q.Name != "" {
+		t.Errorf("search = %q/%q, want empty", q.Email, q.Name)
+	}
+}
+
+func TestParseUserListQueryFilters(t *testing.T) {
+	const (
+		a = "11111111-1111-7111-8111-111111111111"
+		b = "22222222-2222-7222-8222-222222222222"
+	)
+	q := mustParseUser(t, "/v1/users?order=created_at&id="+a+","+b+"&role=admin,viewer"+
+		"&issuer=local,https://provider.example.test&is_local=true&email_verified=false&is_active=1"+
+		"&email=ADA@&name=+Ada+")
+	if q.Order != "created_at" {
+		t.Errorf("order = %q, want created_at", q.Order)
+	}
+	if len(q.IDs) != 2 || q.IDs[0] != a || q.IDs[1] != b {
+		t.Errorf("IDs = %v", q.IDs)
+	}
+	if len(q.Roles) != 2 || q.Roles[0] != "admin" || q.Roles[1] != "viewer" {
+		t.Errorf("Roles = %v", q.Roles)
+	}
+	if len(q.Issuers) != 2 || q.Issuers[0] != "local" || q.Issuers[1] != "https://provider.example.test" {
+		t.Errorf("Issuers = %v", q.Issuers)
+	}
+	if q.IsLocal == nil || !*q.IsLocal || q.EmailVerified == nil || *q.EmailVerified || q.IsActive == nil || !*q.IsActive {
+		t.Errorf("bools = %v/%v/%v, want true/false/true", q.IsLocal, q.EmailVerified, q.IsActive)
+	}
+	if q.Email != "ADA@" || q.Name != "Ada" {
+		t.Errorf("search = %q/%q, want ADA@/Ada", q.Email, q.Name)
+	}
+}
+
+func TestParseUserListQueryInvalidValues(t *testing.T) {
+	bad := []string{
+		"?page=0",
+		"?per_page=201",
+		"?order=name",
+		"?order=-unknown",
+		"?order=--created_at",
+		"?id=not-a-uuid",
+		"?id=11111111-1111-7111-8111-111111111111,not-a-uuid",
+		"?is_local=yes",
+		"?email_verified=2",
+		"?is_active=maybe",
+	}
+	for _, suffix := range bad {
+		c, _ := makeCtx("/v1/users" + suffix)
+		if _, err := ParseUserListQuery(c); err == nil {
+			t.Errorf("ParseUserListQuery(%s) error = nil, want error", suffix)
+		}
+	}
+}
+
+func TestParseUserListQueryTooMany(t *testing.T) {
+	manyIDs := make([]string, 0, 101)
+	for i := 0; i < 101; i++ {
+		manyIDs = append(manyIDs, "11111111-1111-7111-8111-111111111111")
+	}
+	manyRoles := make([]string, 0, 101)
+	for i := 0; i < 101; i++ {
+		manyRoles = append(manyRoles, "viewer")
+	}
+	for name, suffix := range map[string]string{
+		"ids":     "?id=" + strings.Join(manyIDs, ","),
+		"roles":   "?role=" + strings.Join(manyRoles, ","),
+		"issuers": "?issuer=" + strings.Join(manyRoles, ","),
+	} {
+		c, _ := makeCtx("/v1/users" + suffix)
+		if _, err := ParseUserListQuery(c); err == nil {
+			t.Errorf("%s: ParseUserListQuery() error = nil, want cap error", name)
+		}
+	}
+}
+
 func TestStatusForError(t *testing.T) {
 	cases := []struct {
 		err  error

@@ -19,6 +19,7 @@ const (
 	maxIDFilters     = 100
 	maxPage          = 10000
 	maxStatusFilters = 100
+	maxUserFilters   = 100
 )
 
 // ListKind selects the order/type allowlist for a definition list endpoint.
@@ -31,6 +32,8 @@ const (
 	ListKindNode
 	// ListKindInstance is the workflow instance list.
 	ListKindInstance
+	// ListKindUser is the user directory list.
+	ListKindUser
 )
 
 var workflowOrderFields = map[string]bool{
@@ -46,6 +49,10 @@ var nodeOrderFields = map[string]bool{
 var instanceOrderFields = map[string]bool{
 	"id": true, "workflow_definition_id": true, "status": true,
 	"created_at": true, "updated_at": true,
+}
+
+var userOrderFields = map[string]bool{
+	"created_at": true,
 }
 
 func parsePagination(c *gin.Context) (int, int, error) {
@@ -150,6 +157,8 @@ func validOrder(order string, kind ListKind) bool {
 		allow = nodeOrderFields
 	case ListKindInstance:
 		allow = instanceOrderFields
+	case ListKindUser:
+		allow = userOrderFields
 	}
 	return allow[field]
 }
@@ -220,6 +229,94 @@ func ParseInstanceListQuery(c *gin.Context) (*InstanceListQuery, error) {
 		q.Debug = &b
 	}
 	return q, nil
+}
+
+// UserListQuery is a parsed user directory list query.
+type UserListQuery struct {
+	Page          int
+	PerPage       int
+	Order         string
+	IDs           []string
+	Roles         []string
+	Issuers       []string
+	IsLocal       *bool
+	EmailVerified *bool
+	IsActive      *bool
+	Email         string
+	Name          string
+}
+
+// ParseUserListQuery parses and validates a user directory list query.
+// Multi-value filters are comma-separated in one param (?role=a,b);
+// empties from a trailing comma are dropped, not matched.
+func ParseUserListQuery(c *gin.Context) (*UserListQuery, error) {
+	q := &UserListQuery{Order: "-created_at"}
+	page, perPage, err := parsePagination(c)
+	if err != nil {
+		return nil, err
+	}
+	q.Page, q.PerPage = page, perPage
+	if v := c.Query("order"); v != "" {
+		if !validOrder(v, ListKindUser) {
+			return nil, fmt.Errorf("query: order %q is not allowlisted", v)
+		}
+		q.Order = v
+	}
+	if v := c.Query("id"); v != "" {
+		raw := splitComma(v)
+		if len(raw) > maxIDFilters {
+			return nil, fmt.Errorf("query: at most %d id filters allowed", maxIDFilters)
+		}
+		for _, id := range raw {
+			if !ids.Valid(id) {
+				return nil, fmt.Errorf("query: id %q is not a valid uuid", id)
+			}
+			q.IDs = append(q.IDs, id)
+		}
+	}
+	if v := c.Query("role"); v != "" {
+		q.Roles = splitComma(v)
+		if len(q.Roles) > maxUserFilters {
+			return nil, fmt.Errorf("query: at most %d role filters allowed", maxUserFilters)
+		}
+	}
+	if v := c.Query("issuer"); v != "" {
+		q.Issuers = splitComma(v)
+		if len(q.Issuers) > maxUserFilters {
+			return nil, fmt.Errorf("query: at most %d issuer filters allowed", maxUserFilters)
+		}
+	}
+	for _, flag := range []struct {
+		name string
+		set  func(bool)
+	}{
+		{"is_local", func(b bool) { q.IsLocal = &b }},
+		{"email_verified", func(b bool) { q.EmailVerified = &b }},
+		{"is_active", func(b bool) { q.IsActive = &b }},
+	} {
+		if v := c.Query(flag.name); v != "" {
+			b, err := strconv.ParseBool(v)
+			if err != nil {
+				return nil, fmt.Errorf("query: %s must be a boolean, got %q", flag.name, v)
+			}
+			flag.set(b)
+		}
+	}
+	q.Email = strings.TrimSpace(c.Query("email"))
+	q.Name = strings.TrimSpace(c.Query("name"))
+	return q, nil
+}
+
+// splitComma splits a multi-value filter on commas, trimming spaces and
+// dropping empties so "?role=admin," behaves as "?role=admin".
+func splitComma(v string) []string {
+	var out []string
+	for _, part := range strings.Split(v, ",") {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 // StatisticsSummaryQuery is the parsed GET /v1/statistics query: an

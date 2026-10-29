@@ -137,6 +137,82 @@ tasks:
         e2e_wait_http http://127.0.0.1:9999/health/live 60 1
         bash scripts/e2e-oidc.sh http://127.0.0.1:9999 http://127.0.0.1:9099
 
+  # Stands the app up against config.e2e-local.yaml (built-in local auth,
+  # log mail sender, API token on) twice — once with registration closed
+  # and verification off, once with registration open and verification on —
+  # then drives the register/login/verify/resend flow black-box. The app
+  # log is captured to a scratch file so the script can lift the
+  # verification link the log sender wrote there. The database is
+  # provisioned once: the two modes use disjoint emails, and the role seed
+  # is identical, so the second boot keeps the first boot's tables.
+  e2e-local:
+    desc: Black-box local-auth checks against a locally started app
+    cmds:
+      - |
+        set -euo pipefail
+        . scripts/e2e-bootstrap.sh
+        # The single source for the service credential: the app reads it
+        # through auth.api_token's BEELINEWF_API_TOKEN binding, and the script
+        # reads the same variable. config.e2e-local.yaml deliberately leaves
+        # the key out.
+        export BEELINEWF_API_TOKEN="e2e-service-token"
+        # Same single-source pattern for the mandatory at-rest key
+        # (test-only value: base64 of bytes 0..31) and the local JWT secret
+        # (test-only value: 32+ bytes, no production meaning).
+        export BEELINEWF_SECRET_ENCRYPTION_KEY="AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+        export BEELINEWF_AUTH_LOCAL_JWT_SECRET="e2e-local-jwt-secret-32-bytes-ok!"
+        # Throwaway database for this run. Recreating it keeps a previous
+        # run's rows from changing what the checks see.
+        e2e_provision_db beelinewf_e2e_local
+        # One binary for both runs: `go run` wraps the app in a supervisor
+        # that does not reliably die with it, which would leave the first
+        # run's process holding the port (or the harness hanging on it).
+        go build -o /tmp/e2e-local-app ./cmd/app
+        APP_LOG=$(mktemp)
+        APP_BIN=/tmp/e2e-local-app
+        # The app is matched by its exact command line, never by $!: this
+        # block must work wherever task runs it, and $! is not portable
+        # enough to bet the lifecycle on (it has expanded to a job id
+        # instead of a pid under some runners, hanging the harness in
+        # wait). The bracket keeps pkill from matching this very shell.
+        APP_MATCH='e2e-local-app -confi[g]'
+        trap 'pkill -f "$APP_MATCH" 2>/dev/null || true; rm -f "$APP_LOG" "$APP_BIN"' EXIT
+        stop_app() {
+          pkill -f "$APP_MATCH" 2>/dev/null || true
+          for _ in $(seq 1 30); do
+            curl -fsS -m 2 http://127.0.0.1:9998/health/live >/dev/null 2>&1 || break
+            sleep 1
+          done
+          if curl -fsS -m 2 http://127.0.0.1:9998/health/live >/dev/null 2>&1; then
+            pkill -9 -f "$APP_MATCH" 2>/dev/null || true
+            sleep 1
+          fi
+        }
+        run_mode() {
+          local mode="$1" registration="$2" verification="$3"
+          # A squatter on the port would answer health checks while our app
+          # dies on bind, testing a stranger: refuse to start into one.
+          if curl -fsS -m 2 http://127.0.0.1:9998/health/live >/dev/null 2>&1; then
+            echo "e2e-local: port 9998 already serves traffic; kill the squatter first"
+            exit 1
+          fi
+          export BEELINEWF_AUTH_LOCAL_ALLOW_REGISTRATION="$registration"
+          export BEELINEWF_AUTH_LOCAL_EMAIL_VERIFICATION_ENABLED="$verification"
+          : >"$APP_LOG"
+          # Detached past init: setsid re-parents the app away from this
+          # shell, so no exit path can hang waiting on it. Liveness is
+          # proven by the health check and the listen line below, and
+          # shutdown is stop_app's bounded health-poll, never wait.
+          setsid "$APP_BIN" -config config.e2e-local.yaml >>"$APP_LOG" 2>&1 < /dev/null &
+          e2e_wait_http http://127.0.0.1:9998/health/live 60 1
+          curl -fsS http://127.0.0.1:9998/health/live >/dev/null || { echo "e2e-local: app did not start; log:"; cat "$APP_LOG"; exit 1; }
+          grep -q 'http server listening on 127.0.0.1:9998' "$APP_LOG" || { echo "e2e-local: our app never logged its listen; log:"; cat "$APP_LOG"; exit 1; }
+          APP_LOG="$APP_LOG" E2E_LOCAL_MODE="$mode" bash scripts/e2e-local.sh http://127.0.0.1:9998
+          stop_app
+        }
+        run_mode closed false false
+        run_mode open true true
+
   # Self-contained plain black-box suite: throwaway database, Atlas
   # migrations, a freshly built binary on config.e2e.yaml, then
   # scripts/e2e.sh against it. Unlike `task e2e` (which expects an already

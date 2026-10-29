@@ -134,8 +134,27 @@ func NewRouter(deps Deps) *gin.Engine {
 	// registered after the Use below, stays authenticated.
 	var authHandler *AuthHandler
 	if deps.Auth != nil {
-		authHandler = NewAuthHandler(deps.Auth, deps.OIDC, deps.Catalog, deps.AuthSettings.Enabled && deps.AuthSettings.APIToken != "")
+		authHandler = NewAuthHandler(deps.Auth, deps.OIDC, deps.Catalog, deps.AuthSettings.Enabled && deps.AuthSettings.APIToken != "",
+			LocalAuthContract{
+				Enabled:                  deps.AuthSettings.Local.Enabled,
+				RegistrationEnabled:      deps.AuthSettings.Local.AllowRegistration,
+				EmailVerificationEnabled: deps.AuthSettings.Local.EmailVerification.Enabled,
+			})
 		v1.GET("/auth/config", authHandler.Config)
+	}
+
+	// The local register/login endpoints are public for the same reason as
+	// the login contract: they are how a caller without a token gets one.
+	// They are registered before the Use below (so they stay
+	// unauthenticated), only when local auth is on, and each behind the
+	// local-auth rate limiter.
+	if deps.Auth != nil && deps.AuthSettings.Local.Enabled {
+		localLimiter := newLocalAuthLimiter(deps.AuthSettings.Local.RateLimit, deps.AuthSettings.RateLimit.TrustedProxies)
+		localAuth := NewLocalAuthHandler(deps.Auth)
+		v1.POST("/auth/register", limitLocalAuth(localLimiter, "register", localLimitEvery), localAuth.Register)
+		v1.POST("/auth/login", limitLocalAuth(localLimiter, "login", localLimitLogin), localAuth.Login)
+		v1.POST("/auth/verify-email", limitLocalAuth(localLimiter, "verify-email", localLimitIPOnly), localAuth.VerifyEmail)
+		v1.POST("/auth/resend-verification", limitLocalAuth(localLimiter, "resend-verification", localLimitEvery), localAuth.ResendVerification)
 	}
 
 	if enabled {
@@ -206,6 +225,14 @@ func NewRouter(deps Deps) *gin.Engine {
 		userGroup := v1.Group("/users")
 		gate(userGroup, auth.ActionUsersRead, http.MethodGet, "", users.List)
 		gate(userGroup, auth.ActionUsersRead, http.MethodGet, "/:id", users.Get)
+		gate(userGroup, auth.ActionUsersWrite, http.MethodPost, "", users.Create)
+		// PUT carries no resource-action gate: it stays authenticated
+		// (the global Use above), and the service admits a users:write
+		// holder for every field and the account itself for name, email,
+		// and password only.
+		userGroup.PUT("/:id", users.Update)
+		gate(userGroup, auth.ActionUsersWrite, http.MethodDelete, "/:id", users.Delete)
+		gate(userGroup, auth.ActionUsersWrite, http.MethodPost, "/:id/resend-verification", users.ResendVerification)
 	}
 
 	if deps.NodeDefinitions != nil {

@@ -17,7 +17,7 @@ import (
 	// @securityDefinitions.apikey BearerAuth
 	// @in header
 	// @name Authorization
-	// @description OIDC bearer token. In the Swagger Authorize dialog type "Bearer <jwt>" with the Bearer prefix and a space: the value is sent verbatim as the Authorization header. The engine is a resource server: the frontend completes a code+PKCE flow against the provider and calls the API with the JWT. The authorization URL, client id, and scopes are served by GET /v1/auth/config.
+	// @description Bearer token: an OIDC JWT or a locally issued one. In the Swagger Authorize dialog type "Bearer <jwt>" with the Bearer prefix and a space: the value is sent verbatim as the Authorization header. For OIDC the engine is a resource server: the frontend completes a code+PKCE flow against the provider and calls the API with the JWT. For local auth the frontend logs in over POST /v1/auth/login. Which logins exist is served by GET /v1/auth/config.
 	// @type apiKey
 
 	"context"
@@ -38,6 +38,7 @@ import (
 	"github.com/beelinewf/wf-engine/internal/workflow/executor"
 	"github.com/beelinewf/wf-engine/internal/workflow/handler"
 	"github.com/beelinewf/wf-engine/internal/workflow/inputtransport"
+	"github.com/beelinewf/wf-engine/internal/workflow/mail"
 	"github.com/beelinewf/wf-engine/internal/workflow/metrics"
 	"github.com/beelinewf/wf-engine/internal/workflow/model"
 	"github.com/beelinewf/wf-engine/internal/workflow/multipart"
@@ -227,10 +228,10 @@ func checkAuthWiring(verifier auth.Verifier, authSvc service.AuthService, actor 
 		return nil
 	}
 	if authSvc == nil {
-		return errors.New("oidc enabled without an identity resolver: the auth service is required")
+		return errors.New("token auth enabled without an identity resolver: the auth service is required")
 	}
 	if strings.TrimSpace(actor) == "" {
-		return errors.New("oidc enabled without a system user id: system.user_id is required")
+		return errors.New("token auth enabled without a system user id: system.user_id is required")
 	}
 	return nil
 }
@@ -349,13 +350,15 @@ func run(ctx context.Context, cfg *configuration.Config, logger *logrus.Logger) 
 	if actor == "" {
 		actor = "11111111-1111-7111-8111-111111111111"
 	}
-	sysUser := model.User{ID: actor, Name: cfg.System.Name, Email: cfg.System.Email}
+	sysUser := model.User{ID: actor, Name: cfg.System.Name, Email: cfg.System.Email, IsActive: true}
 	if sysUser.Name == "" {
 		sysUser.Name = "system"
 	}
 	if sysUser.Email == "" {
 		sysUser.Email = "system@localhost"
 	}
+	verifiedAt := time.Now().UTC()
+	sysUser.EmailVerifiedAt = &verifiedAt
 	if err := repository.UpsertSystemUser(ctx, db, sysUser); err != nil {
 		return fmt.Errorf("seed system user: %w", err)
 	}
@@ -390,9 +393,47 @@ func run(ctx context.Context, cfg *configuration.Config, logger *logrus.Logger) 
 		oidcVerifier = oidcAuth
 		logger.Infof("oidc enabled for issuer %s", cfg.Auth.OIDC.Issuer)
 	}
+	// Local auth mints the API's own JWTs for customers without a
+	// provider. The constructor re-checks the secret and TTL the
+	// configuration already validated, so a hand-built config fails the
+	// boot here rather than the first login.
+	var localAuth *auth.LocalAuthenticator
+	var mailSender mail.Sender
+	if cfg.Auth.Local.Enabled {
+		var err error
+		localAuth, err = auth.NewLocalAuthenticator(cfg.Auth.Local.JWTSecret, cfg.Auth.Local.Issuer, cfg.Auth.Local.ClientID, cfg.Auth.Local.TokenTTL)
+		if err != nil {
+			return fmt.Errorf("local auth: %w", err)
+		}
+		if cfg.Auth.Local.EmailVerification.Enabled {
+			smtpCfg := cfg.Auth.Local.SMTP
+			mailSender, err = mail.NewSender(smtpCfg.Host, smtpCfg.Port, smtpCfg.Username, smtpCfg.Password, smtpCfg.From, smtpCfg.UseTLS, smtpCfg.TemplateDir)
+			if err != nil {
+				return fmt.Errorf("local auth mail: %w", err)
+			}
+		}
+		logger.Infof("local auth enabled for issuer %s", cfg.Auth.Local.Issuer)
+	}
+	// One verifier for both token kinds: the chain routes by the token's
+	// issuer before doing any crypto, so the middleware below never learns
+	// which side minted the Bearer [REDACTED]
+	verifier := auth.NewChainVerifier(oidcVerifier, localAuth)
 	catalog := auth.CatalogFromConfig(cfg.Auth)
-	authSvc := service.NewAuthService(users, roles, catalog, actor)
-	if err := checkAuthWiring(oidcVerifier, authSvc, actor); err != nil {
+	var svcOpts []service.AuthServiceOption
+	if cfg.Auth.Local.Enabled {
+		svcOpts = append(svcOpts, service.WithLocalAuth(service.LocalAuthDeps{
+			Issuer:               localAuth,
+			Mail:                 mailSender,
+			AllowRegistration:    cfg.Auth.Local.AllowRegistration,
+			DefaultRole:          cfg.Auth.Local.DefaultRole,
+			VerificationEnabled:  cfg.Auth.Local.EmailVerification.Enabled,
+			VerificationTokenTTL: cfg.Auth.Local.EmailVerification.TokenTTL,
+			ResendCooldown:       cfg.Auth.Local.EmailVerification.ResendCooldown,
+			PublicBaseURL:        cfg.Auth.Local.PublicBaseURL,
+		}))
+	}
+	authSvc := service.NewAuthService(users, roles, catalog, actor, svcOpts...)
+	if err := checkAuthWiring(verifier, authSvc, actor); err != nil {
 		return err
 	}
 	// Configuration seeds the role tables only while they are empty; once
@@ -770,7 +811,7 @@ func run(ctx context.Context, cfg *configuration.Config, logger *logrus.Logger) 
 		MetricsRefresh:      metricsRefresh(recorder, monitors, execLimits.HTTPBulkhead),
 		AuthSettings:        cfg.Auth,
 		CORS:                cfg.Infra.HTTP.CORS,
-		OIDC:                oidcVerifier,
+		OIDC:                verifier,
 		Catalog:             catalog,
 		SystemUserID:        actor,
 	})

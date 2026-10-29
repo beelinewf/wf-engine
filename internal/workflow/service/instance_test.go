@@ -33,6 +33,7 @@ func setupSvcDB(t testing.TB) *gorm.DB {
 	db := testdb.Open(t, "service")
 	if err := db.AutoMigrate(
 		&repository.UserModel{}, &repository.RoleModel{}, &repository.RolePermissionModel{},
+		&repository.UserRoleModel{},
 		&repository.SecretModel{}, &repository.FormModel{}, &repository.NodeDefinitionModel{},
 		&repository.WorkflowDefinitionModel{}, &repository.WorkflowDefinitionNodeRefModel{},
 		&repository.WorkflowDefinitionFormRefModel{}, &repository.NodeDefinitionFormRefModel{},
@@ -45,7 +46,7 @@ func setupSvcDB(t testing.TB) *gorm.DB {
 		t.Fatalf("AutoMigrate() error = %v", err)
 	}
 	if err := db.Exec(`TRUNCATE TABLE
-		role_permissions, roles,
+		user_roles, role_permissions, roles,
 		secrets, forms, workflow_definition_form_refs, node_definition_form_refs,
 		status_update_outbox, node_context_history, input_deliveries, workflow_instance_events, node_instances,
 		parallel_branches, parallel_executions,
@@ -54,7 +55,7 @@ func setupSvcDB(t testing.TB) *gorm.DB {
 		t.Fatalf("truncate tables: %v", err)
 	}
 	ctx := context.Background()
-	if err := repository.UpsertSystemUser(ctx, db, model.User{ID: svcSysUserID, Name: "system", Email: "system@localhost"}); err != nil {
+	if err := repository.UpsertSystemUser(ctx, db, model.User{ID: svcSysUserID, Name: "system", Email: "system@localhost", IsActive: true}); err != nil {
 		t.Fatalf("seed system user: %v", err)
 	}
 	// A second user stands in for a just-in-time OIDC identity, so the

@@ -462,3 +462,71 @@ Aggregate run counts over an inclusive creation window. No pagination.
   `finished_at - started_at` in ms over terminal runs with both timestamps set, `null` when none qualify.
 - `runs_per_day` buckets group by calendar day of `created_at` (`date` is `YYYY-MM-DD`), ordered by `order`. Empty
   window returns zeros with `runs_per_day: []` (empty array, never `null`).
+
+## Auth
+
+Local register/login/verify plus the user directory. OIDC callers authenticate with a provider JWT (see
+`auth/zitadel.md`); local callers register or are created, log in for an HS256 JWT, and send it as
+`Authorization: Bearer <jwt>` exactly like an OIDC one. `GET /v1/auth/config` is public and reports which logins
+exist (`local_enabled`, `registration_enabled`, `email_verification_enabled` for the local contract). The four
+`POST /v1/auth/*` routes below are likewise public, exist only while local auth is enabled, and are rate limited:
+past the budget they answer `429` with a `Retry-After` header — back off and honor it.
+
+### `POST /v1/auth/register` → `201`
+
+`{name, email, password}` (password 6–72 chars with an uppercase letter, a number, and a symbol). Closed registration → `403`. Duplicate email → `409`. With email
+verification on the response is `{user, pending_verification: true}` with no token, and the account cannot log in
+(`403`) until its mailed link is consumed; otherwise the response carries `{access_token, token_type: "Bearer",
+expires_in, user}` at once.
+
+### `POST /v1/auth/login` → `200`
+
+`{email, password}` → `{access_token, token_type: "Bearer", expires_in, user}` (`expires_in` is whole seconds).
+Unknown email, wrong password, and disabled account share one generic `401`; a pending account is `403`.
+
+### `POST /v1/auth/verify-email` → `200`
+
+`{token}` from the mailed `{base}/verify-email?token=...` link → a login session for the verified account. The token
+is single-use and expiring: unknown is `422`, expired asks for a resend.
+
+### `POST /v1/auth/resend-verification` → `200`
+
+`{email}` → always the same generic `{message}`, for unknown, verified, disabled, and cooling-down emails alike.
+Sends pace per email through the resend cooldown.
+
+### `GET /v1/auth/me` → `200`
+
+The identity behind the presented credential (`id`, `subject`, `name`, `email`, `roles`, `service`, `permissions`).
+Authenticated but carries no resource-action gate: any authenticated caller succeeds. No credential → `401`.
+
+### `GET /v1/users` → `200`
+
+Paged directory (`page`, `per_page`), newest first. Needs `users:read`. Filters combine with AND: `order`
+(`created_at` or `-created_at`, the default), comma-separated `id`, `role`, and `issuer`, booleans `is_local`,
+`email_verified`, and `is_active`, and case-insensitive substring `email` and `name`. A `role` filter matches
+local members only — OIDC rows carry no stored roles. Items carry `roles`, `is_active`,
+`email_verified`, `is_local` alongside the identity; `subject`/`issuer` are `null` for identity-less rows (system),
+`"local"` issuer marks a password account. The password hash and verification token never appear.
+
+### `POST /v1/users` → `201`
+
+`{name, email, password, roles?}` creates a verified, active account. Needs `users:write`. Unknown role or bad values
+→ `422`; duplicate email → `409`.
+
+### `PUT /v1/users/{id}` → `200`
+
+Profile edit. A `nil` field keeps the stored value; non-nil `roles` replaces the membership set (empty revokes all).
+No resource-action gate of its own: a `users:write` holder edits every field, while the account itself edits name,
+email, and password only and proves `current_password` for a rotation — anything else is `403`. An email change
+re-pends verification while it is on. OIDC rows are read-only here (`422`); unknown id is `404`, malformed id `422`.
+
+### `DELETE /v1/users/{id}` → `204`
+
+Disables the account: the row survives for the audit trail, but the credential is cleared and outstanding tokens stop
+resolving at once. Needs `users:write`. The system user and the caller's own account refuse with `422`; unknown id is
+`404`.
+
+### `POST /v1/users/{id}/resend-verification` → `204`
+
+Admin resend: unknown id is `404`, the cooldown does not apply, a verified account is a silent success. Needs
+`users:write`.

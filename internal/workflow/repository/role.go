@@ -39,9 +39,10 @@ type RoleRepository interface {
 	// would leave no role granting roles:write is model.ErrConflict and
 	// rolls back.
 	Update(ctx context.Context, role model.Role, actions []string) (model.Role, error)
-	// Delete removes a role and its permission rows in one transaction,
-	// permissions first because the foreign key is ON DELETE RESTRICT. An
-	// unknown name is ErrRoleNotFound. Deleting the last role granting
+	// Delete removes a role with its permission rows and the user_roles
+	// memberships naming it in one transaction, permissions and
+	// memberships first because the foreign keys are ON DELETE RESTRICT.
+	// An unknown name is ErrRoleNotFound. Deleting the last role granting
 	// roles:write is model.ErrConflict and rolls back.
 	Delete(ctx context.Context, name string) error
 }
@@ -228,6 +229,11 @@ func (r *roleRepository) Delete(ctx context.Context, name string) error {
 		// Permissions first: the foreign key is ON DELETE RESTRICT, so the
 		// role row cannot go while a grant still names it.
 		if err := tx.Where("role = ?", name).Delete(&RolePermissionModel{}).Error; err != nil {
+			return err
+		}
+		// Memberships for the same reason: a deleted role stops granting
+		// to every holder, local members included.
+		if err := tx.Where("role = ?", name).Delete(&UserRoleModel{}).Error; err != nil {
 			return err
 		}
 		res := tx.Where("name = ?", name).Delete(&RoleModel{})

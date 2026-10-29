@@ -20,12 +20,23 @@ type AuthHandler struct {
 	// apiToken marks a token-only deployment, so the login contract can
 	// tell a frontend that no OIDC login exists yet.
 	apiToken bool
+	// local is the public local-auth fragment of the login contract.
+	local LocalAuthContract
+}
+
+// LocalAuthContract is the public local-auth fragment of the login
+// contract: whether register/login exist, and whether registration pends
+// on a mailbox.
+type LocalAuthContract struct {
+	Enabled                  bool
+	RegistrationEnabled      bool
+	EmailVerificationEnabled bool
 }
 
 // NewAuthHandler builds the auth handler. verifier may be nil, in which case
 // the login contract reports OIDC as disabled.
-func NewAuthHandler(authSvc service.AuthService, verifier auth.Verifier, catalog *auth.Catalog, apiTokenEnabled bool) *AuthHandler {
-	return &AuthHandler{authSvc: authSvc, verifier: verifier, catalog: catalog, apiToken: apiTokenEnabled}
+func NewAuthHandler(authSvc service.AuthService, verifier auth.Verifier, catalog *auth.Catalog, apiTokenEnabled bool, local LocalAuthContract) *AuthHandler {
+	return &AuthHandler{authSvc: authSvc, verifier: verifier, catalog: catalog, apiToken: apiTokenEnabled, local: local}
 }
 
 // Config handles GET /v1/auth/config.
@@ -38,8 +49,11 @@ func NewAuthHandler(authSvc service.AuthService, verifier auth.Verifier, catalog
 // @Router /v1/auth/config [get]
 func (h *AuthHandler) Config(c *gin.Context) {
 	resp := AuthConfigResponse{
-		ApiTokenEnabled: h.apiToken,
-		Roles:           h.catalog.Roles(),
+		ApiTokenEnabled:          h.apiToken,
+		LocalEnabled:             h.local.Enabled,
+		RegistrationEnabled:      h.local.RegistrationEnabled,
+		EmailVerificationEnabled: h.local.EmailVerificationEnabled,
+		Roles:                    h.catalog.Roles(),
 	}
 	if h.verifier != nil {
 		cfg := h.verifier.Config()
