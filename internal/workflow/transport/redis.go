@@ -1,4 +1,4 @@
-// Package transport provides the optional Redis and RabbitMQ broker
+// Package transport provides the optional Redis, RabbitMQ, and NATS broker
 // adapters behind narrow publish interfaces. The engine works without
 // brokers: adapters are constructed only when their DSN is configured, and
 // consumers depend on the narrow interfaces so tests can substitute fakes.

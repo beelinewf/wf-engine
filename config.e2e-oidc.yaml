@@ -11,6 +11,8 @@ infra:
     dsn: ""
   rabbitmq:
     dsn: ""
+  nats:
+    dsn: ""
 
 engine:
   default_node_timeout: 10s

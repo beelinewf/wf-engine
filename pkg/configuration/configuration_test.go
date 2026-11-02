@@ -664,6 +664,15 @@ func TestLoadBrokerDefaults(t *testing.T) {
 	if cfg.Infra.RabbitMQ.DSN != "" {
 		t.Errorf("rabbitmq dsn = %q, want empty (optional)", cfg.Infra.RabbitMQ.DSN)
 	}
+	if cfg.Infra.NATS.DSN != "" {
+		t.Errorf("nats dsn = %q, want empty (optional)", cfg.Infra.NATS.DSN)
+	}
+	if cfg.Infra.NATS.Stream != "BEELINEWF" {
+		t.Errorf("stream = %q, want BEELINEWF", cfg.Infra.NATS.Stream)
+	}
+	if cfg.Infra.NATS.Consumer != "beelinewf-input" {
+		t.Errorf("consumer = %q, want beelinewf-input", cfg.Infra.NATS.Consumer)
+	}
 	if cfg.Infra.RabbitMQ.InputQueue != "beelinewf.input" {
 		t.Errorf("input_queue = %q, want beelinewf.input", cfg.Infra.RabbitMQ.InputQueue)
 	}
@@ -682,6 +691,9 @@ func TestLoadBrokersFromEnv(t *testing.T) {
 	setenv(t, "BEELINEWF_INFRA_RABBITMQ_INPUT_QUEUE", "workflow.input")
 	setenv(t, "BEELINEWF_INFRA_RABBITMQ_OUTPUT_QUEUE", "workflow.output")
 	setenv(t, "BEELINEWF_INFRA_RABBITMQ_STATUS_QUEUE", "workflow.status")
+	setenv(t, "BEELINEWF_INFRA_NATS_DSN", "nats://localhost:4222")
+	setenv(t, "BEELINEWF_INFRA_NATS_STREAM", "CUSTOM")
+	setenv(t, "BEELINEWF_INFRA_NATS_CONSUMER", "custom-input")
 
 	cfg, err := configuration.Load()
 	if err != nil {
@@ -696,6 +708,12 @@ func TestLoadBrokersFromEnv(t *testing.T) {
 	if cfg.Infra.RabbitMQ.InputQueue != "workflow.input" || cfg.Infra.RabbitMQ.OutputQueue != "workflow.output" || cfg.Infra.RabbitMQ.StatusQueue != "workflow.status" {
 		t.Errorf("rabbit queues = %+v, want explicit values", cfg.Infra.RabbitMQ)
 	}
+	if cfg.Infra.NATS.DSN != "nats://localhost:4222" {
+		t.Errorf("nats dsn = %q, want nats://localhost:4222", cfg.Infra.NATS.DSN)
+	}
+	if cfg.Infra.NATS.Stream != "CUSTOM" || cfg.Infra.NATS.Consumer != "custom-input" {
+		t.Errorf("nats stream/consumer = %+v, want explicit values", cfg.Infra.NATS)
+	}
 }
 
 func TestLoadBrokersFromConfigFile(t *testing.T) {
@@ -707,6 +725,8 @@ infra:
     dsn: "redis://file-redis:6379/0"
   rabbitmq:
     dsn: "amqp://file-rabbit:5672/"
+  nats:
+    dsn: "nats://file-nats:4222"
 `)
 	cfg, err := configuration.Load(configuration.WithConfigFile(path))
 	if err != nil {
@@ -721,6 +741,12 @@ infra:
 	// Queue defaults still apply when the file omits them.
 	if cfg.Infra.RabbitMQ.InputQueue != "beelinewf.input" {
 		t.Errorf("input_queue = %q, want default beelinewf.input", cfg.Infra.RabbitMQ.InputQueue)
+	}
+	if cfg.Infra.NATS.DSN != "nats://file-nats:4222" {
+		t.Errorf("nats dsn = %q, want file value", cfg.Infra.NATS.DSN)
+	}
+	if cfg.Infra.NATS.Stream != "BEELINEWF" {
+		t.Errorf("stream = %q, want default BEELINEWF", cfg.Infra.NATS.Stream)
 	}
 }
 
@@ -739,6 +765,42 @@ infra:
 	}
 	if !strings.Contains(err.Error(), "input_queue") {
 		t.Errorf("error = %q, want mention of input_queue", err)
+	}
+}
+
+func TestLoadRejectsNATSDSNWithoutStream(t *testing.T) {
+	path := writeConfig(t, `
+infra:
+  postgresql:
+    dsn: "file-dsn"
+  nats:
+    dsn: "nats://localhost:4222"
+    stream: ""
+`)
+	_, err := configuration.Load(configuration.WithConfigFile(path))
+	if err == nil {
+		t.Fatal("Load() error = nil, want error for nats dsn with empty stream")
+	}
+	if !strings.Contains(err.Error(), "infra.nats.stream") {
+		t.Errorf("error = %q, want mention of infra.nats.stream", err)
+	}
+}
+
+func TestLoadRejectsNATSDSNWithoutConsumer(t *testing.T) {
+	path := writeConfig(t, `
+infra:
+  postgresql:
+    dsn: "file-dsn"
+  nats:
+    dsn: "nats://localhost:4222"
+    consumer: ""
+`)
+	_, err := configuration.Load(configuration.WithConfigFile(path))
+	if err == nil {
+		t.Fatal("Load() error = nil, want error for nats dsn with empty consumer")
+	}
+	if !strings.Contains(err.Error(), "infra.nats.consumer") {
+		t.Errorf("error = %q, want mention of infra.nats.consumer", err)
 	}
 }
 

@@ -40,6 +40,13 @@ infra:
     input_queue: "beelinewf.input"
     output_queue: "beelinewf.output"
     status_queue: "beelinewf.status"
+  # Optional NATS (durable JetStream input, Core output/status subjects). Set
+  # the DSN (e.g. nats://localhost:4222) to enable; the server must have
+  # JetStream enabled.
+  nats:
+    dsn: ""
+    stream: "BEELINEWF"
+    consumer: "beelinewf-input"
   # Optional S3-compatible object storage backing multipart input uploads.
   # See config.yaml for the full contract.
   storage:

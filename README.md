@@ -3,7 +3,7 @@
 # BeelineWF — Durable Workflow Engine on PostgreSQL
 
 [![CI](https://github.com/beelinewf/wf-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/beelinewf/wf-engine/actions/workflows/ci.yml)
-![Coverage](https://img.shields.io/badge/Coverage-80.3%25-brightgreen)
+![Coverage](https://img.shields.io/badge/Coverage-81.8%25-brightgreen)
 [![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)](go.mod)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -11,9 +11,10 @@ BeelineWF is a durable workflow engine in Go. Workflow definitions are
 immutable and versioned, execution state lives in PostgreSQL, and workers
 claim work with `SELECT ... FOR UPDATE SKIP LOCKED` under leases and
 heartbeats. An HTTP API covers definitions, instances, input delivery,
-pause/resume/stop/rollback controls, and per-node debugging. Optional Redis
-and RabbitMQ transports add broker input nodes, broker output nodes, and
-status notifications. Both stay fully disabled when their DSN is absent.
+pause/resume/stop/rollback controls, and per-node debugging. Optional Redis,
+RabbitMQ, and NATS transports add broker input nodes, broker output nodes,
+and status notifications. All three stay fully disabled when their DSN is
+absent.
 
 ## Contents
 
@@ -43,9 +44,10 @@ status notifications. Both stay fully disabled when their DSN is absent.
   (`previous_version_id`, `lineage_id`). Running instances always execute
   the exact definition they started with.
 - **Postgres first, brokers optional.** The engine needs only PostgreSQL.
-  Redis pub/sub and RabbitMQ durable queues plug in for event-driven input,
+  Redis pub/sub, RabbitMQ durable queues, and NATS (durable JetStream input,
+  Core subjects for output and status) plug in for event-driven input,
   output publishing, and status fan-out, and the app still starts
-  HTTP-only when both DSNs are empty.
+  HTTP-only when all three DSNs are empty.
 - **Debuggable.** Full `context_before`/`context_after` snapshots per
   attempt, an append-only event log, per-occurrence node debug, and
   rollback of paused or failed instances to a prior occurrence.
@@ -60,14 +62,15 @@ status notifications. Both stay fully disabled when their DSN is absent.
   so workflows can render `{{ secret.KEY }}` while later secret changes do
   not affect running instances.
 - Node types: `script` (Goja ES5.1 sandbox, no `eval`), `conditions`
-  (exactly-one-match routing), `input` (HTTP webhook, Redis pub/sub, or
-  RabbitMQ queue with optional `form_id` reference into the `/v1/forms` library
-  — JSON Schema plus ui hints — plus validation script and `Idempotency-Key` dedupe;
+  (exactly-one-match routing), `input` (HTTP webhook, Redis pub/sub,
+  RabbitMQ queue, or NATS subject with optional `form_id` reference into the
+  `/v1/forms` library — JSON Schema plus ui hints — plus validation script
+  and `Idempotency-Key` dedupe;
   instances created with `"snapshot_forms": true` freeze those bytes at start),
-  `output` (publish a context value to Redis or RabbitMQ, returns a
+  `output` (publish a context value to Redis, RabbitMQ, or NATS, returns a
   receipt), nested `group`, `external_call` (outbound HTTP, allowlisted
   command, or templated email), and `poller` (active wait over HTTP, Redis,
-  or RabbitMQ until an `until` predicate matches), `delay` (explicit timed
+  RabbitMQ, or NATS until an `until` predicate matches), `delay` (explicit timed
   wait, the node form of `start_delay`), plus `parallel_start`/`parallel_end`
   for fork/join branches with snapshot isolation and a scripted merge.
 - Lifecycle hooks: optional `pre_script`/`post_script` context transforms
@@ -130,13 +133,13 @@ state machines, and recovery semantics.
   rather than serving unsigned ones, so the app verifies the signature
   exactly as it would against Zitadel or Keycloak. Install with
   `pip install cryptography`.
-- Optional: Redis 7, RabbitMQ 4 (only for broker transports)
+- Optional: Redis 7, RabbitMQ 4, NATS 2 with JetStream (only for broker transports)
 
 ## Quickstart
 
 ### Option A: Docker Compose (fastest)
 
-Starts PostgreSQL, Redis, RabbitMQ, migrations, and the app with all
+Starts PostgreSQL, Redis, RabbitMQ, NATS, migrations, and the app with all
 transports enabled. The stack is API-only: there is no bundled web UI, so
 deploy a frontend separately against `http://localhost:8080`. CORS allows
 any origin by default; set `BEELINEWF_INFRA_HTTP_CORS_ALLOWED_ORIGINS` to
@@ -149,7 +152,7 @@ curl http://localhost:8080/health/ready
 
 - App: `http://localhost:8080` (PostgreSQL `9921`, Redis `6379`,
   RabbitMQ `5672`, management UI `http://localhost:15672` with
-  `beelinewf` / `beelinewf`).
+  `beelinewf` / `beelinewf`, NATS `4222`).
 - Swagger UI: `http://localhost:8080/swagger/index.html`.
 - Auth is disabled in the compose defaults. To require the service credential,
   set `BEELINEWF_AUTH_ENABLED=true` and pass `X-Api-Token: wadidaw` on `/v1` calls.
@@ -237,10 +240,10 @@ uses; `config.e2e-oidc.yaml` is a working example.
 | `script`         | Goja ES5.1 transform, return value written to `output_property`                    | [workflow.yaml](workflow.yaml)     |
 | `conditions`     | Evaluates all conditions, routes on the single match (0 or 2+ fail)                | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | `input`          | Parks with `waiting_reason: input` until a payload arrives                         | [API reference](#api-reference)    |
-| `output`         | Publishes `context_path` JSON to Redis or RabbitMQ, returns receipt                | [workflow.yaml](workflow.yaml)     |
+| `output`         | Publishes `context_path` JSON to Redis, RabbitMQ, or NATS, returns receipt        | [workflow.yaml](workflow.yaml)     |
 | `group`          | Nested sub-graph with its own key routing and hooks                                | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | `external_call`  | Outbound HTTP (allowlisted), allowlisted command, or templated email; optional `on_failure` fallback | [Configuration](#configuration)    |
-| `poller`         | Repeats HTTP/Redis/RabbitMQ reads until `until` returns `true`                     | [ARCHITECTURE.md](ARCHITECTURE.md) |
+| `poller`         | Repeats HTTP/Redis/RabbitMQ/NATS reads until `until` returns `true`                | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | `parallel_start` | Forks named branches from a frozen parent snapshot, parks on the join              | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | `parallel_end`   | Barrier join: runs `combining_script` over branch contexts, continues past         | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | `delay`          | Explicit timed wait on arrival, then continues at `next_node`                      | [docs/integration/fields.md](docs/integration/fields.md) |
@@ -282,6 +285,7 @@ system audit user. Key settings:
 | `infra.postgresql.connect_timeout`                          | `15s`                  | Startup ping budget; a blackhole DSN fails the boot fast (`BEELINEWF_INFRA_POSTGRESQL_CONNECT_TIMEOUT`)                        |
 | `infra.redis.dsn`                                           | `""` (disabled)        | e.g. `redis://localhost:6379/0`; unreachable broker fails startup                                                              |
 | `infra.rabbitmq.dsn`                                        | `""` (disabled)        | e.g. `amqp://beelinewf:beelinewf@localhost:5672/`; queues default to `beelinewf.input`, `beelinewf.output`, `beelinewf.status` |
+| `infra.nats.dsn`                                            | `""` (disabled)        | e.g. `nats://localhost:4222`; needs JetStream; stream `BEELINEWF`, consumer `beelinewf-input` by default                       |
 | `engine.default_node_timeout` / `max_node_timeout`          | `30s` / `5m`           | Caps script, `external_call`, and `output` nodes                                                                               |
 | `engine.condition_timeout`                                  | `5s`                   | Fixed budget for conditions, input validation, poller predicates, join scripts                                                 |
 | `engine.parallel.max_depth`                                 | `4`                    | Max parallel nesting depth (groups add no depth)                                                                               |
@@ -414,8 +418,9 @@ front of multi-replica deployments.
 **API token (the service principal).** `auth.enabled` + `auth.api_token`
 accepts `X-Api-Token`. This principal bypasses every authorization gate —
 it exists so machines and the broker can drive instances. Treat it like a
-password, and never hand it to a browser. Broker deliveries (Redis, RabbitMQ)
-have no user identity at all and are likewise the service principal.
+password, and never hand it to a browser. Broker deliveries (Redis,
+RabbitMQ, NATS) have no user identity at all and are likewise the service
+principal.
 
 With both disabled, `/v1` behaves exactly as it did before this feature:
 open.
@@ -696,6 +701,8 @@ status_update:
     max_retry: 2
   rabbitmq:
     max_retry: 1
+  nats:
+    max_retry: 2
 ```
 
 Covered transitions: `waiting_for_input`, `input_received`, `paused`,
@@ -703,7 +710,8 @@ Covered transitions: `waiting_for_input`, `input_received`, `paused`,
 outbox row per configured transport sharing one logical event id, delivered
 in per-instance/per-transport order, at-least-once. Receivers dedupe on the
 id (`Idempotency-Key` / `X-BeelineWF-Event-ID` on HTTP, AMQP `message_id` on
-RabbitMQ, embedded `id` on Redis). A transport configured without its
+RabbitMQ, embedded `id` on Redis, `Nats-Msg-Id` on NATS). A transport
+configured without its
 broker DSN dead-letters. Full payload and ordering guarantees are in
 [ARCHITECTURE.md](ARCHITECTURE.md).
 
@@ -828,7 +836,7 @@ internal/workflow/model       domain entities, statuses, state machine invariant
 internal/workflow/repository  GORM models, fenced claims, checkpoints, outbox
 internal/workflow/executor    Goja sandbox, node executors, lifecycle hooks
 internal/workflow/engine      cursor machine, dispatcher, cancellation registry
-internal/workflow/transport   optional Redis/RabbitMQ adapters
+internal/workflow/transport   optional Redis/RabbitMQ/NATS adapters
 internal/workflow/inputtransport  broker input consumers
 internal/workflow/statusupdate    outbox dispatcher + status publishers
 internal/workflow/service     use-case orchestration (instances, controls, debug)

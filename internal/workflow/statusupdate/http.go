@@ -1,7 +1,7 @@
 // Package statusupdate delivers workflow status-change notifications from
 // the transactional outbox to their configured transports. The http, redis,
-// and rabbitmq publishers all implement the same Publisher interface and
-// are routed by the outbox row's transport.
+// rabbitmq, and nats publishers all implement the same Publisher interface
+// and are routed by the outbox row's transport.
 package statusupdate
 
 import (

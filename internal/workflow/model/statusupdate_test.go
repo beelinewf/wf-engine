@@ -96,6 +96,7 @@ func TestParseStatusUpdateRejectsInvalid(t *testing.T) {
 		{"no transport", `{"status_update":{}}`, "at least one"},
 		{"redis negative max retry", `{"status_update":{"redis":{"max_retry":-1}}}`, "redis"},
 		{"rabbit bad retry delay", `{"status_update":{"rabbitmq":{"retry_delay":"soon"}}}`, "rabbitmq"},
+		{"nats negative max retry", `{"status_update":{"nats":{"max_retry":-1}}}`, "nats"},
 		{"malformed", `{"status_update":"not an object"}`, ""},
 	}
 	for _, tc := range cases {
@@ -114,7 +115,8 @@ func TestParseStatusUpdateRejectsInvalid(t *testing.T) {
 func TestParseStatusUpdateBrokerBlocks(t *testing.T) {
 	cfg := mustStatusUpdate(t, `{"status_update":{
 		"redis":{"max_retry":1,"retry_delay":"2s"},
-		"rabbitmq":{"max_retry":0}
+		"rabbitmq":{"max_retry":0},
+		"nats":{"retry_delay":"3s"}
 	}}`)
 	if cfg.HTTP != nil {
 		t.Errorf("http = %+v, want nil", cfg.HTTP)
@@ -125,8 +127,11 @@ func TestParseStatusUpdateBrokerBlocks(t *testing.T) {
 	if cfg.RabbitMQ == nil || cfg.RabbitMQ.MaxRetry != 0 || cfg.RabbitMQ.RetryDelay != 5*time.Second {
 		t.Errorf("rabbitmq = %+v, want max_retry 0 delay default 5s", cfg.RabbitMQ)
 	}
-	if got := cfg.Transports(); len(got) != 2 || got[0] != model.StatusUpdateTransportRedis || got[1] != model.StatusUpdateTransportRabbitMQ {
-		t.Errorf("Transports() = %v, want [redis rabbitmq]", got)
+	if cfg.NATS == nil || cfg.NATS.MaxRetry != 3 || cfg.NATS.RetryDelay != 3*time.Second {
+		t.Errorf("nats = %+v, want max_retry default 3 delay 3s", cfg.NATS)
+	}
+	if got := cfg.Transports(); len(got) != 3 || got[0] != model.StatusUpdateTransportRedis || got[1] != model.StatusUpdateTransportRabbitMQ || got[2] != model.StatusUpdateTransportNATS {
+		t.Errorf("Transports() = %v, want [redis rabbitmq nats]", got)
 	}
 }
 
@@ -140,6 +145,9 @@ func TestStatusUpdateRetryPolicy(t *testing.T) {
 	}
 	if _, _, ok := cfg.RetryPolicy(model.StatusUpdateTransportRabbitMQ); !ok {
 		t.Error("rabbitmq retry ok = false, want true")
+	}
+	if _, _, ok := cfg.RetryPolicy(model.StatusUpdateTransportNATS); ok {
+		t.Error("nats retry ok = true, want false (not configured)")
 	}
 	if _, _, ok := cfg.RetryPolicy("kafka"); ok {
 		t.Error("unknown transport retry ok = true, want false")

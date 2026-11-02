@@ -59,8 +59,8 @@ type UpdateContext struct {
 }
 
 // DeliverInput delivers a payload to a waiting input node. Source is the
-// transport the payload arrived on ("http", "redis", or "rabbitmq"); an
-// empty Source defaults to "http".
+// transport the payload arrived on ("http", "redis", "rabbitmq", or
+// "nats"); an empty Source defaults to "http".
 type DeliverInput struct {
 	InstanceID string
 	// BranchID targets a branch-parked input node instead of the instance

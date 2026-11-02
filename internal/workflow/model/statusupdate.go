@@ -25,6 +25,7 @@ type StatusUpdateConfig struct {
 	HTTP     *HTTPStatusUpdateConfig   `json:"http"`
 	Redis    *RedisStatusUpdateConfig  `json:"redis"`
 	RabbitMQ *RabbitStatusUpdateConfig `json:"rabbitmq"`
+	NATS     *NATSStatusUpdateConfig   `json:"nats"`
 }
 
 // HTTPStatusUpdateConfig describes the outbound webhook called on externally
@@ -49,6 +50,14 @@ type RedisStatusUpdateConfig struct {
 // configured status queue. Only the retry policy is configurable; the queue
 // comes from the infrastructure configuration.
 type RabbitStatusUpdateConfig struct {
+	MaxRetry   int
+	RetryDelay time.Duration
+}
+
+// NATSStatusUpdateConfig enables publishing status events to the fixed
+// beelinewf.status.<instance> subject. Only the retry policy is
+// configurable; the subject name is fixed.
+type NATSStatusUpdateConfig struct {
 	MaxRetry   int
 	RetryDelay time.Duration
 }
@@ -97,6 +106,8 @@ const (
 	StatusUpdateTransportRedis = "redis"
 	// StatusUpdateTransportRabbitMQ is the rabbitmq queue outbox transport.
 	StatusUpdateTransportRabbitMQ = "rabbitmq"
+	// StatusUpdateTransportNATS is the nats subject outbox transport.
+	StatusUpdateTransportNATS = "nats"
 )
 
 // StatusUpdateEventPayload is the immutable webhook body delivered for one
@@ -137,12 +148,13 @@ func ParseStatusUpdate(content json.RawMessage) (*StatusUpdateConfig, error) {
 		HTTP     *rawStatusUpdateHTTP  `json:"http"`
 		Redis    *rawStatusUpdateRetry `json:"redis"`
 		RabbitMQ *rawStatusUpdateRetry `json:"rabbitmq"`
+		NATS     *rawStatusUpdateRetry `json:"nats"`
 	}
 	if err := json.Unmarshal(wf.StatusUpdate, &raw); err != nil {
 		return nil, fmt.Errorf("parse status_update: %w", err)
 	}
-	if raw.HTTP == nil && raw.Redis == nil && raw.RabbitMQ == nil {
-		return nil, errors.New("status_update requires at least one of http, redis, rabbitmq")
+	if raw.HTTP == nil && raw.Redis == nil && raw.RabbitMQ == nil && raw.NATS == nil {
+		return nil, errors.New("status_update requires at least one of http, redis, rabbitmq, nats")
 	}
 	cfg := &StatusUpdateConfig{}
 	if raw.HTTP != nil {
@@ -166,11 +178,18 @@ func ParseStatusUpdate(content json.RawMessage) (*StatusUpdateConfig, error) {
 		}
 		cfg.RabbitMQ = &RabbitStatusUpdateConfig{MaxRetry: maxRetry, RetryDelay: retryDelay}
 	}
+	if raw.NATS != nil {
+		maxRetry, retryDelay, err := parseStatusUpdateRetry(raw.NATS, "nats")
+		if err != nil {
+			return nil, err
+		}
+		cfg.NATS = &NATSStatusUpdateConfig{MaxRetry: maxRetry, RetryDelay: retryDelay}
+	}
 	return cfg, nil
 }
 
 // Transports returns the configured transport names in canonical order
-// (http, redis, rabbitmq).
+// (http, redis, rabbitmq, nats).
 func (c *StatusUpdateConfig) Transports() []string {
 	var out []string
 	if c.HTTP != nil {
@@ -181,6 +200,9 @@ func (c *StatusUpdateConfig) Transports() []string {
 	}
 	if c.RabbitMQ != nil {
 		out = append(out, StatusUpdateTransportRabbitMQ)
+	}
+	if c.NATS != nil {
+		out = append(out, StatusUpdateTransportNATS)
 	}
 	return out
 }
@@ -204,6 +226,11 @@ func (c *StatusUpdateConfig) RetryPolicy(tr string) (maxRetry int, retryDelay ti
 			return 0, 0, false
 		}
 		return c.RabbitMQ.MaxRetry, c.RabbitMQ.RetryDelay, true
+	case StatusUpdateTransportNATS:
+		if c.NATS == nil {
+			return 0, 0, false
+		}
+		return c.NATS.MaxRetry, c.NATS.RetryDelay, true
 	}
 	return 0, 0, false
 }

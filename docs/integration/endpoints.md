@@ -297,7 +297,7 @@ rendered from the secret-redacted snapshot and never carrying literal values.
 ### `PUT /v1/workflow/instance/{id}/input` → `202`
 
 Delivers a payload to the parked input node. Only works when the instance is `waiting` with `waiting_reason == "input"`
-and the node channel is `http` (this endpoint always delivers as source `http`; `redis`/`rabbitmq` channels are fed by
+and the node channel is `http` (this endpoint always delivers as source `http`; `redis`/`rabbitmq`/`nats` channels are fed by
 brokers, never by FE).
 
 | Item                     | Rule                                                                                                                                                                                                                                                                   |

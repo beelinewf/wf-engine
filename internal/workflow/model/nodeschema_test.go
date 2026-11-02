@@ -131,8 +131,8 @@ func TestNodeSchemaEnumsPerType(t *testing.T) {
 		path     []string
 		want     []string
 	}{
-		{"input", []string{"channel"}, []string{"http", "redis", "rabbitmq"}},
-		{"output", []string{"channel"}, []string{"redis", "rabbitmq"}},
+		{"input", []string{"channel"}, []string{"http", "redis", "rabbitmq", "nats"}},
+		{"output", []string{"channel"}, []string{"redis", "rabbitmq", "nats"}},
 		{"poller", []string{"redis", "method"}, []string{"GET", "SUB"}},
 	}
 	for _, tc := range cases {
@@ -174,7 +174,7 @@ func TestNodeSchemaConditionsConstraints(t *testing.T) {
 func TestNodeSchemaOneOfPerType(t *testing.T) {
 	cases := map[string][]string{
 		"external_call": {"http_config", "execution_config", "smtp_config"},
-		"poller":        {"http", "redis", "rabbitmq"},
+		"poller":        {"http", "redis", "rabbitmq", "nats"},
 	}
 	for nodeType, want := range cases {
 		raw, _ := model.NodeSchema(nodeType)

@@ -46,6 +46,25 @@ func (f *fakeRabbitPublisher) PublishJSON(_ context.Context, queue string, paylo
 	return f.err
 }
 
+// fakeNATSPublisher records nats publishes for assertions.
+type fakeNATSPublisher struct {
+	calls     int
+	subject   string
+	payload   []byte
+	messageID string
+	headers   map[string]string
+	err       error
+}
+
+func (f *fakeNATSPublisher) PublishJSON(_ context.Context, subject string, payload []byte, messageID string, headers map[string]string) error {
+	f.calls++
+	f.subject = subject
+	f.payload = payload
+	f.messageID = messageID
+	f.headers = headers
+	return f.err
+}
+
 func outNode(channel, contextPath string) *model.NodeContent {
 	return &model.NodeContent{
 		Type:           model.NodeTypeOutput,
@@ -59,7 +78,7 @@ func outNode(channel, contextPath string) *model.NodeContent {
 func TestOutputExecutorPublishesToRedis(t *testing.T) {
 	redisPub := &fakeRedisPublisher{}
 	rabbitPub := &fakeRabbitPublisher{}
-	ex := executor.NewBrokerOutputPublisher(redisPub, rabbitPub, "beelinewf.output")
+	ex := executor.NewBrokerOutputPublisher(redisPub, rabbitPub, "beelinewf.output", &fakeNATSPublisher{})
 	// The registry wires the publisher into the executor.
 	reg := executor.NewExecutors(executor.Limits{}, nil, executor.Dependencies{Output: ex})
 	got := reg[model.NodeTypeOutput]
@@ -95,7 +114,7 @@ func TestOutputExecutorPublishesToRedis(t *testing.T) {
 func TestOutputExecutorPublishesToRabbit(t *testing.T) {
 	redisPub := &fakeRedisPublisher{}
 	rabbitPub := &fakeRabbitPublisher{}
-	ex := executor.NewBrokerOutputPublisher(redisPub, rabbitPub, "beelinewf.output")
+	ex := executor.NewBrokerOutputPublisher(redisPub, rabbitPub, "beelinewf.output", &fakeNATSPublisher{})
 	reg := executor.NewExecutors(executor.Limits{}, nil, executor.Dependencies{Output: ex})
 	got := reg[model.NodeTypeOutput]
 	_, err := got.Execute(context.Background(), executor.Request{
@@ -123,7 +142,7 @@ func TestOutputExecutorPublishesToRabbit(t *testing.T) {
 
 func TestOutputExecutorFailsOnMissingContextPath(t *testing.T) {
 	reg := executor.NewExecutors(executor.Limits{}, nil, executor.Dependencies{
-		Output: executor.NewBrokerOutputPublisher(&fakeRedisPublisher{}, &fakeRabbitPublisher{}, "q"),
+		Output: executor.NewBrokerOutputPublisher(&fakeRedisPublisher{}, &fakeRabbitPublisher{}, "q", &fakeNATSPublisher{}),
 	})
 	exe := reg[model.NodeTypeOutput]
 	_, err := exe.Execute(context.Background(), executor.Request{
@@ -139,7 +158,7 @@ func TestOutputExecutorFailsOnMissingContextPath(t *testing.T) {
 func TestOutputExecutorFailsOnPublishError(t *testing.T) {
 	redisPub := &fakeRedisPublisher{err: errors.New("broker down")}
 	reg := executor.NewExecutors(executor.Limits{}, nil, executor.Dependencies{
-		Output: executor.NewBrokerOutputPublisher(redisPub, &fakeRabbitPublisher{}, "q"),
+		Output: executor.NewBrokerOutputPublisher(redisPub, &fakeRabbitPublisher{}, "q", &fakeNATSPublisher{}),
 	})
 	exe := reg[model.NodeTypeOutput]
 	_, err := exe.Execute(context.Background(), executor.Request{
@@ -167,8 +186,48 @@ func TestOutputExecutorFailsWhenBrokerDisabled(t *testing.T) {
 	}
 }
 
+func TestOutputExecutorPublishesToNATS(t *testing.T) {
+	natsPub := &fakeNATSPublisher{}
+	ex := executor.NewBrokerOutputPublisher(&fakeRedisPublisher{}, &fakeRabbitPublisher{}, "beelinewf.output", natsPub)
+	reg := executor.NewExecutors(executor.Limits{}, nil, executor.Dependencies{Output: ex})
+	got := reg[model.NodeTypeOutput]
+	res, err := got.Execute(context.Background(), executor.Request{
+		Node:           outNode("nats", "payload"),
+		Context:        map[string]any{"payload": map[string]any{"k": "v"}},
+		IdempotencyKey: outInstanceID + ":occ-1",
+		InstanceID:     outInstanceID,
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if natsPub.calls != 1 || natsPub.subject != "beelinewf.output."+outInstanceID {
+		t.Errorf("nats publish = %+v, want subject beelinewf.output.%s", natsPub, outInstanceID)
+	}
+	if natsPub.messageID != outInstanceID+":occ-1" {
+		t.Errorf("message_id = %q, want stable execution id", natsPub.messageID)
+	}
+	if natsPub.headers["NodeInstanceId"] != outInstanceID || natsPub.headers["IdempotencyKey"] != outInstanceID+":occ-1" {
+		t.Errorf("headers = %+v", natsPub.headers)
+	}
+	receipt, ok := res.Output.(*executor.PublishReceipt)
+	if !ok {
+		t.Fatalf("output = %T, want *PublishReceipt", res.Output)
+	}
+	if receipt.Channel != "nats" || receipt.Destination != "beelinewf.output."+outInstanceID {
+		t.Errorf("receipt = %+v", receipt)
+	}
+}
+
+func TestBrokerOutputPublisherFailsWhenNATSDisabled(t *testing.T) {
+	pub := executor.NewBrokerOutputPublisher(&fakeRedisPublisher{}, &fakeRabbitPublisher{}, "q", nil)
+	_, err := pub.Publish(context.Background(), "nats", outInstanceID, []byte(`{}`), "m")
+	if err == nil {
+		t.Fatal("Publish() error = nil, want error for unconfigured nats publisher")
+	}
+}
+
 func TestBrokerOutputPublisherRejectsUnknownChannel(t *testing.T) {
-	pub := executor.NewBrokerOutputPublisher(&fakeRedisPublisher{}, &fakeRabbitPublisher{}, "q")
+	pub := executor.NewBrokerOutputPublisher(&fakeRedisPublisher{}, &fakeRabbitPublisher{}, "q", &fakeNATSPublisher{})
 	_, err := pub.Publish(context.Background(), "kafka", outInstanceID, []byte(`{}`), "m")
 	if err == nil {
 		t.Fatal("Publish() error = nil, want error for unknown channel")

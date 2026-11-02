@@ -75,8 +75,8 @@ func (d *Dispatcher) SetMetrics(rec *metrics.Recorder) {
 }
 
 // NewDispatcher builds a dispatcher; it is inert until Run is called.
-// publishers maps a transport name ("http", "redis", "rabbitmq") to the
-// publisher that delivers that transport's events.
+// publishers maps a transport name ("http", "redis", "rabbitmq", "nats") to
+// the publisher that delivers that transport's events.
 func NewDispatcher(ctx context.Context, repo repository.StatusUpdateRepository, loader ConfigLoader, publishers map[string]Publisher, workerID string, opts DispatcherOptions) (*Dispatcher, error) {
 	if opts.PollInterval <= 0 {
 		opts.PollInterval = 200 * time.Millisecond

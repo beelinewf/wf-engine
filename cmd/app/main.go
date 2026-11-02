@@ -531,6 +531,18 @@ func run(ctx context.Context, cfg *configuration.Config, logger *logrus.Logger) 
 		defer func() { _ = rabbitClient.Close() }()
 		logger.Info("rabbitmq connected")
 	}
+	var natsClient *transport.NATSClient
+	var natsPub transport.NATSPublisher
+	if dsn := cfg.Infra.NATS.DSN; dsn != "" {
+		nc, err := transport.NewNATSClient(ctx, dsn, cfg.Infra.NATS.Stream, cfg.Infra.NATS.Consumer)
+		if err != nil {
+			return fmt.Errorf("nats: %w", err)
+		}
+		natsClient = nc
+		natsPub = nc
+		defer func() { _ = natsClient.Close() }()
+		logger.Info("nats connected")
+	}
 
 	// Optional object storage for multipart input uploads. The client is
 	// built once here; a nil store means storage is disabled and multipart
@@ -574,9 +586,10 @@ func run(ctx context.Context, cfg *configuration.Config, logger *logrus.Logger) 
 
 	hookRunner := executor.NewHookRunner(nil)
 	executors := executor.NewExecutors(execLimits, nil, executor.Dependencies{
-		Output:       executor.NewBrokerOutputPublisher(redisPub, rabbitPub, cfg.Infra.RabbitMQ.OutputQueue),
+		Output:       executor.NewBrokerOutputPublisher(redisPub, rabbitPub, cfg.Infra.RabbitMQ.OutputQueue, natsPub),
 		RedisPoller:  redisClient,
 		RabbitPoller: rabbitClient,
+		NATSPoller:   natsClient,
 		SMTPSender:   workflowMail,
 		SMTPObjects:  objStore,
 	})
@@ -674,6 +687,28 @@ func run(ctx context.Context, cfg *configuration.Config, logger *logrus.Logger) 
 		}()
 		logger.Info("rabbitmq input consumer started")
 	}
+	if natsClient != nil {
+		natsDSN := cfg.Infra.NATS.DSN
+		natsStream := cfg.Infra.NATS.Stream
+		natsConsumer := cfg.Infra.NATS.Consumer
+		natsStatus := inputtransport.NewConsumerStatus("nats")
+		monitors["nats"] = natsStatus
+		consumers.Add(1)
+		go func() {
+			defer consumers.Done()
+			inputtransport.SuperviseCapped(ctx, natsStatus, func(runCtx context.Context) error {
+				// Each attempt dials a fresh client and discards
+				// it, so a dead client is never reused.
+				nc, err := transport.NewNATSClient(runCtx, natsDSN, natsStream, natsConsumer)
+				if err != nil {
+					return err
+				}
+				defer func() { _ = nc.Close() }()
+				return inputtransport.NewNATSInput(nc, instSvc).Run(runCtx)
+			}, retry)
+		}()
+		logger.Info("nats input consumer started")
+	}
 	defer func() {
 		stopCtx := shutdown.context()
 		done := make(chan struct{})
@@ -701,8 +736,8 @@ func run(ctx context.Context, cfg *configuration.Config, logger *logrus.Logger) 
 
 	// Status-update dispatcher: drains the transactional outbox, delivering
 	// notifications in strict per-instance and per-transport order through
-	// the configured transport publishers (http always; redis and rabbitmq
-	// when their clients exist).
+	// the configured transport publishers (http always; redis, rabbitmq,
+	// and nats when their clients exist).
 	statusUpdates := repository.NewStatusUpdateRepository(db)
 
 	// Metrics registry with snapshot sources. DB pool stats read
@@ -781,6 +816,9 @@ func run(ctx context.Context, cfg *configuration.Config, logger *logrus.Logger) 
 	}
 	if rabbitPub != nil {
 		statusPublishers[model.StatusUpdateTransportRabbitMQ] = statusupdate.NewRabbitPublisher(rabbitPub, cfg.Infra.RabbitMQ.StatusQueue)
+	}
+	if natsPub != nil {
+		statusPublishers[model.StatusUpdateTransportNATS] = statusupdate.NewNATSPublisher(natsPub)
 	}
 	statusDispatcher, err := statusupdate.NewDispatcher(ctx, statusUpdates, statusLoader,
 		statusPublishers, "status-"+hostname, statusDispatcherOptions(cfg, limits))

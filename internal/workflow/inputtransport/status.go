@@ -134,8 +134,8 @@ func SuperviseCapped(ctx context.Context, status *ConsumerStatus, run func(conte
 }
 
 // cappedBackoff doubles InitialBackoff per consecutive failure up to
-// MaxBackoff, then adds up to 25% jitter so the redis and rabbitmq consumers
-// do not redial in lockstep. failures is >= 1.
+// MaxBackoff, then adds up to 25% jitter so the broker consumers do not
+// redial in lockstep. failures is >= 1.
 func cappedBackoff(initial, max time.Duration, failures int) time.Duration {
 	d := initial
 	for i := 1; i < failures && d < max; i++ {
