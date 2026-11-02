@@ -158,7 +158,7 @@ func TestParseInputNode(t *testing.T) {
 }
 
 func TestParseInputNodeAcceptsBrokerChannels(t *testing.T) {
-	for _, channel := range []string{"http", "redis", "rabbitmq"} {
+	for _, channel := range []string{"http", "redis", "rabbitmq", "nats"} {
 		nc := mustParseContent(t, `{"type":"input","channel":"`+channel+`","output_property":"x"}`)
 		if nc.Channel != channel {
 			t.Errorf("channel = %q, want %q", nc.Channel, channel)
@@ -428,7 +428,7 @@ func TestParseGroupNodeRejectsInvalid(t *testing.T) {
 }
 
 func TestParseOutputNode(t *testing.T) {
-	for _, channel := range []string{"redis", "rabbitmq"} {
+	for _, channel := range []string{"redis", "rabbitmq", "nats"} {
 		nc := mustParseContent(t, `{"type":"output","channel":"`+channel+`","context_path":"result.payload","output_property":"out","next_node":"11111111-1111-7111-8111-111111111111"}`)
 		if nc.Type != model.NodeTypeOutput || nc.Channel != channel || nc.ContextPath != "result.payload" {
 			t.Errorf("output node mismatch: %+v", nc)
@@ -639,7 +639,31 @@ func TestParsePollerRabbitMQ(t *testing.T) {
 	if r.MaxWaitTime != 5*time.Minute {
 		t.Errorf("max_wait_time = %v, want 5m", r.MaxWaitTime)
 	}
-	if nc.PollerHTTP != nil || nc.PollerRedis != nil {
+	if nc.PollerHTTP != nil || nc.PollerRedis != nil || nc.PollerNATS != nil {
+		t.Error("other transport blocks should be nil")
+	}
+}
+
+func TestParsePollerNATS(t *testing.T) {
+	nc := mustParseContent(t, `{
+		"type": "poller",
+		"nats": {
+			"subject": "jobs.{{ workflow_instance_id }}",
+			"max_wait_time": "5m",
+			"until": "return response.body.status === \"completed\";"
+		}
+	}`)
+	r := nc.PollerNATS
+	if r == nil {
+		t.Fatal("nats block not parsed")
+	}
+	if r.Subject != "jobs.{{ workflow_instance_id }}" {
+		t.Errorf("subject = %q", r.Subject)
+	}
+	if r.MaxWaitTime != 5*time.Minute {
+		t.Errorf("max_wait_time = %v, want 5m", r.MaxWaitTime)
+	}
+	if nc.PollerHTTP != nil || nc.PollerRedis != nil || nc.PollerRabbitMQ != nil {
 		t.Error("other transport blocks should be nil")
 	}
 }
@@ -772,6 +796,10 @@ func TestParsePollerRejectsInvalid(t *testing.T) {
 		{"redis sub missing channel", `{"type":"poller","redis":{"method":"SUB","until":"return true;"}}`, "channel"},
 		{"rabbit missing queue", `{"type":"poller","rabbitmq":{"max_wait_time":"5m","until":"return true;"}}`, "queue"},
 		{"rabbit blank queue", `{"type":"poller","rabbitmq":{"queue":"  ","max_wait_time":"5m","until":"return true;"}}`, "queue"},
+		{"nats missing subject", `{"type":"poller","nats":{"max_wait_time":"5m","until":"return true;"}}`, "subject"},
+		{"nats blank subject", `{"type":"poller","nats":{"subject":"  ","max_wait_time":"5m","until":"return true;"}}`, "subject"},
+		{"nats invalid max_wait_time", `{"type":"poller","nats":{"subject":"s","max_wait_time":"soon","until":"return true;"}}`, "max_wait_time"},
+		{"poller redis plus nats", `{"type":"poller","redis":{"method":"SUB","channel":"c","until":"return true;"},"nats":{"subject":"s","until":"return true;"}}`, "exactly one"},
 		{"zero delay", `{"type":"poller","http":{"url":"https://example.com/x","delay":"0s","until":"return true;"}}`, "delay"},
 		{"negative delay", `{"type":"poller","http":{"url":"https://example.com/x","delay":"-5s","until":"return true;"}}`, "delay"},
 		{"invalid delay", `{"type":"poller","http":{"url":"https://example.com/x","delay":"soon","until":"return true;"}}`, "delay"},

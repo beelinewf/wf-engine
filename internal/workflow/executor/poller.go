@@ -41,6 +41,12 @@ func NewRabbitPollerResponse(headers map[string]string, body any) *PollerRespons
 	return &PollerResponse{Body: body, Headers: headers}
 }
 
+// NewNATSPollerResponse builds the NATS shape {body, headers} with
+// map[string]string headers.
+func NewNATSPollerResponse(headers map[string]string, body any) *PollerResponse {
+	return &PollerResponse{Body: body, Headers: headers}
+}
+
 // NormalizePollerBody parses a raw response body: valid JSON becomes its
 // parsed object, array, string, number, boolean, or null; invalid JSON
 // remains the raw string.
@@ -109,14 +115,24 @@ type RabbitPollerClient interface {
 	ConsumeQueue(ctx context.Context, queue, consumerTag string, handler func(msg transport.RabbitPollerMessage) (transport.RabbitPollerSettlement, error)) error
 }
 
+// NATSPollerClient is the narrow nats surface poller nodes need.
+// *transport.NATSClient implements it.
+type NATSPollerClient interface {
+	// Subscribe invokes handler for every message on subject until ctx is
+	// cancelled.
+	Subscribe(ctx context.Context, subject string, handler func(ctx context.Context, subject string, payload []byte, headers map[string]string) error) error
+}
+
 // PollerExecutor runs active poller nodes: repeated HTTP requests, Redis
-// GET/SUB, and RabbitMQ queue waits, each until its until predicate matches
-// or its budget is exhausted. Every attempt occupies the engine worker.
+// GET/SUB, RabbitMQ queue waits, and NATS subject waits, each until its
+// until predicate matches or its budget is exhausted. Every attempt occupies
+// the engine worker.
 type PollerExecutor struct {
 	http   *HTTPExecutor
 	pred   *PollerPredicateEvaluator
 	redis  RedisPollerClient
 	rabbit RabbitPollerClient
+	nats   NATSPollerClient
 }
 
 // NewPollerExecutor builds the poller executor; funcs may be nil.
@@ -136,6 +152,12 @@ func (e *PollerExecutor) SetRabbitClient(client RabbitPollerClient) {
 	e.rabbit = client
 }
 
+// SetNATSClient wires the optional nats poller transport. A nil client
+// makes nats poller nodes fail with a missing-transport error.
+func (e *PollerExecutor) SetNATSClient(client NATSPollerClient) {
+	e.nats = client
+}
+
 // Execute implements Executor.
 func (e *PollerExecutor) Execute(ctx context.Context, req Request) (*Result, error) {
 	switch {
@@ -145,6 +167,8 @@ func (e *PollerExecutor) Execute(ctx context.Context, req Request) (*Result, err
 		return e.pollRedis(ctx, req)
 	case req.Node.PollerRabbitMQ != nil:
 		return e.pollRabbit(ctx, req)
+	case req.Node.PollerNATS != nil:
+		return e.pollNATS(ctx, req)
 	default:
 		return nil, &NodeError{Node: req.Node, Reason: "poller", Err: errors.New("poller node has no transport config")}
 	}
@@ -437,5 +461,75 @@ func (e *PollerExecutor) pollRabbit(ctx context.Context, req Request) (*Result, 
 			return nil, ctx.Err()
 		}
 		return nil, &NodeError{Node: req.Node, Reason: "poller", Err: fmt.Errorf("rabbitmq consumption on %q ended without a match", queue)}
+	}
+}
+
+type natsSubResult struct {
+	resp *PollerResponse
+	err  error
+}
+
+// pollNATS subscribes to the rendered subject and waits up to max_wait_time
+// for a message whose predicate matches. The subject is rendered once;
+// nonmatching messages are discarded and consumption continues. NATS Core
+// delivery is broadcast: messages published while nobody is subscribed are
+// lost.
+func (e *PollerExecutor) pollNATS(ctx context.Context, req Request) (*Result, error) {
+	cfg := req.Node.PollerNATS
+	if e.nats == nil {
+		return nil, &NodeError{Node: req.Node, Reason: "poller", Err: errors.New("nats polling client is not configured")}
+	}
+	subject, err := renderString(cfg.Subject, req.TemplateData())
+	if err != nil {
+		return nil, &NodeError{Node: req.Node, Reason: "poller", Err: err}
+	}
+	if subject == "" {
+		return nil, &NodeError{Node: req.Node, Reason: "poller", Err: errors.New("nats subject is empty after rendering")}
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, cfg.MaxWaitTime)
+	defer cancel()
+	results := make(chan natsSubResult, 1)
+	handler := func(ctx context.Context, _ string, payload []byte, headers map[string]string) error {
+		resp := NewNATSPollerResponse(headers, NormalizePollerBody(payload))
+		matched, err := e.pred.Evaluate(ctx, cfg.Until, req.Node.PredicateTimeout, req.Context, resp, req.Identity())
+		if err != nil {
+			select {
+			case results <- natsSubResult{err: err}:
+			case <-waitCtx.Done():
+			}
+			return nil
+		}
+		if matched {
+			select {
+			case results <- natsSubResult{resp: resp}:
+			case <-waitCtx.Done():
+			}
+		}
+		return nil
+	}
+	subDone := make(chan error, 1)
+	go func() { subDone <- e.nats.Subscribe(waitCtx, subject, handler) }()
+	select {
+	case r := <-results:
+		cancel()
+		<-subDone
+		if r.err != nil {
+			return nil, &NodeError{Node: req.Node, Reason: "poller-until", Err: r.err}
+		}
+		return &Result{Output: r.resp}, nil
+	case <-waitCtx.Done():
+		<-subDone
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, &NodeError{Node: req.Node, Reason: "poller", Err: fmt.Errorf("nats subscription on %q elapsed without a match after %s", subject, cfg.MaxWaitTime)}
+	case err := <-subDone:
+		if err != nil {
+			return nil, &NodeError{Node: req.Node, Reason: "poller", Err: err}
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, &NodeError{Node: req.Node, Reason: "poller", Err: fmt.Errorf("nats subscription on %q ended without a match", subject)}
 	}
 }

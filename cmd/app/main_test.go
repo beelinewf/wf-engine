@@ -565,4 +565,12 @@ func TestCompositionNilBrokerDependencies(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "rabbitmq") {
 		t.Fatalf("rabbitmq poller error = %v, want missing transport", err)
 	}
+	natsCfg := &model.PollerNATSConfig{Subject: "jobs", MaxWaitTime: time.Second, Until: "return true;"}
+	_, err = poller.Execute(context.Background(), executor.Request{
+		Node:    &model.NodeContent{Type: model.NodeTypePoller, PollerNATS: natsCfg, PredicateTimeout: time.Second},
+		Context: map[string]any{},
+	})
+	if err == nil || !strings.Contains(err.Error(), "nats") {
+		t.Fatalf("nats poller error = %v, want missing transport", err)
+	}
 }

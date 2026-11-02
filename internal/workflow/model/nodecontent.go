@@ -43,6 +43,7 @@ const (
 	InputChannelHTTP     = "http"
 	InputChannelRedis    = "redis"
 	InputChannelRabbitMQ = "rabbitmq"
+	InputChannelNATS     = "nats"
 )
 
 // Media types an input node may accept. Absent accept means JSON only, so
@@ -192,6 +193,7 @@ type NodeContent struct {
 	PollerHTTP      *PollerHTTPConfig     // poller
 	PollerRedis     *PollerRedisConfig    // poller
 	PollerRabbitMQ  *PollerRabbitMQConfig // poller
+	PollerNATS      *PollerNATSConfig     // poller
 	// ParallelBranches maps branch name to target node id (parallel_start).
 	ParallelBranches map[string]string
 	// ParallelEndNodeID is the join node id (parallel_start).
@@ -386,6 +388,15 @@ type PollerRabbitMQConfig struct {
 	Until       string
 }
 
+// PollerNATSConfig describes a Core subscription wait on a subject; the
+// first matching message completes the node. Nonmatching messages are
+// discarded and consumption continues.
+type PollerNATSConfig struct {
+	Subject     string
+	MaxWaitTime time.Duration
+	Until       string
+}
+
 // GroupContent is the nested node list of a group node.
 type GroupContent struct {
 	StartNodeID string
@@ -424,6 +435,7 @@ type rawNode struct {
 	PollerHTTP        *rawPollerHTTPConfig     `json:"http"`
 	PollerRedis       *rawPollerRedisConfig    `json:"redis"`
 	PollerRabbitMQ    *rawPollerRabbitMQConfig `json:"rabbitmq"`
+	PollerNATS        *rawPollerNATSConfig     `json:"nats"`
 	// Config is the raw config object of a custom node type. It is the
 	// only executable field custom nodes may carry.
 	Config          json.RawMessage   `json:"config"`
@@ -513,6 +525,12 @@ type rawPollerRedisConfig struct {
 
 type rawPollerRabbitMQConfig struct {
 	Queue       string          `json:"queue"`
+	MaxWaitTime json.RawMessage `json:"max_wait_time"`
+	Until       *string         `json:"until"`
+}
+
+type rawPollerNATSConfig struct {
+	Subject     string          `json:"subject"`
 	MaxWaitTime json.RawMessage `json:"max_wait_time"`
 	Until       *string         `json:"until"`
 }
@@ -623,7 +641,7 @@ func parseReferencedNode(nc *NodeContent, r *rawNode) (*NodeContent, error) {
 		return nil, errors.New("input node does not support context_path; use output_property")
 	}
 	if r.Script != nil || r.Conditions != nil || r.Channel != nil || r.FormID != nil || r.HTTPConfig != nil || r.ExecutionConfig != nil || r.SMTPConfig != nil || r.Nodes != nil ||
-		r.PollerHTTP != nil || r.PollerRedis != nil || r.PollerRabbitMQ != nil || len(r.Config) > 0 ||
+		r.PollerHTTP != nil || r.PollerRedis != nil || r.PollerRabbitMQ != nil || r.PollerNATS != nil || len(r.Config) > 0 ||
 		len(r.Branches) > 0 || r.ParallelEndNodeID != nil || r.CombiningScript != nil || len(r.Delay) > 0 ||
 		// allowed_roles, allowed_users, record_actor, and public are the
 		// input node's authorization surface, and accept/storage are its
@@ -734,9 +752,9 @@ func parseInputNode(nc *NodeContent, r *rawNode, limits NodeLimits) error {
 		return errors.New("input node requires a channel")
 	}
 	switch *r.Channel {
-	case InputChannelHTTP, InputChannelRedis, InputChannelRabbitMQ:
+	case InputChannelHTTP, InputChannelRedis, InputChannelRabbitMQ, InputChannelNATS:
 	default:
-		return fmt.Errorf("input channel %q is not supported (allowed: http, redis, rabbitmq)", *r.Channel)
+		return fmt.Errorf("input channel %q is not supported (allowed: http, redis, rabbitmq, nats)", *r.Channel)
 	}
 	if r.ContextPath != nil {
 		return errors.New("input node does not support context_path; use output_property")
@@ -814,8 +832,8 @@ func parseOutputNode(nc *NodeContent, r *rawNode, limits NodeLimits) error {
 	if r.Channel == nil {
 		return errors.New("output node requires a channel")
 	}
-	if *r.Channel != InputChannelRedis && *r.Channel != InputChannelRabbitMQ {
-		return fmt.Errorf("output channel %q is not supported (allowed: redis, rabbitmq)", *r.Channel)
+	if *r.Channel != InputChannelRedis && *r.Channel != InputChannelRabbitMQ && *r.Channel != InputChannelNATS {
+		return fmt.Errorf("output channel %q is not supported (allowed: redis, rabbitmq, nats)", *r.Channel)
 	}
 	if r.ContextPath == nil || strings.TrimSpace(*r.ContextPath) == "" {
 		return errors.New("output node requires a context_path")
@@ -1016,8 +1034,15 @@ func parsePollerNode(nc *NodeContent, r *rawNode, limits NodeLimits) error {
 	hasHTTP := r.PollerHTTP != nil
 	hasRedis := r.PollerRedis != nil
 	hasRabbit := r.PollerRabbitMQ != nil
-	if (hasHTTP && (hasRedis || hasRabbit)) || (hasRedis && hasRabbit) || (!hasHTTP && !hasRedis && !hasRabbit) {
-		return errors.New("poller node requires exactly one of http, redis, or rabbitmq")
+	hasNATS := r.PollerNATS != nil
+	count := 0
+	for _, has := range []bool{hasHTTP, hasRedis, hasRabbit, hasNATS} {
+		if has {
+			count++
+		}
+	}
+	if count != 1 {
+		return errors.New("poller node requires exactly one of http, redis, rabbitmq, or nats")
 	}
 	switch {
 	case hasHTTP:
@@ -1030,6 +1055,10 @@ func parsePollerNode(nc *NodeContent, r *rawNode, limits NodeLimits) error {
 		}
 	case hasRabbit:
 		if err := parsePollerRabbitMQ(nc, r.PollerRabbitMQ); err != nil {
+			return err
+		}
+	case hasNATS:
+		if err := parsePollerNATS(nc, r.PollerNATS); err != nil {
 			return err
 		}
 	}
@@ -1149,6 +1178,23 @@ func parsePollerRabbitMQ(nc *NodeContent, cfg *rawPollerRabbitMQConfig) error {
 		return err
 	}
 	nc.PollerRabbitMQ = &PollerRabbitMQConfig{Queue: cfg.Queue, MaxWaitTime: wait, Until: until}
+	return nil
+}
+
+// parsePollerNATS parses the nats block of a poller node.
+func parsePollerNATS(nc *NodeContent, cfg *rawPollerNATSConfig) error {
+	if strings.TrimSpace(cfg.Subject) == "" {
+		return errors.New("nats.subject is required")
+	}
+	wait, err := pollerDuration(cfg.MaxWaitTime, "max_wait_time", 5*time.Minute)
+	if err != nil {
+		return fmt.Errorf("nats.%w", err)
+	}
+	until, err := requiredUntil(cfg.Until)
+	if err != nil {
+		return err
+	}
+	nc.PollerNATS = &PollerNATSConfig{Subject: cfg.Subject, MaxWaitTime: wait, Until: until}
 	return nil
 }
 
@@ -1567,7 +1613,7 @@ func parseAllowedMIMETypes(raw []string) ([]string, error) {
 func parseCustomNode(nc *NodeContent, r *rawNode, limits NodeLimits) (*NodeContent, error) {
 	if r.Script != nil || r.Conditions != nil || r.Channel != nil || r.Validation != nil ||
 		r.FormID != nil || r.HTTPConfig != nil || r.ExecutionConfig != nil || r.SMTPConfig != nil ||
-		r.PollerHTTP != nil || r.PollerRedis != nil || r.PollerRabbitMQ != nil ||
+		r.PollerHTTP != nil || r.PollerRedis != nil || r.PollerRabbitMQ != nil || r.PollerNATS != nil ||
 		len(r.Branches) > 0 || r.ParallelEndNodeID != nil || r.CombiningScript != nil ||
 		r.Nodes != nil || r.StartNodeID != nil || r.ContextPath != nil || len(r.Delay) > 0 ||
 		// A custom type is never an input node, so the input node's

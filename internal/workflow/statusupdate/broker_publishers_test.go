@@ -40,6 +40,24 @@ func (f *fakeRabbitPublisher) PublishJSON(_ context.Context, queue string, paylo
 	return f.err
 }
 
+type fakeNATSPublisher struct {
+	calls     int
+	subject   string
+	payload   []byte
+	messageID string
+	headers   map[string]string
+	err       error
+}
+
+func (f *fakeNATSPublisher) PublishJSON(_ context.Context, subject string, payload []byte, messageID string, headers map[string]string) error {
+	f.calls++
+	f.subject = subject
+	f.payload = payload
+	f.messageID = messageID
+	f.headers = headers
+	return f.err
+}
+
 func TestRedisPublisherPublishesToStatusChannel(t *testing.T) {
 	fake := &fakeRedisPublisher{}
 	p := statusupdate.NewRedisPublisher(fake)
@@ -100,6 +118,44 @@ func TestRabbitPublisherFailsWithoutRabbitBlock(t *testing.T) {
 	cfg := &model.StatusUpdateConfig{Redis: &model.RedisStatusUpdateConfig{}}
 	if err := p.Publish(context.Background(), cfg, testEvent("logical-2")); err == nil {
 		t.Error("Publish() error = nil, want missing-rabbitmq-block failure")
+	}
+	if fake.calls != 0 {
+		t.Errorf("publish calls = %d, want 0", fake.calls)
+	}
+}
+
+func TestNATSPublisherPublishesToStatusSubject(t *testing.T) {
+	fake := &fakeNATSPublisher{}
+	p := statusupdate.NewNATSPublisher(fake)
+	ev := testEvent("logical-3")
+	cfg := &model.StatusUpdateConfig{NATS: &model.NATSStatusUpdateConfig{MaxRetry: 2}}
+	if err := p.Publish(context.Background(), cfg, ev); err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+	if fake.calls != 1 {
+		t.Fatalf("publish calls = %d, want 1", fake.calls)
+	}
+	want := "beelinewf.status." + ev.WorkflowInstanceID
+	if fake.subject != want {
+		t.Errorf("subject = %q, want %q", fake.subject, want)
+	}
+	if fake.messageID != "logical-3" {
+		t.Errorf("message_id = %q, want logical event id", fake.messageID)
+	}
+	if fake.headers["NodeInstanceId"] != ev.WorkflowInstanceID || fake.headers["IdempotencyKey"] != "logical-3" {
+		t.Errorf("headers = %+v", fake.headers)
+	}
+	if string(fake.payload) != string(ev.Payload) {
+		t.Errorf("payload = %s, want event payload", fake.payload)
+	}
+}
+
+func TestNATSPublisherFailsWithoutNATSBlock(t *testing.T) {
+	fake := &fakeNATSPublisher{}
+	p := statusupdate.NewNATSPublisher(fake)
+	cfg := &model.StatusUpdateConfig{Redis: &model.RedisStatusUpdateConfig{}}
+	if err := p.Publish(context.Background(), cfg, testEvent("logical-3")); err == nil {
+		t.Error("Publish() error = nil, want missing-nats-block failure")
 	}
 	if fake.calls != 0 {
 		t.Errorf("publish calls = %d, want 0", fake.calls)

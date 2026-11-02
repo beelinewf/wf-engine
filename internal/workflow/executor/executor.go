@@ -164,6 +164,9 @@ type Dependencies struct {
 	// RabbitPoller is optional: when nil, rabbitmq poller nodes fail with a
 	// missing-transport error.
 	RabbitPoller RabbitPollerClient
+	// NATSPoller is optional: when nil, nats poller nodes fail with a
+	// missing-transport error.
+	NATSPoller NATSPollerClient
 	// SMTPSender is optional: when nil, smtp external_call nodes fail
 	// with "smtp is not configured" instead of executing.
 	SMTPSender SMTPSender
@@ -182,6 +185,7 @@ func NewExecutors(limits Limits, funcs *jsfunc.Registry, deps Dependencies) map[
 	pollerEx := NewPollerExecutor(httpEx, funcs)
 	pollerEx.SetRedisClient(deps.RedisPoller)
 	pollerEx.SetRabbitClient(deps.RabbitPoller)
+	pollerEx.SetNATSClient(deps.NATSPoller)
 	out := map[model.NodeType]Executor{
 		model.NodeTypeScript:       &ScriptExecutor{funcs: funcs},
 		model.NodeTypeConditions:   &ConditionExecutor{funcs: funcs},

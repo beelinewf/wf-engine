@@ -53,6 +53,7 @@ type Infra struct {
 	PostgreSQL PostgreSQL `mapstructure:"postgresql"`
 	Redis      Redis      `mapstructure:"redis"`
 	RabbitMQ   RabbitMQ   `mapstructure:"rabbitmq"`
+	NATS       NATS       `mapstructure:"nats"`
 	Storage    Storage    `mapstructure:"storage"`
 }
 
@@ -125,6 +126,17 @@ type RabbitMQ struct {
 	InputQueue  string `mapstructure:"input_queue"`
 	OutputQueue string `mapstructure:"output_queue"`
 	StatusQueue string `mapstructure:"status_queue"`
+}
+
+// NATS holds the optional NATS connection and the JetStream stream and
+// durable consumer used for input messages. An empty DSN disables the NATS
+// transports; a configured but unreachable DSN, or a server without
+// JetStream, fails startup. The DSN key keeps the value under the
+// BEELINEWF_*_DSN env deny list so it never reaches context snapshots.
+type NATS struct {
+	DSN      string `mapstructure:"dsn"`
+	Stream   string `mapstructure:"stream"`
+	Consumer string `mapstructure:"consumer"`
 }
 
 // Storage holds the S3-compatible object storage connection serving
@@ -740,6 +752,9 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("infra.rabbitmq.input_queue", "beelinewf.input")
 	v.SetDefault("infra.rabbitmq.output_queue", "beelinewf.output")
 	v.SetDefault("infra.rabbitmq.status_queue", "beelinewf.status")
+	v.SetDefault("infra.nats.dsn", "")
+	v.SetDefault("infra.nats.stream", "BEELINEWF")
+	v.SetDefault("infra.nats.consumer", "beelinewf-input")
 	// Optional object storage for multipart input uploads: empty endpoint
 	// and credentials disable it. Region and use_ssl carry safe defaults
 	// so an enabled storage always has a valid connection shape.
@@ -924,6 +939,14 @@ func (c *Config) validate() error {
 		}
 		if strings.TrimSpace(c.Infra.RabbitMQ.StatusQueue) == "" {
 			return errors.New("configuration: infra.rabbitmq.status_queue is required when infra.rabbitmq.dsn is set")
+		}
+	}
+	if strings.TrimSpace(c.Infra.NATS.DSN) != "" {
+		if strings.TrimSpace(c.Infra.NATS.Stream) == "" {
+			return errors.New("configuration: infra.nats.stream is required when infra.nats.dsn is set")
+		}
+		if strings.TrimSpace(c.Infra.NATS.Consumer) == "" {
+			return errors.New("configuration: infra.nats.consumer is required when infra.nats.dsn is set")
 		}
 	}
 	// Object storage is all or nothing: a partial connection (endpoint

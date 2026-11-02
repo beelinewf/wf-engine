@@ -22,9 +22,10 @@ type PublishReceipt struct {
 
 // OutputPublisher publishes an output node's payload to its broker channel.
 type OutputPublisher interface {
-	// Publish sends payload to the node's transport ("redis" or
-	// "rabbitmq"). instanceID seeds the redis channel name; messageID is
-	// the stable execution id stamped as the AMQP message id for rabbitmq.
+	// Publish sends payload to the node's transport ("redis", "rabbitmq",
+	// or "nats"). instanceID seeds the redis channel and nats subject
+	// names; messageID is the stable execution id stamped as the AMQP
+	// message id for rabbitmq and as Nats-Msg-Id for nats.
 	Publish(ctx context.Context, channel, instanceID string, payload []byte, messageID string) (*PublishReceipt, error)
 }
 
@@ -36,12 +37,14 @@ type BrokerOutputPublisher struct {
 	redis       transport.RedisPublisher
 	rabbit      transport.RabbitPublisher
 	rabbitQueue string
+	nats        transport.NATSPublisher
 }
 
 // NewBrokerOutputPublisher builds the adapter. rabbitQueue is the configured
-// durable output queue used when a node's channel is rabbitmq.
-func NewBrokerOutputPublisher(redis transport.RedisPublisher, rabbit transport.RabbitPublisher, rabbitQueue string) *BrokerOutputPublisher {
-	return &BrokerOutputPublisher{redis: redis, rabbit: rabbit, rabbitQueue: rabbitQueue}
+// durable output queue used when a node's channel is rabbitmq; nats
+// publishes to the fixed per-instance subject.
+func NewBrokerOutputPublisher(redis transport.RedisPublisher, rabbit transport.RabbitPublisher, rabbitQueue string, nats transport.NATSPublisher) *BrokerOutputPublisher {
+	return &BrokerOutputPublisher{redis: redis, rabbit: rabbit, rabbitQueue: rabbitQueue, nats: nats}
 }
 
 // Publish implements OutputPublisher.
@@ -68,6 +71,19 @@ func (p *BrokerOutputPublisher) Publish(ctx context.Context, channel, instanceID
 			return nil, err
 		}
 		return &PublishReceipt{Channel: channel, Destination: p.rabbitQueue, MessageID: messageID}, nil
+	case model.InputChannelNATS:
+		if p.nats == nil {
+			return nil, errors.New("nats output publisher is not configured")
+		}
+		dest := transport.NATSOutputSubject(instanceID)
+		headers := map[string]string{
+			"NodeInstanceId": instanceID,
+			"IdempotencyKey": messageID,
+		}
+		if err := p.nats.PublishJSON(ctx, dest, payload, messageID, headers); err != nil {
+			return nil, err
+		}
+		return &PublishReceipt{Channel: channel, Destination: dest, MessageID: messageID}, nil
 	default:
 		return nil, fmt.Errorf("output channel %q is not supported", channel)
 	}

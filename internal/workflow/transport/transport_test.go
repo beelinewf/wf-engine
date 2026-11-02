@@ -28,6 +28,17 @@ func TestRabbitClientPollerContract(t *testing.T) {
 	var _ rabbitPollerContract = (*RabbitClient)(nil)
 }
 
+// natsPollerContract is the poller-facing surface of the nats client:
+// subject subscription for poller waits.
+type natsPollerContract interface {
+	Subscribe(ctx context.Context, subject string, handler func(ctx context.Context, subject string, payload []byte, headers map[string]string) error) error
+}
+
+func TestNATSClientPollerContract(t *testing.T) {
+	var _ natsPollerContract = (*NATSClient)(nil)
+	var _ NATSPublisher = (*NATSClient)(nil)
+}
+
 func TestChannelNames(t *testing.T) {
 	inst := "11111111-1111-7111-8111-111111111111"
 	if got := InputChannel(inst); got != "workflow:input:"+inst {
@@ -41,6 +52,22 @@ func TestChannelNames(t *testing.T) {
 	}
 	if got := InputChannelPattern(); got != "workflow:input:*" {
 		t.Errorf("InputChannelPattern() = %q", got)
+	}
+}
+
+func TestNATSSubjectNames(t *testing.T) {
+	inst := "11111111-1111-7111-8111-111111111111"
+	if got := NATSInputSubject(inst); got != "beelinewf.input."+inst {
+		t.Errorf("NATSInputSubject() = %q", got)
+	}
+	if got := NATSOutputSubject(inst); got != "beelinewf.output."+inst {
+		t.Errorf("NATSOutputSubject() = %q", got)
+	}
+	if got := NATSStatusSubject(inst); got != "beelinewf.status."+inst {
+		t.Errorf("NATSStatusSubject() = %q", got)
+	}
+	if got := NATSInputPattern(); got != "beelinewf.input.*" {
+		t.Errorf("NATSInputPattern() = %q", got)
 	}
 }
 
@@ -60,6 +87,26 @@ func TestInstanceFromInputChannel(t *testing.T) {
 	for _, c := range cases {
 		if got := InstanceFromInputChannel(c.channel); got != c.want {
 			t.Errorf("InstanceFromInputChannel(%q) = %q, want %q", c.channel, got, c.want)
+		}
+	}
+}
+
+func TestNATSInstanceFromInputSubject(t *testing.T) {
+	inst := "11111111-1111-7111-8111-111111111111"
+	cases := []struct {
+		subject string
+		want    string
+	}{
+		{"beelinewf.input." + inst, inst},
+		{"beelinewf.input.", ""},
+		{"beelinewf.input", ""},
+		{"beelinewf.output." + inst, ""},
+		{"beelinewf.status." + inst, ""},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := NATSInstanceFromInputSubject(c.subject); got != c.want {
+			t.Errorf("NATSInstanceFromInputSubject(%q) = %q, want %q", c.subject, got, c.want)
 		}
 	}
 }

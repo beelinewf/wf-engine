@@ -310,6 +310,117 @@ func TestRabbitInputRejectsPermanentDomainErrors(t *testing.T) {
 	}
 }
 
+// fakeNATSConsumer captures the handler.
+type fakeNATSConsumer struct {
+	handler transport.NATSConsumeFunc
+}
+
+func (f *fakeNATSConsumer) Consume(ctx context.Context, handler transport.NATSConsumeFunc) error {
+	f.handler = handler
+	<-ctx.Done()
+	return nil
+}
+
+func natsMsg(subject, body string, headers map[string]string, messageID string) transport.NATSMessage {
+	return transport.NATSMessage{Subject: subject, Body: []byte(body), Headers: headers, MessageID: messageID}
+}
+
+func TestNATSInputAcksSuccessfulDelivery(t *testing.T) {
+	svc := &fakeInstanceService{}
+	in := NewNATSInput(&fakeNATSConsumer{}, svc)
+	res, err := in.handle(context.Background(), natsMsg("beelinewf.input."+testInstanceID, `{"ok":1}`, map[string]string{
+		"IdempotencyKey": "nats-key-1",
+	}, ""))
+	if err != nil {
+		t.Fatalf("handle() error = %v", err)
+	}
+	if res != transport.NATSConsumeAck {
+		t.Errorf("result = %v, want NATSConsumeAck", res)
+	}
+	if len(svc.calls) != 1 || svc.calls[0].Source != "nats" || svc.calls[0].IdempotencyKey != "nats-key-1" || svc.calls[0].InstanceID != testInstanceID {
+		t.Errorf("deliver = %+v, want source nats key nats-key-1", svc.calls)
+	}
+	if svc.calls[0].Principal != nil {
+		t.Errorf("Principal = %+v, want nil so the service treats it as the service principal", svc.calls[0].Principal)
+	}
+}
+
+func TestNATSInputFallsBackToHeadersAndMessageID(t *testing.T) {
+	svc := &fakeInstanceService{}
+	in := NewNATSInput(&fakeNATSConsumer{}, svc)
+	_, err := in.handle(context.Background(), natsMsg("legacy.subject", `{"ok":1}`, map[string]string{
+		"NodeInstanceId": testInstanceID,
+	}, "nats-msg-id"))
+	if err != nil {
+		t.Fatalf("handle() error = %v", err)
+	}
+	if len(svc.calls) != 1 || svc.calls[0].InstanceID != testInstanceID || svc.calls[0].IdempotencyKey != "nats-msg-id" {
+		t.Errorf("deliver = %+v, want header instance and message_id fallback", svc.calls)
+	}
+}
+
+func TestNATSInputTerminatesMissingMetadata(t *testing.T) {
+	svc := &fakeInstanceService{}
+	in := NewNATSInput(&fakeNATSConsumer{}, svc)
+	ctx := context.Background()
+	cases := []transport.NATSMessage{
+		natsMsg("legacy.subject", `{}`, nil, ""),
+		natsMsg("beelinewf.input."+testInstanceID, `{}`, nil, ""),
+		natsMsg("legacy.subject", `{}`, map[string]string{"IdempotencyKey": "k"}, "m"),
+	}
+	for i, msg := range cases {
+		res, err := in.handle(ctx, msg)
+		if err != nil {
+			t.Errorf("case %d: error = %v, want nil", i, err)
+		}
+		if res != transport.NATSConsumeTerm {
+			t.Errorf("case %d: result = %v, want NATSConsumeTerm", i, res)
+		}
+	}
+	if len(svc.calls) != 0 {
+		t.Errorf("deliver calls = %d, want 0", len(svc.calls))
+	}
+}
+
+func TestNATSInputNaksTransientFailures(t *testing.T) {
+	svc := &fakeInstanceService{deliverErr: errors.New("database connection refused")}
+	in := NewNATSInput(&fakeNATSConsumer{}, svc)
+	res, err := in.handle(context.Background(), natsMsg("beelinewf.input."+testInstanceID, `{}`, map[string]string{
+		"IdempotencyKey": "k",
+	}, ""))
+	if err == nil {
+		t.Fatal("handle() error = nil, want redelivery error")
+	}
+	if res != transport.NATSConsumeNak {
+		t.Errorf("result = %v, want NATSConsumeNak", res)
+	}
+}
+
+func TestNATSInputTerminatesPermanentDomainErrors(t *testing.T) {
+	cases := map[string]error{
+		"conflict":     fmt.Errorf("%w: instance is terminal", model.ErrConflict),
+		"invalid":      fmt.Errorf("%w: bad payload", model.ErrInvalid),
+		"not found":    fmt.Errorf("%w: no instance", model.ErrNotFound),
+		"forbidden":    fmt.Errorf("%w: roles are required", model.ErrForbidden),
+		"delivery 4xx": fmt.Errorf("%w: no delivery", repository.ErrDeliveryNotFound),
+	}
+	for name, deliverErr := range cases {
+		t.Run(name, func(t *testing.T) {
+			svc := &fakeInstanceService{deliverErr: deliverErr}
+			in := NewNATSInput(&fakeNATSConsumer{}, svc)
+			res, err := in.handle(context.Background(), natsMsg("beelinewf.input."+testInstanceID, `{}`, map[string]string{
+				"IdempotencyKey": "k",
+			}, ""))
+			if err != nil {
+				t.Fatalf("handle() error = %v, want nil", err)
+			}
+			if res != transport.NATSConsumeTerm {
+				t.Errorf("result = %v, want NATSConsumeTerm", res)
+			}
+		})
+	}
+}
+
 // A refusal is a decision about this message, not a transient fault: the
 // roles that were missing will still be missing on a redelivery, so the
 // message is dropped instead of looping on the queue forever.

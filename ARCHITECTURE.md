@@ -2,7 +2,7 @@
 
 BeelineWF is a PostgreSQL-backed durable workflow engine: immutable definitions,
 a leased state machine, HTTP input/control/debug APIs, and optional
-Redis/RabbitMQ transports for broker input nodes, output nodes, and
+Redis/RabbitMQ/NATS transports for broker input nodes, output nodes, and
 multi-transport status notifications. A transactional outbox is the durable
 internal queue for status notifications regardless of transport. This
 document describes package boundaries, the runtime model, and the deployment
@@ -34,13 +34,13 @@ behind narrow interfaces.
 | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `cmd/app`                          | Composition root: configuration, database, system-user seed, repositories, services, executors, engine, ants dispatcher + status-update dispatcher, optional broker clients/consumers, status publishers, Gin router, graceful shutdown. No workflow rules.                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `cmd/atlas-loader`                 | Atlas Go Program Mode schema loader; never runs AutoMigrate in prod (tests use AutoMigrate for schema bootstrap only).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `internal/workflow/model`          | Framework-free domain: entities, statuses, `Frame`/`Counters`/`Limits`, transition invariants, workflow/group-scoped condition-key routing, node-content validation (input channels `http`, `redis`, `rabbitmq`; output channels `redis`, `rabbitmq`; external_call `http_config`/`execution_config`/`smtp_config`; node timeouts incl. output nodes; poller transports `http`, `redis`, `rabbitmq` with per-transport defaults; multi-transport `status_update`).                                                                                                                                                                                                                                                         |
+| `internal/workflow/model`          | Framework-free domain: entities, statuses, `Frame`/`Counters`/`Limits`, transition invariants, workflow/group-scoped condition-key routing, node-content validation (input channels `http`, `redis`, `rabbitmq`, `nats`; output channels `redis`, `rabbitmq`, `nats`; external_call `http_config`/`execution_config`/`smtp_config`; node timeouts incl. output nodes; poller transports `http`, `redis`, `rabbitmq`, `nats` with per-transport defaults; multi-transport `status_update`).                                                                                                                                                                                                                                                         |
 | `internal/workflow/repository`     | GORM persistence: models, mappers, fenced claims (`FOR UPDATE SKIP LOCKED`), checkpoints (lease + revision), pause/resume/stop, node attempts, events, idempotent input deliveries, termination pending/sweep, status-update outbox (atomic per-transport fan-out enqueue + ordered claim/deliver/dead-letter), and secret CRUD plus internal `GetAll` snapshots. |                                                                                                                                                                                                                                                                                                                                                                    |
-| `internal/workflow/executor`       | Node executors: Goja sandbox (context deep-cloned to pure JS, then cloned/frozen, no eval / no `Function`, hard timeout, ctx-cancellation interrupt), script, conditions, input validation (string return rejects), outbound HTTP (allowlist + DNS + redirect revalidation, `Idempotency-Key` stable per attempt), allowlisted commands (argv only, process-group kill), workflow mail (templated SMTP via the operator relay), output (publish resolved context value, receipt), active pollers (repeated HTTP, Redis GET/SUB, RabbitMQ queue waits; frozen `until` predicate over a normalized response), lifecycle hooks (shared `HookRunner`: pre/post context-transform scripts in the same sandbox, frozen `output` global for post hooks). |
+| `internal/workflow/executor`       | Node executors: Goja sandbox (context deep-cloned to pure JS, then cloned/frozen, no eval / no `Function`, hard timeout, ctx-cancellation interrupt), script, conditions, input validation (string return rejects), outbound HTTP (allowlist + DNS + redirect revalidation, `Idempotency-Key` stable per attempt), allowlisted commands (argv only, process-group kill), workflow mail (templated SMTP via the operator relay), output (publish resolved context value, receipt), active pollers (repeated HTTP, Redis GET/SUB, RabbitMQ queue waits, NATS subject waits; frozen `until` predicate over a normalized response), lifecycle hooks (shared `HookRunner`: pre/post context-transform scripts in the same sandbox, frozen `output` global for post hooks). |
 | `internal/workflow/engine`         | Durable cursor machine (`EnterGroup`/`Advance`), one transition per claim, recovery, per-node/total limits, cancellation registry, fenced commit, lease + revision fencing (`ErrLeaseLost` / `ErrRevisionConflict`); ants-based dispatcher with claim/heartbeat loops and termination polling. Node transitions run optional lifecycle hooks: pre before node behavior, post after the output merge, exited-group posts innermost-first.                                                                                                                                                                                                                                                 |
-| `internal/workflow/transport`      | Optional Redis and RabbitMQ adapters: connect/ping, durable queue declaration, confirmed persistent publishing, pattern/exact subscribe, keyed GET with missing-key detection, manual-ack consume including per-execution arbitrary-queue poller consumption, clean shutdown; narrow `RedisPublisher`/`RabbitPublisher` interfaces plus poller `Get`/`Subscribe`/`ConsumeQueue` surfaces.                                                                                                                                                                                                                                                                                                  |
-| `internal/workflow/inputtransport` | Broker input consumers: Redis pattern subscriber (`workflow:input:*`, envelope decode) and RabbitMQ queue consumer (`NodeInstanceId` + `IdempotencyKey` headers, `message_id` fallback, manual ack/requeue), both delivering through `InstanceService.DeliverInput` with the matching source channel.                                                                                                                                                                                                                                                                                                                                                                                      |
-| `internal/workflow/statusupdate`   | Status-notification dispatcher: claims the oldest unresolved outbox event per instance/transport, loads the immutable per-definition config, publishes through the transport's publisher (http/redis/rabbitmq), retries with the transport's `retry_delay` and dead-letters past its `max_retry`.                                                                                                                                                                                                                                                                                                                                                                                    |
+| `internal/workflow/transport`      | Optional Redis, RabbitMQ, and NATS adapters: connect/ping, durable queue declaration, confirmed persistent publishing, pattern/exact subscribe, keyed GET with missing-key detection, manual-ack consume including per-execution arbitrary-queue poller consumption, JetStream stream/consumer provisioning plus Core subject publish/subscribe, clean shutdown; narrow `RedisPublisher`/`RabbitPublisher`/`NATSPublisher` interfaces plus poller `Get`/`Subscribe`/`ConsumeQueue` surfaces. |                                                                                                                                                                                                                                                                                                  |
+| `internal/workflow/inputtransport` | Broker input consumers: Redis pattern subscriber (`workflow:input:*`, envelope decode), RabbitMQ queue consumer (`NodeInstanceId` + `IdempotencyKey` headers, `message_id` fallback, manual ack/requeue), and NATS JetStream consumer (`beelinewf.input.*` stream, subject-derived instance, `IdempotencyKey` header with `Nats-Msg-Id` fallback, ack/nak/term settlement), all delivering through `InstanceService.DeliverInput` with the matching source channel. |                                                                                                                                                                                                                                                                                                                                                                                      |
+| `internal/workflow/statusupdate`   | Status-notification dispatcher: claims the oldest unresolved outbox event per instance/transport, loads the immutable per-definition config, publishes through the transport's publisher (http/redis/rabbitmq/nats), retries with the transport's `retry_delay` and dead-letters past its `max_retry`.                                                                                                                                                                                                                                                                                                                                                                                    |
 | `internal/workflow/form`           | Draft 2020-12 sanity check (`CheckSchema`) for forms-library schema documents before they are stored. Payloads are never validated against a form backend-side; input delivery is gated solely by the node's validation script.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `internal/workflow/auth`          | Framework-free authentication and authorization: the OIDC discovery + JWKS verifier, the local HS256 issuer/verifier plus the chain that routes between them, the claim-to-`Principal` mapping, the `Principal` carried on the request context, the shared in-memory role catalog, and the resource-action constants every route gates on. Knows nothing about Gin or GORM.                                                                                                                                                                                                                                                                                                                                                                                       |
 | `internal/workflow/service`        | Use-case orchestration: definitions, secrets validation, instance create/status/context/input (source channel must match the input node channel; the two-gate authorization check, then script-only enforcement on delivery), node debug, pause/resume/stop controls (events + local cancellation signal), rollback of paused/failed instances to a prior occurrence (context restore, recomputed group stack), and identity resolution (JIT user upsert, role seeding, role CRUD). Instance creation snapshots all secrets under reserved `secret`; read views redact that root and rendered secret values. |
@@ -63,11 +63,14 @@ flowchart LR
     SDISP -->|http webhook| WEB[Subscriber]
     SDISP -->|workflow:status channel| RDS[Redis]
     SDISP -->|status queue| RAB[RabbitMQ]
-    INP[Redis/Rabbit input consumers] -->|DeliverInput| SVC[Instance service]
+    SDISP -->|status subject| NTS[NATS]
+    INP[Redis/Rabbit/NATS input consumers] -->|DeliverInput| SVC[Instance service]
     INP --> RDS
     INP --> RAB
+    INP --> NTS
     ENG -->|output node| RDS
     ENG -->|output node| RAB
+    ENG -->|output node| NTS
 ```
 
 - **Claim**: a dispatcher claims runnable instances with
@@ -109,7 +112,7 @@ flowchart LR
   (`waiting_for_input`, `input_received`, `paused`, `resumed`, `finished`,
   `failed`, `stopped`) is enqueued into `status_update_outbox` in the same transaction
   as the transition, when the definition configures any `status_update`
-  transport (http, redis, rabbitmq, or any combination). Each event fans out
+  transport (http, redis, rabbitmq, nats, or any combination). Each event fans out
   to one row per configured transport, all sharing one logical event id.
   Scheduler `waiting <-> running` churn and pending-pause flag changes are
   skipped. A dedicated dispatcher delivers events strictly in
@@ -157,7 +160,8 @@ flowchart LR
   context registered in the engine. `Cancel` interrupts Goja (runtime
   interrupt), aborts HTTP (request context), SIGKILLs the whole command
   process group, and aborts active poller waits (in-flight request, inter-attempt
-  delay, Redis subscription, RabbitMQ consumption). Interrupted attempts
+  delay, Redis subscription, RabbitMQ consumption, NATS subscription).
+  Interrupted attempts
   become `stopped` + `cancelled` when a stop committed; otherwise they are
   left running for another worker to recover.
 - **Parallel execution**: `parallel_start` forks named branches and parks
@@ -326,8 +330,9 @@ Node statuses: `waiting -> running -> finished | failed | stopped`.
 Transports are pluggable behind the `statusupdate.Publisher` interface,
 routed by the outbox row's transport: HTTP reuses the engine
 allowlist/DNS/redirect policy, Redis publishes to the instance's status
-channel (best effort), and RabbitMQ publishes persistent, confirmed messages
-to the configured status queue.
+channel (best effort), RabbitMQ publishes persistent, confirmed messages
+to the configured status queue, and NATS publishes to the instance's
+status subject (best effort).
 
 ## Broker input
 
@@ -345,8 +350,14 @@ When a broker DSN is configured, `cmd/app` starts the matching consumer:
   outcomes (success, validation rejection, domain conflicts) are
   acknowledged or rejected; transient repository failures are requeued with
   a bounded backoff.
+- **NATS**: consumes the durable JetStream consumer over the input stream
+  (`beelinewf.input.*`). The subject suffix names the instance
+  (`NodeInstanceId` header is the fallback); the raw body is the payload
+  and `IdempotencyKey` (falling back to `Nats-Msg-Id`) dedupes it. Permanent
+  outcomes are acknowledged or terminated; transient failures redeliver
+  after a backoff derived from the delivery count.
 
-Both consumers call `InstanceService.DeliverInput` with their source
+All three consumers call `InstanceService.DeliverInput` with their source
 channel; the service rejects a delivery whose source does not match the
 channel of the input node the instance is parked on.
 
@@ -558,7 +569,9 @@ An `output` node publishes the exact JSON of its selected `context_path` to
 its channel (`redis` → `workflow:output:<instance_id>`, `rabbitmq` → the
 configured `output_queue` with `NodeInstanceId` (the workflow instance id) /
 `IdempotencyKey` headers and the stable `<instance_id>:<occurrence_id>`
-execution id as AMQP `message_id` and receipt `message_id`). The publish result
+execution id as AMQP `message_id` and receipt `message_id`, `nats` →
+`beelinewf.output.<instance_id>` with the same headers and `Nats-Msg-Id`).
+The publish result
 (`{channel, destination, message_id}`) is written to the workflow context
 through the normal `output_property` behavior (default: the graph node id). A broker-disabled deployment
 or a publish error fails the node like any other execution error.
@@ -574,18 +587,19 @@ that block) runs in the frozen sandbox against a normalized `response`
 (`{body, headers?, status?}`, unavailable fields omitted, invalid JSON
 bodies kept as strings) with the frozen workflow context. The first HTTP or
 Redis GET call starts immediately, `delay` only separates attempts, and
-every call counts toward `max_attempts`; Redis SUB and RabbitMQ wait up to
-`max_wait_time`. `request_timeout`/`max_wait_time` are parsed without the
-global node-timeout cap.
+every call counts toward `max_attempts`; Redis SUB, RabbitMQ, and NATS wait
+up to `max_wait_time`. `request_timeout`/`max_wait_time` are parsed without
+the global node-timeout cap.
 
-Broker pollers reuse the same `RedisClient`/`RabbitClient` connections as
-input/output (no extra long-lived connections), behind the narrow
-executor-side `RedisPollerClient` (`Get` with missing-key detection,
-exact-channel `Subscribe`) and `RabbitPollerClient` (`ConsumeQueue`:
+Broker pollers reuse the same `RedisClient`/`RabbitClient`/`NATSClient`
+connections as input/output (no extra long-lived connections), behind the
+narrow executor-side `RedisPollerClient` (`Get` with missing-key detection,
+exact-channel `Subscribe`), `RabbitPollerClient` (`ConsumeQueue`:
 per-execution fresh AMQP channel, passive queue check of the
 pre-provisioned queue, QoS 1, consumer tag derived from the poller idempotency key (`poller-<instance>:<occurrence>`), manual ACK
 settlement, channel closed on return/cancellation — the fixed input
-consumer channel is never reused). Poller templates additionally expose the
+consumer channel is never reused), and `NATSPollerClient` (subject
+`Subscribe`). Poller templates additionally expose the
 reserved automatic roots `workflow_instance_id` and `node_instance_id`
 (read-only, always win over user values, never persisted).
 
@@ -599,6 +613,9 @@ Capacity and delivery semantics to design against:
   are discarded, the first match completes the node, and
   predicate/normalization errors ACK then fail the node, so poison messages
   cannot requeue.
+- NATS polling subscribes to the rendered subject like Redis SUB: broadcast
+  and best-effort, nonmatching messages discarded, and the response carries
+  `{body, headers}`.
 - Exhaustion (`max_attempts` or `max_wait_time`), rendering errors, missing
   broker transports, and missing/unconsumable RabbitMQ queues fail the node
   and the workflow. Interrupted pollers default to recovery retry with a
@@ -608,10 +625,11 @@ Capacity and delivery semantics to design against:
 ## Deployment shape
 
 `docker-compose.yml` runs PostgreSQL 16, an Atlas `migrate` service (waits
-for a healthy database, applies `migrations/versions`), Redis 7 and
-RabbitMQ 4 (with management UI), and `app` (waits for the migration to
-complete and both brokers to be healthy, then serves the API, dispatcher,
-status dispatcher, and broker consumers). The compose stack ships with
+for a healthy database, applies `migrations/versions`), Redis 7,
+RabbitMQ 4 (with management UI), NATS 2 with JetStream, and `app` (waits
+for the migration to complete and all three brokers to be healthy, then
+serves the API, dispatcher, status dispatcher, and broker consumers).
+The compose stack ships with
 authentication **disabled** (`BEELINEWF_AUTH_ENABLED=false`) and the wildcard
 HTTP allowlist for dev; the `BEELINEWF_API_TOKEN` value present in the file is
 inert while auth is off, and is ignored unless `BEELINEWF_AUTH_ENABLED=true` is

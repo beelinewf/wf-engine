@@ -1018,6 +1018,104 @@ func TestRabbitPollerMissingTransport(t *testing.T) {
 	}
 }
 
+// fakeNATSPoller implements executor.NATSPollerClient for nats poller
+// tests. It delivers queued messages synchronously then blocks until ctx is
+// done.
+type fakeNATSPoller struct {
+	mu         sync.Mutex
+	msgs       []transport.NATSPollerMessage
+	subErr     error
+	subSubject string
+}
+
+func (f *fakeNATSPoller) Subscribe(ctx context.Context, subject string, handler func(ctx context.Context, subject string, payload []byte, headers map[string]string) error) error {
+	f.mu.Lock()
+	f.subSubject = subject
+	msgs := f.msgs
+	subErr := f.subErr
+	f.mu.Unlock()
+	if subErr != nil {
+		return subErr
+	}
+	for _, m := range msgs {
+		if err := handler(ctx, m.Subject, m.Body, m.Headers); err != nil {
+			return err
+		}
+	}
+	<-ctx.Done()
+	return nil
+}
+
+func pollerNATSNode(cfg *model.PollerNATSConfig) *model.NodeContent {
+	return &model.NodeContent{Type: model.NodeTypePoller, PollerNATS: cfg, PredicateTimeout: time.Second}
+}
+
+func TestNATSPollerDiscardsNonmatches(t *testing.T) {
+	fake := &fakeNATSPoller{msgs: []transport.NATSPollerMessage{
+		{Subject: "jobs", Body: []byte(`{"status":"running"}`)},
+		{Subject: "jobs", Body: []byte(`{"status":"completed"}`), Headers: map[string]string{"X-Job": "j1"}},
+	}}
+	ex := newPollerExecutor(t)
+	ex.SetNATSClient(fake)
+	cfg := &model.PollerNATSConfig{
+		Subject: "jobs.{{ job.id }}", MaxWaitTime: time.Second,
+		Until: "return response.body.status === 'completed' && response.headers['X-Job'] === 'j1';",
+	}
+	res, err := ex.Execute(context.Background(), executor.Request{
+		Node:    pollerNATSNode(cfg),
+		Context: map[string]any{"job": map[string]any{"id": "j1"}},
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	body, _ := res.Output.(*executor.PollerResponse).Body.(map[string]any)
+	if body["status"] != "completed" {
+		t.Errorf("body = %v, want completed", res.Output.(*executor.PollerResponse).Body)
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if fake.subSubject != "jobs.j1" {
+		t.Errorf("subject = %q, want rendered jobs.j1", fake.subSubject)
+	}
+}
+
+func TestNATSPollerTimeout(t *testing.T) {
+	fake := &fakeNATSPoller{}
+	ex := newPollerExecutor(t)
+	ex.SetNATSClient(fake)
+	cfg := &model.PollerNATSConfig{
+		Subject: "jobs", MaxWaitTime: 50 * time.Millisecond, Until: "return true;",
+	}
+	_, err := ex.Execute(context.Background(), executor.Request{Node: pollerNATSNode(cfg), Context: map[string]any{}})
+	if err == nil || !strings.Contains(err.Error(), "without a match") {
+		t.Fatalf("Execute() error = %v, want wait timeout", err)
+	}
+}
+
+func TestNATSPollerPredicateError(t *testing.T) {
+	fake := &fakeNATSPoller{msgs: []transport.NATSPollerMessage{{Subject: "jobs", Body: []byte(`{"status":"completed"}`)}}}
+	ex := newPollerExecutor(t)
+	ex.SetNATSClient(fake)
+	cfg := &model.PollerNATSConfig{
+		Subject: "jobs", MaxWaitTime: time.Second, Until: "return undefinedVar.x;",
+	}
+	_, err := ex.Execute(context.Background(), executor.Request{Node: pollerNATSNode(cfg), Context: map[string]any{}})
+	if err == nil {
+		t.Fatal("Execute() error = nil, want predicate failure")
+	}
+}
+
+func TestNATSPollerMissingTransport(t *testing.T) {
+	ex := newPollerExecutor(t)
+	cfg := &model.PollerNATSConfig{
+		Subject: "jobs", MaxWaitTime: time.Second, Until: "return true;",
+	}
+	_, err := ex.Execute(context.Background(), executor.Request{Node: pollerNATSNode(cfg), Context: map[string]any{}})
+	if err == nil || !strings.Contains(err.Error(), "nats") {
+		t.Fatalf("Execute() error = %v, want missing nats transport", err)
+	}
+}
+
 func TestNewExecutorsRegistersPoller(t *testing.T) {
 	reg := executor.NewExecutors(executor.Limits{}, nil, executor.Dependencies{})
 	ex, ok := reg[model.NodeTypePoller]

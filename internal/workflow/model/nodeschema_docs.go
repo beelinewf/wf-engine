@@ -76,7 +76,7 @@ const inputNodeSchemaJSON = `{
   "type": "object",
   "properties": {
     "type": { "const": "input" },
-    "channel": { "type": "string", "enum": ["http", "redis", "rabbitmq"] },
+    "channel": { "type": "string", "enum": ["http", "redis", "rabbitmq", "nats"] },
     "output_property": { "type": "string", "pattern": "^[A-Za-z0-9_]+$", "description": "Bare key receiving the accepted payload; blank means the graph node id." },
     "validation": {
       "type": "object",
@@ -235,7 +235,7 @@ const outputNodeSchemaJSON = `{
   "type": "object",
   "properties": {
     "type": { "const": "output" },
-    "channel": { "type": "string", "enum": ["redis", "rabbitmq"] },
+    "channel": { "type": "string", "enum": ["redis", "rabbitmq", "nats"] },
     "context_path": { "type": "string", "minLength": 1, "description": "Context path whose value is published." },
     "timeout": { "$ref": "#/$defs/duration" },
     "next_node": { "$ref": "#/$defs/nodeId" },
@@ -297,6 +297,17 @@ const pollerNodeSchemaJSON = `{
       "required": ["queue", "until"],
       "additionalProperties": false
     },
+    "nats": {
+      "type": "object",
+      "description": "Subscribes to the subject and waits for the first message whose predicate matches. MaxWaitTime default 5m.",
+      "properties": {
+        "subject": { "type": "string", "minLength": 1 },
+        "max_wait_time": { "$ref": "#/$defs/duration" },
+        "until": { "type": "string", "minLength": 1, "description": "Predicate evaluated against the normalized response; must return a boolean." }
+      },
+      "required": ["subject", "until"],
+      "additionalProperties": false
+    },
     "timeout": { "$ref": "#/$defs/duration" },
     "on_failure": { "$ref": "#/$defs/failureRoute" },
     "retry_on_recovery": { "type": "boolean", "default": true, "description": "Pollers are active waits and requeue by default when the worker lease expires." },
@@ -309,7 +320,7 @@ const pollerNodeSchemaJSON = `{
     "post_script": { "$ref": "#/$defs/hook" }
   },
   "required": ["type"],
-  "oneOf": [{ "required": ["http"] }, { "required": ["redis"] }, { "required": ["rabbitmq"] }],
+  "oneOf": [{ "required": ["http"] }, { "required": ["redis"] }, { "required": ["rabbitmq"] }, { "required": ["nats"] }],
   "additionalProperties": false
 }`
 
