@@ -49,6 +49,21 @@ func TestNewLoggerRejectsInvalidLevel(t *testing.T) {
 	}
 }
 
+// TestVersionString pins the release-binary contract: an unstamped build
+// reports dev values, and a release build stamped via -ldflags -X reports
+// the tag and commit so a downloaded binary is attributable.
+func TestVersionString(t *testing.T) {
+	if version != "dev" || commit != "unknown" {
+		t.Errorf("defaults = %q/%q, want dev/unknown", version, commit)
+	}
+	oldVersion, oldCommit := version, commit
+	defer func() { version, commit = oldVersion, oldCommit }()
+	version, commit = "v1.2.3", "deadbee"
+	if got, want := versionString(), "v1.2.3 (deadbee)"; got != want {
+		t.Errorf("versionString() = %q, want %q", got, want)
+	}
+}
+
 // TestShutdownBudgetFitsTerminationGrace pins the shutdown invariant:
 // every stage shares one budget that fits the orchestrator grace, so
 // sequential stages can never stack past SIGKILL.
