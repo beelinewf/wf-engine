@@ -68,6 +68,25 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+      - name: Build release binaries
+        run: |
+          mkdir -p dist
+          version="${{ github.ref_name }}"
+          commit="${{ github.sha }}"
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
+            os="${target%/*}"
+            arch="${target#*/}"
+            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath \
+              -ldflags "-X main.version=$version -X main.commit=$commit" \
+              -o wf-engine ./cmd/app
+            tar -czf "dist/wf-engine_${version}_${os}_${arch}.tar.gz" wf-engine
+            rm wf-engine
+          done
+          (cd dist && sha256sum *.tar.gz > checksums.txt)
+          ls -la dist
       - uses: orhun/git-cliff-action@a9a95522b26fe6403f7bb24031f21fb573d0f5ff # v4
         id: cliff
         with:
@@ -77,6 +96,10 @@ jobs:
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           body_path: /tmp/NOTES.md
+          files: |
+            dist/*.tar.gz
+            dist/checksums.txt
+          fail_on_unmatched_files: true
 
   cleanup-tag:
     runs-on: ubuntu-latest

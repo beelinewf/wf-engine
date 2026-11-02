@@ -101,9 +101,26 @@ func (s *sharedShutdown) stop() {
 
 var errMetricsSnapshot = errors.New("metrics snapshot not implemented")
 
+// version and commit are stamped at release time via -ldflags -X. A local
+// build reports dev values.
+var (
+	version = "dev"
+	commit  = "unknown"
+)
+
+func versionString() string {
+	return version + " (" + commit + ")"
+}
+
 func main() {
 	configPath := flag.String("config", "", "path to config file (default: config.yaml in working directory)")
+	showVersion := flag.Bool("version", false, "print the release version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(versionString())
+		return
+	}
 
 	logger, err := NewLogger("info")
 	if err != nil {
