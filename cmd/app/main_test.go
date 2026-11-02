@@ -269,6 +269,48 @@ func TestRunShutsDownGracefully(t *testing.T) {
 	}
 }
 
+// TestRunRefusesUnreachableNATS pins the broker fail-fast wiring: a
+// configured but unreachable NATS server fails startup with a nats error
+// instead of booting half-connected. Port 9 (discard) refuses instantly on
+// localhost, so the dial fails fast with no outside dependency.
+func TestRunRefusesUnreachableNATS(t *testing.T) {
+	dsn := testdb.RequireDSN(t, "app")
+	bootstrapSchema(t, dsn)
+
+	cfg := &configuration.Config{
+		Infra: configuration.Infra{
+			PostgreSQL: configuration.PostgreSQL{
+				DSN:             dsn,
+				MaxOpenConns:    25,
+				MaxIdleConns:    25,
+				ConnMaxLifetime: 5 * time.Minute,
+				ConnMaxIdleTime: 5 * time.Minute,
+			},
+			NATS: configuration.NATS{
+				DSN:      "nats://127.0.0.1:9",
+				Stream:   "beelinewf-test",
+				Consumer: "beelinewf-test",
+			},
+		},
+		Worker: configuration.Worker{
+			Pool: configuration.WorkerPool{Size: 4},
+		},
+		Scheduler: configuration.Scheduler{Enabled: true},
+		Secrets:   configuration.Secrets{EncryptionKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="},
+	}
+	logger, err := NewLogger("info")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err = run(ctx, cfg, logger)
+	if err == nil || !strings.Contains(err.Error(), "nats") {
+		t.Fatalf("run() error = %v, want a nats failure", err)
+	}
+}
+
 // TestDatabaseOptions pins the config→pool mapping: explicit config values
 // reach database.New unchanged, and a Load-defaulted config never yields
 // zero pool fields (the original bug class: a bare database.Options{DSN}
