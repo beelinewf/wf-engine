@@ -1889,6 +1889,18 @@ const docTemplate = `{
                         "description": "Runs-per-day direction: date or -date",
                         "name": "order",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Scope to one workflow definition version (UUID)",
+                        "name": "workflow_definition_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Expand to every version in the definition's lineage; requires workflow_definition_id",
+                        "name": "include_all",
+                        "in": "query"
                     }
                 ],
                 "responses": {

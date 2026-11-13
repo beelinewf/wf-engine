@@ -51,26 +51,23 @@ func claimableArgs() []any {
 // PendingDispatchStats counts claimable pending transitions and reports the
 // age of the oldest one. Zero rows yields (0, 0, nil).
 func (r *instanceRepo) PendingDispatchStats(ctx context.Context) (pending int64, oldestAgeSeconds float64, err error) {
-	db := r.db.WithContext(ctx).Model(&WorkflowInstanceModel{}).Where(claimableWhere, claimableArgs()...)
-	if err := db.Count(&pending).Error; err != nil {
-		return 0, 0, err
+	var row struct {
+		Pending int64
+		Oldest  *time.Time
 	}
-	if pending == 0 {
-		return 0, 0, nil
-	}
-	var oldest *time.Time
 	if err := r.db.WithContext(ctx).Model(&WorkflowInstanceModel{}).
 		Where(claimableWhere, claimableArgs()...).
-		Select("MIN(updated_at)").
-		Scan(&oldest).Error; err != nil {
+		Select("COUNT(*) AS pending, MIN(updated_at) AS oldest").
+		Scan(&row).Error; err != nil {
 		return 0, 0, err
 	}
-	if oldest != nil {
-		if age := time.Since(*oldest).Seconds(); age > 0 {
-			oldestAgeSeconds = age
-		}
+	if row.Pending == 0 || row.Oldest == nil {
+		return 0, 0, nil
 	}
-	return pending, oldestAgeSeconds, nil
+	if age := time.Since(*row.Oldest).Seconds(); age > 0 {
+		oldestAgeSeconds = age
+	}
+	return row.Pending, oldestAgeSeconds, nil
 }
 
 // OutboxDepth counts unresolved status-update outbox rows. It serves the

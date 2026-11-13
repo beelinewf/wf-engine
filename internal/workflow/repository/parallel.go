@@ -374,14 +374,25 @@ func (r *parallelRepo) ClaimNextBranches(ctx context.Context, workerID string, l
 
 	now := time.Now().UTC()
 	expiry := now.Add(lease)
-	for i := range models {
-		m := &models[i]
-		m.Status = string(model.ParallelBranchRunning)
-		m.LeasedBy = workerID
-		m.LeaseExpiry = &expiry
-		m.Revision++
-		m.UpdatedAt = now
-		if err := tx.Save(m).Error; err != nil {
+	if len(models) > 0 {
+		ids := make([]string, len(models))
+		for i := range models {
+			m := &models[i]
+			m.Status = string(model.ParallelBranchRunning)
+			m.LeasedBy = workerID
+			m.LeaseExpiry = &expiry
+			m.Revision++
+			m.UpdatedAt = now
+			ids[i] = m.ID
+		}
+		// One targeted UPDATE instead of a full-row Save per claim: the
+		// context/frame JSONB is untouched, so claims stay small in WAL.
+		if err := tx.Exec(`UPDATE parallel_branches
+			SET status = ?, leased_by = ?, lease_expiry = ?,
+			    revision = revision + 1, updated_at = ?
+			WHERE id IN ?`,
+			string(model.ParallelBranchRunning), workerID, expiry, now, ids,
+		).Error; err != nil {
 			return nil, err
 		}
 	}

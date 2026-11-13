@@ -101,6 +101,8 @@ Every `GET` list returns the same envelope:
 - `lineage_id`: single uuid. `version`: integer `>= 1`. `latest_only`: boolean (`true`/`false`; `strconv.ParseBool`
   forms accepted).
 - `created_from` / `created_to`: statistics summary only. Optional inclusive RFC3339 window on instance `created_at`.
+- `workflow_definition_id` / `include_all`: statistics summary only. Optional uuid scoping the aggregate to one
+  definition version, optionally expanded to its whole lineage (`include_all=true`).
 - `total_pages` is `ceil(total / per_page)`.
 - Exception: `GET /v1/statistics` (aggregate summary) has no `items` envelope and no pagination; its `order`
   (`date` / `-date`) sorts the `runs_per_day` buckets, not rows.
@@ -132,7 +134,7 @@ Every `GET` list returns the same envelope:
 8. Inspect any step: `GET .../status/node/{node_id}` (`context_before`, `context_after`, `input`, `output`, `error`,
    attempts). On debug runs, `GET .../debug/context` returns the same position as a TypeScript declaration
    for editor autocomplete.
-9. Dashboard: `GET /v1/statistics` for KPI cards (`active_runs` for live load) and `runs_per_day` charts over the `created_from`/`created_to` window.
+9. Dashboard: `GET /v1/statistics` for KPI cards (`active_runs` for live load) and `runs_per_day` charts over the `created_from`/`created_to` window. Pass `workflow_definition_id` (plus `include_all=true` for the whole version family) to scope the cards to one workflow.
 
 ## Anonymous public-input flow
 

@@ -7,12 +7,16 @@ import (
 	"time"
 
 	"github.com/beelinewf/wf-engine/internal/workflow/model"
+	"gorm.io/gorm"
 )
 
-// StatisticsQuery filters the aggregate summary by instance creation time.
-// Bounds are inclusive: created_at >= From AND created_at <= To. Order
-// selects the runs-per-day bucket direction ("date" or "-date", default
-// "-date"); callers validate before use.
+// StatisticsQuery filters the aggregate summary by instance creation time
+// and workflow definition. Bounds are inclusive: created_at >= From AND
+// created_at <= To. Order selects the runs-per-day bucket direction
+// ("date" or "-date", default "-date"); callers validate before use.
+// WorkflowDefinitionID scopes the aggregate to one definition version;
+// with IncludeAll it expands to every version sharing that definition's
+// lineage.
 type StatisticsQuery struct {
 	From  *time.Time
 	To    *time.Time
@@ -22,6 +26,13 @@ type StatisticsQuery struct {
 	// result set by naming another user: the field is not parsed from
 	// the query string.
 	CreatedBy string
+	// WorkflowDefinitionID scopes the aggregate to one workflow
+	// definition version. Empty leaves the aggregate unfiltered.
+	WorkflowDefinitionID string
+	// IncludeAll expands WorkflowDefinitionID to the whole version
+	// family (every version with the same lineage_id). It is meaningless
+	// without WorkflowDefinitionID; callers validate before use.
+	IncludeAll bool
 }
 
 // RunsPerDayPoint is one calendar-day bucket (Date is YYYY-MM-DD).
@@ -50,9 +61,13 @@ type StatisticsResult struct {
 	RunsPerDay        []RunsPerDayPoint
 }
 
-// statisticsAggRow is the single-row aggregate scan target.
-type statisticsAggRow struct {
-	Total    int64           `gorm:"column:total"`
+// statisticsCombinedRow is one GROUPING SETS output row: the grand-total
+// row (day and status NULL) carries the window totals in n plus the
+// FILTER columns, every other row carries one (day, status) count in n.
+type statisticsCombinedRow struct {
+	Day      *time.Time      `gorm:"column:day"`
+	Status   *string         `gorm:"column:status"`
+	N        int64           `gorm:"column:n"`
 	Finished int64           `gorm:"column:finished"`
 	Failed   int64           `gorm:"column:failed"`
 	Stopped  int64           `gorm:"column:stopped"`
@@ -68,24 +83,49 @@ type statisticsDayRow struct {
 	N      int64     `gorm:"column:n"`
 }
 
+// applyStatisticsFilters scopes a workflow-instances query to the
+// aggregate's creation window, owner, and definition filter. Both the
+// totals query and the runs-per-day query share it so the two can never
+// disagree on the row set.
+func applyStatisticsFilters(db *gorm.DB, q StatisticsQuery) *gorm.DB {
+	if q.From != nil {
+		db = db.Where("created_at >= ?", *q.From)
+	}
+	if q.To != nil {
+		db = db.Where("created_at <= ?", *q.To)
+	}
+	if q.CreatedBy != "" {
+		db = db.Where("created_by = ?", q.CreatedBy)
+	}
+	if q.WorkflowDefinitionID != "" {
+		if q.IncludeAll {
+			// Every version in the named definition's lineage. An
+			// unknown id matches no lineage, so the aggregate is zeros.
+			db = db.Where(`workflow_definition_id IN (
+				SELECT id FROM workflow_definitions WHERE lineage_id = (
+					SELECT lineage_id FROM workflow_definitions WHERE id = ?))`,
+				q.WorkflowDefinitionID)
+		} else {
+			db = db.Where("workflow_definition_id = ?", q.WorkflowDefinitionID)
+		}
+	}
+	return db
+}
+
 // StatisticsSummary aggregates instance counts, success rate, average
 // terminal duration, and per-day buckets over the creation-time window.
 func (r *instanceRepo) StatisticsSummary(ctx context.Context, q StatisticsQuery) (StatisticsResult, error) {
 	var out StatisticsResult
 
-	base := r.db.WithContext(ctx).Model(&WorkflowInstanceModel{})
-	if q.From != nil {
-		base = base.Where("created_at >= ?", *q.From)
+	dayDir := "DESC"
+	if q.Order == "date" {
+		dayDir = "ASC"
 	}
-	if q.To != nil {
-		base = base.Where("created_at <= ?", *q.To)
-	}
-	if q.CreatedBy != "" {
-		base = base.Where("created_by = ?", q.CreatedBy)
-	}
-
-	var agg statisticsAggRow
-	if err := base.Select(`COUNT(*) AS total,` +
+	// One scan serves both the totals and the per-day pivot: the ()
+	// grouping set is the grand total, (day, status) the daily buckets.
+	base := applyStatisticsFilters(r.db.WithContext(ctx).Model(&WorkflowInstanceModel{}), q)
+	var rows []statisticsCombinedRow
+	if err := base.Select(`DATE(created_at) AS day, status, COUNT(*) AS n,` +
 		` COUNT(*) FILTER (WHERE status = 'finished') AS finished,` +
 		` COUNT(*) FILTER (WHERE status = 'failed') AS failed,` +
 		` COUNT(*) FILTER (WHERE status = 'stopped') AS stopped,` +
@@ -94,44 +134,31 @@ func (r *instanceRepo) StatisticsSummary(ctx context.Context, q StatisticsQuery)
 		` AVG(EXTRACT(EPOCH FROM (finished_at - started_at)) * 1000)` +
 		` FILTER (WHERE status IN ('finished','failed','stopped')` +
 		` AND started_at IS NOT NULL AND finished_at IS NOT NULL) AS avg_ms`,
-	).Scan(&agg).Error; err != nil {
+	).Group("GROUPING SETS ((), (DATE(created_at), status))").
+		Order("1 " + dayDir).
+		Scan(&rows).Error; err != nil {
 		return StatisticsResult{}, fmt.Errorf("statistics summary: %w", err)
 	}
-	out.TotalRuns = agg.Total
-	out.FinishedRuns = agg.Finished
-	out.FailedRuns = agg.Failed
-	out.StoppedRuns = agg.Stopped
-	out.TerminalRuns = agg.Terminal
-	out.ActiveRuns = agg.Active
-	if agg.Terminal > 0 {
-		rate := float64(agg.Finished) / float64(agg.Terminal)
-		out.SuccessRate = &rate
-	}
-	if agg.AvgMs.Valid {
-		avg := agg.AvgMs.Float64
-		out.AverageDurationMS = &avg
-	}
-
-	dayDir := "DESC"
-	if q.Order == "date" {
-		dayDir = "ASC"
-	}
-	dayQuery := r.db.WithContext(ctx).Model(&WorkflowInstanceModel{})
-	if q.From != nil {
-		dayQuery = dayQuery.Where("created_at >= ?", *q.From)
-	}
-	if q.To != nil {
-		dayQuery = dayQuery.Where("created_at <= ?", *q.To)
-	}
-	if q.CreatedBy != "" {
-		dayQuery = dayQuery.Where("created_by = ?", q.CreatedBy)
-	}
 	var dayRows []statisticsDayRow
-	if err := dayQuery.Select(`DATE(created_at) AS day, status, COUNT(*) AS n`).
-		Group("1, 2").
-		Order("1 " + dayDir).
-		Scan(&dayRows).Error; err != nil {
-		return StatisticsResult{}, fmt.Errorf("statistics runs per day: %w", err)
+	for _, row := range rows {
+		if row.Day == nil {
+			out.TotalRuns = row.N
+			out.FinishedRuns = row.Finished
+			out.FailedRuns = row.Failed
+			out.StoppedRuns = row.Stopped
+			out.TerminalRuns = row.Terminal
+			out.ActiveRuns = row.Active
+			if row.Terminal > 0 {
+				rate := float64(row.Finished) / float64(row.Terminal)
+				out.SuccessRate = &rate
+			}
+			if row.AvgMs.Valid {
+				avg := row.AvgMs.Float64
+				out.AverageDurationMS = &avg
+			}
+			continue
+		}
+		dayRows = append(dayRows, statisticsDayRow{Day: *row.Day, Status: *row.Status, N: row.N})
 	}
 	byDay := make(map[string]*RunsPerDayPoint, len(dayRows))
 	var order []string

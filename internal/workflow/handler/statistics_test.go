@@ -84,6 +84,29 @@ func TestStatisticsSummaryDefaults(t *testing.T) {
 	if svc.summaryOrder != "-date" {
 		t.Errorf("order = %q, want default -date", svc.summaryOrder)
 	}
+	if svc.summaryQuery.WorkflowDefinitionID != "" || svc.summaryQuery.IncludeAll {
+		t.Errorf("definition filter = %q/%v, want empty/false",
+			svc.summaryQuery.WorkflowDefinitionID, svc.summaryQuery.IncludeAll)
+	}
+}
+
+func TestStatisticsSummaryDelegatesDefinitionFilter(t *testing.T) {
+	const defID = "77777777-7777-7777-8777-777777777777"
+	svc := &fakeStatisticsSvc{summaryRes: repository.StatisticsResult{
+		RunsPerDay: []repository.RunsPerDayPoint{},
+	}}
+	r := NewRouter(Deps{Health: NewHealth(fakePinger{}), Statistics: svc})
+	w := performJSON(r, http.MethodGet,
+		"/v1/statistics?workflow_definition_id="+defID+"&include_all=true", "", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%s)", w.Code, w.Body.String())
+	}
+	if svc.summaryQuery.WorkflowDefinitionID != defID {
+		t.Errorf("workflow_definition_id = %q, want %q", svc.summaryQuery.WorkflowDefinitionID, defID)
+	}
+	if !svc.summaryQuery.IncludeAll {
+		t.Error("include_all = false, want true")
+	}
 }
 
 // A Bearer [REDACTED] is scoped to their own runs, so the handler must thread
@@ -137,6 +160,9 @@ func TestStatisticsSummaryInvalidQuery(t *testing.T) {
 		"?created_to=2026-13-99",
 		"?created_from=2026-09-20T00:00:00Z&created_to=2026-09-01T00:00:00Z",
 		"?order=total",
+		"?workflow_definition_id=not-a-uuid",
+		"?include_all=maybe",
+		"?include_all=true",
 	} {
 		r := NewRouter(Deps{Health: NewHealth(fakePinger{}), Statistics: &fakeStatisticsSvc{}})
 		w := performJSON(r, http.MethodGet, "/v1/statistics"+suffix, "", nil)

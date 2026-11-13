@@ -94,12 +94,22 @@ func (r *statusUpdateRepo) ClaimNextStatusUpdates(ctx context.Context, workerID 
 
 	now := time.Now().UTC()
 	expiry := now.Add(lease)
-	for i := range models {
-		m := &models[i]
-		m.ClaimedBy = workerID
-		m.ClaimExpiry = &expiry
-		m.UpdatedAt = now
-		if err := tx.Save(m).Error; err != nil {
+	if len(models) > 0 {
+		ids := make([]string, len(models))
+		for i := range models {
+			m := &models[i]
+			m.ClaimedBy = workerID
+			m.ClaimExpiry = &expiry
+			m.UpdatedAt = now
+			ids[i] = m.ID
+		}
+		// One targeted UPDATE instead of a full-row Save per claim: the
+		// payload JSONB is untouched, so claims stay small in WAL.
+		if err := tx.Exec(`UPDATE status_update_outbox
+			SET claimed_by = ?, claim_expiry = ?, updated_at = ?
+			WHERE id IN ?`,
+			workerID, expiry, now, ids,
+		).Error; err != nil {
 			return nil, err
 		}
 	}

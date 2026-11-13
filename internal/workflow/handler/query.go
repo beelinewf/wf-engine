@@ -352,6 +352,8 @@ func parseCreatedWindow(c *gin.Context) (*time.Time, *time.Time, error) {
 
 // ParseStatisticsSummaryQuery parses and validates the aggregate query.
 // Order selects the runs-per-day bucket direction ("date"/"-date").
+// WorkflowDefinitionID scopes the aggregate to one definition version;
+// IncludeAll expands it to every version in the same lineage.
 func ParseStatisticsSummaryQuery(c *gin.Context) (*StatisticsSummaryQuery, error) {
 	from, to, err := parseCreatedWindow(c)
 	if err != nil {
@@ -364,8 +366,26 @@ func ParseStatisticsSummaryQuery(c *gin.Context) (*StatisticsSummaryQuery, error
 		}
 		order = v
 	}
+	var defID string
+	if v := c.Query("workflow_definition_id"); v != "" {
+		if !ids.Valid(v) {
+			return nil, fmt.Errorf("query: workflow_definition_id %q is not a valid uuid", v)
+		}
+		defID = v
+	}
+	var includeAll bool
+	if v := c.Query("include_all"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return nil, fmt.Errorf("query: include_all must be a boolean, got %q", v)
+		}
+		includeAll = b
+	}
+	if includeAll && defID == "" {
+		return nil, errors.New("query: include_all requires workflow_definition_id")
+	}
 	return &StatisticsSummaryQuery{
-		Window: repository.StatisticsQuery{From: from, To: to, Order: order},
+		Window: repository.StatisticsQuery{From: from, To: to, Order: order, WorkflowDefinitionID: defID, IncludeAll: includeAll},
 		Order:  order,
 	}, nil
 }

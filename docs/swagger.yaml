@@ -2258,6 +2258,15 @@ paths:
         in: query
         name: order
         type: string
+      - description: Scope to one workflow definition version (UUID)
+        in: query
+        name: workflow_definition_id
+        type: string
+      - description: Expand to every version in the definition's lineage; requires
+          workflow_definition_id
+        in: query
+        name: include_all
+        type: boolean
       produces:
       - application/json
       responses:
