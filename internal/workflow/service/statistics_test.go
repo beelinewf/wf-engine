@@ -111,3 +111,72 @@ func TestStatisticsServiceOwnerScoping(t *testing.T) {
 		})
 	}
 }
+
+func TestStatisticsServiceDefinitionFilterKeepsOwnerScoping(t *testing.T) {
+	db := setupSvcDB(t)
+	ctx := context.Background()
+
+	defRepo := repository.NewWorkflowDefinitionRepository(db)
+	lineage := svcNewID()
+	mkDef := func(version int) string {
+		t.Helper()
+		wf := model.WorkflowDefinition{
+			ID: svcNewID(), Name: "svc-flow", Version: version, LineageID: lineage,
+			Content: json.RawMessage(`{}`), CreatedBy: svcSysUserID, UpdatedBy: svcSysUserID,
+			CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+		}
+		if err := defRepo.Create(ctx, wf); err != nil {
+			t.Fatalf("create workflow version %d: %v", version, err)
+		}
+		return wf.ID
+	}
+	v1, v2 := mkDef(1), mkDef(2)
+
+	const adaID = "44444444-4444-7444-8444-444444444444"
+	const mossID = "22222222-2222-7222-8222-222222222222"
+	repo := repository.NewInstanceRepository(db)
+	mk := func(defID, owner string) model.WorkflowInstance {
+		frame := model.NewFrame("n1")
+		frameRaw, _ := frame.JSON()
+		return model.WorkflowInstance{
+			ID:                   svcNewID(),
+			WorkflowDefinitionID: defID,
+			Status:               model.WorkflowWaiting,
+			Frame:                frameRaw,
+			Context:              json.RawMessage(`{}`),
+			Counters:             json.RawMessage(`{}`),
+			CreatedBy:            owner,
+			UpdatedBy:            owner,
+			CreatedAt:            time.Now().UTC(),
+			UpdatedAt:            time.Now().UTC(),
+		}
+	}
+	for _, w := range []model.WorkflowInstance{
+		mk(v1, adaID),
+		mk(v2, adaID),
+		mk(v2, mossID),
+	} {
+		if err := repo.Insert(ctx, w); err != nil {
+			t.Fatalf("insert: %v", err)
+		}
+	}
+
+	svc := service.NewStatisticsService(repo)
+	q := repository.StatisticsQuery{WorkflowDefinitionID: v2, IncludeAll: true}
+
+	ada, err := svc.Summary(ctx, q, auth.Principal{UserID: adaID, Roles: []string{"finance"}})
+	if err != nil {
+		t.Fatalf("Summary(ada) error = %v", err)
+	}
+	if ada.TotalRuns != 2 {
+		t.Errorf("ada TotalRuns = %d, want 2 (own runs across the lineage)", ada.TotalRuns)
+	}
+
+	admin, err := svc.Summary(ctx, q, auth.Principal{UserID: adaID, Roles: []string{"admin"}})
+	if err != nil {
+		t.Fatalf("Summary(admin) error = %v", err)
+	}
+	if admin.TotalRuns != 3 {
+		t.Errorf("admin TotalRuns = %d, want 3", admin.TotalRuns)
+	}
+}

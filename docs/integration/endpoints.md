@@ -446,13 +446,16 @@ no `409`/`422` paths: bad query → `400`, service failure → `500`.
 
 Aggregate run counts over an inclusive creation window. No pagination.
 
-| Query        | Rule                                                                                           |
-| ------------ | ---------------------------------------------------------------------------------------------- |
-| `created_from` | Optional RFC3339 timestamp, inclusive lower bound on instance `created_at`. Garbage → `400`.       |
-| `created_to`   | Optional RFC3339 timestamp, inclusive upper bound on instance `created_at`. Garbage → `400`.       |
-| `order`        | `date` or `-date` only, default `-date`. Selects `runs_per_day` bucket direction. Anything else → `400`. |
+| Query                    | Rule                                                                                                                                                                                  |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `created_from`           | Optional RFC3339 timestamp, inclusive lower bound on instance `created_at`. Garbage → `400`.                                                                                          |
+| `created_to`             | Optional RFC3339 timestamp, inclusive upper bound on instance `created_at`. Garbage → `400`.                                                                                          |
+| `order`                  | `date` or `-date` only, default `-date`. Selects `runs_per_day` bucket direction. Anything else → `400`.                                                                              |
+| `workflow_definition_id` | Optional uuid. Scopes the aggregate to that definition version's runs. Garbage → `400`.                                                                                               |
+| `include_all`            | Optional boolean, default `false`. Expands `workflow_definition_id` to every version in its lineage (same `lineage_id`). Garbage, or `true` without `workflow_definition_id` → `400`. |
 
-`created_from` after `created_to` → `400`. Response:
+`created_from` after `created_to` → `400`. An unknown `workflow_definition_id` returns `200` with zero
+counts and `runs_per_day: []`. Response:
 
 ```json
 {
@@ -477,6 +480,8 @@ Aggregate run counts over an inclusive creation window. No pagination.
   `finished_at - started_at` in ms over terminal runs with both timestamps set, `null` when none qualify.
 - `runs_per_day` buckets group by calendar day of `created_at` (`date` is `YYYY-MM-DD`), ordered by `order`. Empty
   window returns zeros with `runs_per_day: []` (empty array, never `null`).
+- The definition filter applies to every number: totals, `success_rate`, `average_duration_ms`, and the
+  `runs_per_day` buckets all cover the same row set (one version, or the whole lineage with `include_all=true`).
 
 ## Auth
 

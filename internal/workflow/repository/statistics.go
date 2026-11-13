@@ -7,12 +7,16 @@ import (
 	"time"
 
 	"github.com/beelinewf/wf-engine/internal/workflow/model"
+	"gorm.io/gorm"
 )
 
-// StatisticsQuery filters the aggregate summary by instance creation time.
-// Bounds are inclusive: created_at >= From AND created_at <= To. Order
-// selects the runs-per-day bucket direction ("date" or "-date", default
-// "-date"); callers validate before use.
+// StatisticsQuery filters the aggregate summary by instance creation time
+// and workflow definition. Bounds are inclusive: created_at >= From AND
+// created_at <= To. Order selects the runs-per-day bucket direction
+// ("date" or "-date", default "-date"); callers validate before use.
+// WorkflowDefinitionID scopes the aggregate to one definition version;
+// with IncludeAll it expands to every version sharing that definition's
+// lineage.
 type StatisticsQuery struct {
 	From  *time.Time
 	To    *time.Time
@@ -22,6 +26,13 @@ type StatisticsQuery struct {
 	// result set by naming another user: the field is not parsed from
 	// the query string.
 	CreatedBy string
+	// WorkflowDefinitionID scopes the aggregate to one workflow
+	// definition version. Empty leaves the aggregate unfiltered.
+	WorkflowDefinitionID string
+	// IncludeAll expands WorkflowDefinitionID to the whole version
+	// family (every version with the same lineage_id). It is meaningless
+	// without WorkflowDefinitionID; callers validate before use.
+	IncludeAll bool
 }
 
 // RunsPerDayPoint is one calendar-day bucket (Date is YYYY-MM-DD).
@@ -68,21 +79,41 @@ type statisticsDayRow struct {
 	N      int64     `gorm:"column:n"`
 }
 
+// applyStatisticsFilters scopes a workflow-instances query to the
+// aggregate's creation window, owner, and definition filter. Both the
+// totals query and the runs-per-day query share it so the two can never
+// disagree on the row set.
+func applyStatisticsFilters(db *gorm.DB, q StatisticsQuery) *gorm.DB {
+	if q.From != nil {
+		db = db.Where("created_at >= ?", *q.From)
+	}
+	if q.To != nil {
+		db = db.Where("created_at <= ?", *q.To)
+	}
+	if q.CreatedBy != "" {
+		db = db.Where("created_by = ?", q.CreatedBy)
+	}
+	if q.WorkflowDefinitionID != "" {
+		if q.IncludeAll {
+			// Every version in the named definition's lineage. An
+			// unknown id matches no lineage, so the aggregate is zeros.
+			db = db.Where(`workflow_definition_id IN (
+				SELECT id FROM workflow_definitions WHERE lineage_id = (
+					SELECT lineage_id FROM workflow_definitions WHERE id = ?))`,
+				q.WorkflowDefinitionID)
+		} else {
+			db = db.Where("workflow_definition_id = ?", q.WorkflowDefinitionID)
+		}
+	}
+	return db
+}
+
 // StatisticsSummary aggregates instance counts, success rate, average
 // terminal duration, and per-day buckets over the creation-time window.
 func (r *instanceRepo) StatisticsSummary(ctx context.Context, q StatisticsQuery) (StatisticsResult, error) {
 	var out StatisticsResult
 
-	base := r.db.WithContext(ctx).Model(&WorkflowInstanceModel{})
-	if q.From != nil {
-		base = base.Where("created_at >= ?", *q.From)
-	}
-	if q.To != nil {
-		base = base.Where("created_at <= ?", *q.To)
-	}
-	if q.CreatedBy != "" {
-		base = base.Where("created_by = ?", q.CreatedBy)
-	}
+	base := applyStatisticsFilters(r.db.WithContext(ctx).Model(&WorkflowInstanceModel{}), q)
 
 	var agg statisticsAggRow
 	if err := base.Select(`COUNT(*) AS total,` +
@@ -116,16 +147,7 @@ func (r *instanceRepo) StatisticsSummary(ctx context.Context, q StatisticsQuery)
 	if q.Order == "date" {
 		dayDir = "ASC"
 	}
-	dayQuery := r.db.WithContext(ctx).Model(&WorkflowInstanceModel{})
-	if q.From != nil {
-		dayQuery = dayQuery.Where("created_at >= ?", *q.From)
-	}
-	if q.To != nil {
-		dayQuery = dayQuery.Where("created_at <= ?", *q.To)
-	}
-	if q.CreatedBy != "" {
-		dayQuery = dayQuery.Where("created_by = ?", q.CreatedBy)
-	}
+	dayQuery := applyStatisticsFilters(r.db.WithContext(ctx).Model(&WorkflowInstanceModel{}), q)
 	var dayRows []statisticsDayRow
 	if err := dayQuery.Select(`DATE(created_at) AS day, status, COUNT(*) AS n`).
 		Group("1, 2").

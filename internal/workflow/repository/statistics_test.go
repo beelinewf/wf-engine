@@ -2,6 +2,7 @@ package repository_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -175,5 +176,110 @@ func TestStatisticsSummaryOwnerScoping(t *testing.T) {
 	}
 	if all.TotalRuns != 4 {
 		t.Errorf("unscoped TotalRuns = %d, want 4", all.TotalRuns)
+	}
+}
+
+func TestStatisticsSummaryDefinitionFilter(t *testing.T) {
+	db := setupTestDB(t)
+	seedInstanceFixture(t, db)
+	ctx := context.Background()
+	repo := repository.NewInstanceRepository(db)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	lineage := "aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa"
+	v1 := "a1111111-1111-7111-8111-111111111111"
+	v2 := "a2222222-2222-7222-8222-222222222222"
+	v3 := "a3333333-3333-7333-8333-333333333333"
+	unrelated := "b4444444-4444-7444-8444-444444444444"
+	mkDef := func(id string, version int, lineageID string, prev *string) {
+		t.Helper()
+		wd := repository.WorkflowDefinitionToModel(model.WorkflowDefinition{
+			ID: id, Name: "versioned-flow", Version: version,
+			PreviousVersionID: prev, LineageID: lineageID, Content: json.RawMessage(`{}`),
+			CreatedBy: fixtureUserID, UpdatedBy: fixtureUserID, CreatedAt: now, UpdatedAt: now,
+		})
+		if err := db.Create(&wd).Error; err != nil {
+			t.Fatalf("seed workflow definition %s: %v", id, err)
+		}
+	}
+	mkDef(v1, 1, lineage, nil)
+	mkDef(v2, 2, lineage, &v1)
+	mkDef(v3, 3, lineage, &v2)
+	mkDef(unrelated, 1, unrelated, nil)
+
+	day1 := now.Add(-48 * time.Hour)
+	day2 := now.Add(-24 * time.Hour)
+	mk := func(id, defID string, status model.WorkflowStatus, created time.Time) model.WorkflowInstance {
+		w := newTestInstance(id, status, "")
+		w.WorkflowDefinitionID = defID
+		w.CreatedAt = created
+		w.UpdatedAt = created
+		return w
+	}
+	insertInstance(t, db, mk("c1111111-1111-7111-8111-111111111111", v1, model.WorkflowFinished, day1))
+	failed := mk("c2222222-2222-7222-8222-222222222222", v2, model.WorkflowFailed, day1)
+	failed.Error = "boom"
+	insertInstance(t, db, failed)
+	insertInstance(t, db, mk("c3333333-3333-7333-8333-333333333333", v2, model.WorkflowRunning, day2))
+	insertInstance(t, db, mk("c4444444-4444-7444-8444-444444444444", v3, model.WorkflowWaiting, day2))
+	insertInstance(t, db, mk("c5555555-5555-7555-8555-555555555555", unrelated, model.WorkflowFinished, day1))
+
+	// Exact: only v2's own runs.
+	exact, err := repo.StatisticsSummary(ctx, repository.StatisticsQuery{WorkflowDefinitionID: v2})
+	if err != nil {
+		t.Fatalf("StatisticsSummary(exact) error = %v", err)
+	}
+	if exact.TotalRuns != 2 || exact.FailedRuns != 1 || exact.ActiveRuns != 1 {
+		t.Errorf("exact failed/active/total = %d/%d/%d, want 1/1/2",
+			exact.FailedRuns, exact.ActiveRuns, exact.TotalRuns)
+	}
+	if len(exact.RunsPerDay) != 2 {
+		t.Errorf("exact RunsPerDay len = %d, want 2 (one run on each day)", len(exact.RunsPerDay))
+	}
+
+	// Expanded: the whole lineage, excluding the unrelated definition.
+	expanded, err := repo.StatisticsSummary(ctx, repository.StatisticsQuery{WorkflowDefinitionID: v2, IncludeAll: true})
+	if err != nil {
+		t.Fatalf("StatisticsSummary(include_all) error = %v", err)
+	}
+	if expanded.TotalRuns != 4 || expanded.FinishedRuns != 1 || expanded.FailedRuns != 1 {
+		t.Errorf("include_all finished/failed/total = %d/%d/%d, want 1/1/4",
+			expanded.FinishedRuns, expanded.FailedRuns, expanded.TotalRuns)
+	}
+	if expanded.ActiveRuns != 2 {
+		t.Errorf("include_all ActiveRuns = %d, want 2", expanded.ActiveRuns)
+	}
+
+	// The filter composes with the window and the owner scope.
+	from := day2.Add(-time.Hour)
+	to := now.Add(time.Hour)
+	composed, err := repo.StatisticsSummary(ctx, repository.StatisticsQuery{
+		From: &from, To: &to, CreatedBy: fixtureUserID, WorkflowDefinitionID: v2, IncludeAll: true,
+	})
+	if err != nil {
+		t.Fatalf("StatisticsSummary(composed) error = %v", err)
+	}
+	if composed.TotalRuns != 2 {
+		t.Errorf("composed TotalRuns = %d, want 2 (v2 running + v3 waiting on day2)", composed.TotalRuns)
+	}
+	if len(composed.RunsPerDay) != 1 || composed.RunsPerDay[0].Total != 2 {
+		t.Errorf("composed RunsPerDay = %+v, want one day2 bucket with total 2", composed.RunsPerDay)
+	}
+
+	// Unknown definition: zero counts, nil rate/avg, empty buckets.
+	unknown, err := repo.StatisticsSummary(ctx, repository.StatisticsQuery{
+		WorkflowDefinitionID: "d6666666-6666-7666-8666-666666666666", IncludeAll: true,
+	})
+	if err != nil {
+		t.Fatalf("StatisticsSummary(unknown) error = %v", err)
+	}
+	if unknown.TotalRuns != 0 || unknown.TerminalRuns != 0 || unknown.ActiveRuns != 0 {
+		t.Errorf("unknown definition = %+v, want zeros", unknown)
+	}
+	if unknown.SuccessRate != nil || unknown.AverageDurationMS != nil {
+		t.Errorf("unknown definition rate/avg = %v/%v, want nil/nil", unknown.SuccessRate, unknown.AverageDurationMS)
+	}
+	if len(unknown.RunsPerDay) != 0 {
+		t.Errorf("unknown definition RunsPerDay = %+v, want empty", unknown.RunsPerDay)
 	}
 }

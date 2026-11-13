@@ -35,6 +35,8 @@ func NewStatisticsHandler(svc service.StatisticsService) *StatisticsHandler {
 // @Param created_from query string false "Inclusive window start (RFC3339)"
 // @Param created_to query string false "Inclusive window end (RFC3339)"
 // @Param order query string false "Runs-per-day direction: date or -date"
+// @Param workflow_definition_id query string false "Scope to one workflow definition version (UUID)"
+// @Param include_all query boolean false "Expand to every version in the definition's lineage; requires workflow_definition_id"
 // @Success 200 {object} StatisticsSummaryResponse
 // @Failure 401,403,400,500 {object} Problem
 // @Security ApiKeyAuth
