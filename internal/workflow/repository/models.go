@@ -40,8 +40,10 @@ type UserModel struct {
 	EmailVerifiedAt *time.Time `gorm:"column:email_verified_at"`
 	// VerificationTokenHash is the SHA-256 hex of the outstanding email
 	// verification token. The raw token exists only in the email, never
-	// at rest. Cleared on consume, so a token is single-use.
-	VerificationTokenHash string `gorm:"column:verification_token_hash;not null;default:'';index:idx_users_verification_token"`
+	// at rest. Cleared on consume, so a token is single-use. The partial
+	// index on this column lives in cmd/atlas-loader with the other
+	// WHERE-predicate indexes.
+	VerificationTokenHash string `gorm:"column:verification_token_hash;not null;default:''"`
 	// VerificationExpiresAt bounds the outstanding token. NULL when no
 	// token is outstanding.
 	VerificationExpiresAt *time.Time `gorm:"column:verification_expires_at"`
@@ -125,13 +127,13 @@ func (FormModel) TableName() string { return "forms" }
 type NodeDefinitionModel struct {
 	ID                string         `gorm:"column:id;type:uuid;primaryKey"`
 	Name              string         `gorm:"column:name;not null"`
-	Version           int            `gorm:"column:version;not null"`
+	Version           int            `gorm:"column:version;not null;index:idx_node_definitions_lineage_version,priority:2,sort:desc"`
 	PreviousVersionID *string        `gorm:"column:previous_version_id;type:uuid;uniqueIndex"`
-	LineageID         string         `gorm:"column:lineage_id;type:uuid;not null;index"`
+	LineageID         string         `gorm:"column:lineage_id;type:uuid;not null;index:idx_node_definitions_lineage_version,priority:1"`
 	Type              string         `gorm:"column:type;not null"`
 	Content           datatypes.JSON `gorm:"column:content;type:jsonb;not null"`
-	CreatedBy         string         `gorm:"column:created_by;type:uuid;not null"`
-	UpdatedBy         string         `gorm:"column:updated_by;type:uuid;not null"`
+	CreatedBy         string         `gorm:"column:created_by;type:uuid;not null;index:idx_node_definitions_created_by"`
+	UpdatedBy         string         `gorm:"column:updated_by;type:uuid;not null;index:idx_node_definitions_updated_by"`
 	CreatedAt         time.Time      `gorm:"column:created_at;not null"`
 	UpdatedAt         time.Time      `gorm:"column:updated_at;not null"`
 }
@@ -143,12 +145,12 @@ func (NodeDefinitionModel) TableName() string { return "node_definitions" }
 type WorkflowDefinitionModel struct {
 	ID                string         `gorm:"column:id;type:uuid;primaryKey"`
 	Name              string         `gorm:"column:name;not null"`
-	Version           int            `gorm:"column:version;not null"`
+	Version           int            `gorm:"column:version;not null;index:idx_workflow_definitions_lineage_version,priority:2,sort:desc"`
 	PreviousVersionID *string        `gorm:"column:previous_version_id;type:uuid;uniqueIndex"`
-	LineageID         string         `gorm:"column:lineage_id;type:uuid;not null;index"`
+	LineageID         string         `gorm:"column:lineage_id;type:uuid;not null;index:idx_workflow_definitions_lineage_version,priority:1"`
 	Content           datatypes.JSON `gorm:"column:content;type:jsonb;not null"`
-	CreatedBy         string         `gorm:"column:created_by;type:uuid;not null"`
-	UpdatedBy         string         `gorm:"column:updated_by;type:uuid;not null"`
+	CreatedBy         string         `gorm:"column:created_by;type:uuid;not null;index:idx_workflow_definitions_created_by"`
+	UpdatedBy         string         `gorm:"column:updated_by;type:uuid;not null;index:idx_workflow_definitions_updated_by"`
 	CreatedAt         time.Time      `gorm:"column:created_at;not null"`
 	UpdatedAt         time.Time      `gorm:"column:updated_at;not null"`
 }
@@ -210,8 +212,8 @@ type CronScheduleModel struct {
 	Timezone             string         `gorm:"column:timezone;not null;default:'UTC'"`
 	Context              datatypes.JSON `gorm:"column:context;type:jsonb;not null;default:'{}'"`
 	Enabled              bool           `gorm:"column:enabled;not null;index"`
-	CreatedBy            string         `gorm:"column:created_by;type:uuid;not null"`
-	UpdatedBy            string         `gorm:"column:updated_by;type:uuid;not null"`
+	CreatedBy            string         `gorm:"column:created_by;type:uuid;not null;index:idx_cron_schedules_created_by"`
+	UpdatedBy            string         `gorm:"column:updated_by;type:uuid;not null;index:idx_cron_schedules_updated_by"`
 	CreatedAt            time.Time      `gorm:"column:created_at;not null"`
 	UpdatedAt            time.Time      `gorm:"column:updated_at;not null"`
 }
@@ -278,14 +280,14 @@ func (WorkflowInstanceModel) TableName() string { return "workflow_instances" }
 // NodeContextHistoryModel stores one lean-context commit or anchor.
 type NodeContextHistoryModel struct {
 	ID                 string         `gorm:"column:id;type:uuid;primaryKey;index:idx_node_context_history_cursor,priority:3"`
-	WorkflowInstanceID string         `gorm:"column:workflow_instance_id;type:uuid;not null;index;index:idx_node_context_history_cursor,priority:1"`
-	OccurrenceID       string         `gorm:"column:occurrence_id;not null;default:'';index"`
+	WorkflowInstanceID string         `gorm:"column:workflow_instance_id;type:uuid;not null;index:idx_node_context_history_cursor,priority:1"`
+	OccurrenceID       string         `gorm:"column:occurrence_id;not null;default:''"`
 	NodeID             string         `gorm:"column:node_id;not null"`
 	Attempt            int            `gorm:"column:attempt;not null;default:0"`
 	IsAnchor           bool           `gorm:"column:is_anchor;not null;default:false"`
 	Snapshot           datatypes.JSON `gorm:"column:snapshot;type:jsonb;not null;default:'null'"`
 	Diff               datatypes.JSON `gorm:"column:diff;type:jsonb;not null;default:'null'"`
-	Superseded         bool           `gorm:"column:superseded;not null;default:false;index"`
+	Superseded         bool           `gorm:"column:superseded;not null;default:false"`
 	CreatedAt          time.Time      `gorm:"column:created_at;not null;index:idx_node_context_history_cursor,priority:2"`
 }
 
@@ -295,14 +297,14 @@ func (NodeContextHistoryModel) TableName() string { return "node_context_history
 // NodeInstanceModel persists model.NodeInstance.
 type NodeInstanceModel struct {
 	ID                 string         `gorm:"column:id;type:uuid;primaryKey"`
-	WorkflowInstanceID string         `gorm:"column:workflow_instance_id;type:uuid;not null;index"`
-	BranchID           *string        `gorm:"column:branch_id;type:uuid;index"`
-	NodeID             string         `gorm:"column:node_id;type:uuid;not null"`
-	NodeDefinitionID   *string        `gorm:"column:node_definition_id;type:uuid"`
+	WorkflowInstanceID string         `gorm:"column:workflow_instance_id;type:uuid;not null;index;index:idx_node_instances_instance_node,priority:1"`
+	BranchID           *string        `gorm:"column:branch_id;type:uuid;index;index:idx_node_instances_branch_node,priority:1"`
+	NodeID             string         `gorm:"column:node_id;type:uuid;not null;index:idx_node_instances_instance_node,priority:2;index:idx_node_instances_branch_node,priority:2"`
+	NodeDefinitionID   *string        `gorm:"column:node_definition_id;type:uuid;index:idx_node_instances_node_definition_id"`
 	Name               string         `gorm:"column:name;not null"`
 	Type               string         `gorm:"column:type;not null"`
 	Attempt            int            `gorm:"column:attempt;not null;default:0"`
-	Status             string         `gorm:"column:status;not null;index"`
+	Status             string         `gorm:"column:status;not null;index;index:idx_node_instances_instance_node,priority:3;index:idx_node_instances_branch_node,priority:3"`
 	Input              datatypes.JSON `gorm:"column:input;type:jsonb;not null;default:'null'"`
 	Output             datatypes.JSON `gorm:"column:output;type:jsonb;not null;default:'null'"`
 	Error              string         `gorm:"column:error;not null;default:''"`
@@ -323,12 +325,12 @@ func (NodeInstanceModel) TableName() string { return "node_instances" }
 
 // WorkflowInstanceEventModel persists model.WorkflowInstanceEvent.
 type WorkflowInstanceEventModel struct {
-	ID                 string         `gorm:"column:id;type:uuid;primaryKey"`
-	WorkflowInstanceID string         `gorm:"column:workflow_instance_id;type:uuid;not null;index"`
+	ID                 string         `gorm:"column:id;type:uuid;primaryKey;index:idx_workflow_instance_events_instance,priority:3"`
+	WorkflowInstanceID string         `gorm:"column:workflow_instance_id;type:uuid;not null;index;index:idx_workflow_instance_events_instance,priority:1"`
 	Type               string         `gorm:"column:type;not null"`
 	Data               datatypes.JSON `gorm:"column:data;type:jsonb;not null;default:'{}'"`
-	CreatedBy          string         `gorm:"column:created_by;type:uuid;not null"`
-	CreatedAt          time.Time      `gorm:"column:created_at;not null;index"`
+	CreatedBy          string         `gorm:"column:created_by;type:uuid;not null;index:idx_workflow_instance_events_created_by"`
+	CreatedAt          time.Time      `gorm:"column:created_at;not null;index;index:idx_workflow_instance_events_instance,priority:2"`
 }
 
 // TableName is the workflow_instance_events table.
@@ -337,7 +339,7 @@ func (WorkflowInstanceEventModel) TableName() string { return "workflow_instance
 // InputDeliveryModel persists model.InputDelivery.
 type InputDeliveryModel struct {
 	ID                 string         `gorm:"column:id;type:uuid;primaryKey"`
-	WorkflowInstanceID string         `gorm:"column:workflow_instance_id;type:uuid;not null;index;uniqueIndex:uq_input_deliveries_instance_key,priority:1"`
+	WorkflowInstanceID string         `gorm:"column:workflow_instance_id;type:uuid;not null;uniqueIndex:uq_input_deliveries_instance_key,priority:1"`
 	NodeInstanceID     string         `gorm:"column:node_instance_id;type:uuid;not null;uniqueIndex:uq_input_deliveries_node_key"`
 	IdempotencyKey     string         `gorm:"column:idempotency_key;not null;uniqueIndex:uq_input_deliveries_node_key;uniqueIndex:uq_input_deliveries_instance_key,priority:2"`
 	Payload            datatypes.JSON `gorm:"column:payload;type:jsonb;not null"`
@@ -410,15 +412,15 @@ type ParallelBranchModel struct {
 	Frame               datatypes.JSON `gorm:"column:frame;type:jsonb;not null;default:'{}'"`
 	Context             datatypes.JSON `gorm:"column:context;type:jsonb;not null;default:'{}'"`
 	Counters            datatypes.JSON `gorm:"column:counters;type:jsonb;not null;default:'{}'"`
-	Status              string         `gorm:"column:status;not null;index"`
-	WaitingReason       string         `gorm:"column:waiting_reason;not null;default:''"`
+	Status              string         `gorm:"column:status;not null;index:idx_parallel_branches_claim,priority:1"`
+	WaitingReason       string         `gorm:"column:waiting_reason;not null;default:'';index:idx_parallel_branches_claim,priority:2"`
 	Revision            int64          `gorm:"column:revision;not null;default:0"`
 	LeasedBy            string         `gorm:"column:leased_by;not null;default:''"`
-	LeaseExpiry         *time.Time     `gorm:"column:lease_expiry;index"`
+	LeaseExpiry         *time.Time     `gorm:"column:lease_expiry;index:idx_parallel_branches_claim,priority:3"`
 	RunAt               *time.Time     `gorm:"column:run_at"`
 	Error               string         `gorm:"column:error;not null;default:''"`
 	CreatedAt           time.Time      `gorm:"column:created_at;not null"`
-	UpdatedAt           time.Time      `gorm:"column:updated_at;not null"`
+	UpdatedAt           time.Time      `gorm:"column:updated_at;not null;index:idx_parallel_branches_claim,priority:4"`
 }
 
 // TableName is the parallel_branches table.

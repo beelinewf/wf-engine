@@ -168,18 +168,13 @@ func (r *gormFormRepository) Update(ctx context.Context, id, name, contentType s
 
 func (r *gormFormRepository) Delete(ctx context.Context, id string) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var refs int64
-		if err := tx.Model(&WorkflowDefinitionFormRefModel{}).
-			Where("form_id = ?", id).Count(&refs).Error; err != nil {
+		var referenced bool
+		if err := tx.Raw(`SELECT EXISTS(SELECT 1 FROM workflow_definition_form_refs WHERE form_id = ?)
+			OR EXISTS(SELECT 1 FROM node_definition_form_refs WHERE form_id = ?) AS referenced`,
+			id, id).Scan(&referenced).Error; err != nil {
 			return fmt.Errorf("form refs check: %w", err)
 		}
-		if refs == 0 {
-			if err := tx.Model(&NodeDefinitionFormRefModel{}).
-				Where("form_id = ?", id).Count(&refs).Error; err != nil {
-				return fmt.Errorf("form refs check: %w", err)
-			}
-		}
-		if refs > 0 {
+		if referenced {
 			return fmt.Errorf("%w: form %s is referenced by definitions", model.ErrConflict, id)
 		}
 		res := tx.Delete(&FormModel{}, "id = ?", id)

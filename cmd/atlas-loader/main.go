@@ -137,5 +137,29 @@ func foreignKeyDDL() string {
 	fmt.Fprintf(&b, "CREATE INDEX %q ON %q (%s) WHERE %s;\n",
 		"idx_parallel_branches_delay", "parallel_branches",
 		"\"status\", \"waiting_reason\", \"run_at\"", "\"waiting_reason\" = 'delay'")
+	// Partial index: reclaiming running rows with an expired lease is the
+	// one claim branch the (status, waiting_reason, ...) composite serves
+	// poorly, since it carries no waiting_reason equality.
+	fmt.Fprintf(&b, "CREATE INDEX %q ON %q (%s) WHERE %s;\n",
+		"idx_workflow_instances_running", "workflow_instances",
+		"\"lease_expiry\"", "\"status\" = 'running'")
+	// Partial index: the branch-side twin for running-lease reclaim.
+	fmt.Fprintf(&b, "CREATE INDEX %q ON %q (%s) WHERE %s;\n",
+		"idx_parallel_branches_running", "parallel_branches",
+		"\"lease_expiry\"", "\"status\" = 'running'")
+	// Partial index: almost every user row holds the empty token, so only
+	// outstanding (non-empty) tokens are indexed.
+	fmt.Fprintf(&b, "CREATE INDEX %q ON %q (%s) WHERE %s;\n",
+		"idx_users_verification_token", "users",
+		"\"verification_token_hash\"", "\"verification_token_hash\" <> ''")
+	// Trigram indexes: the user directory searches email/name with
+	// case-insensitive substring matches no B-tree can serve. The pg_trgm
+	// extension itself is created by the migration by hand (Atlas CE
+	// cannot carry extensions in the desired schema), and the dev
+	// database used for `migrate diff` needs it installed once.
+	fmt.Fprintf(&b, "CREATE INDEX %q ON %q USING gin (%s);\n",
+		"idx_users_email_trgm", "users", "\"email\" gin_trgm_ops")
+	fmt.Fprintf(&b, "CREATE INDEX %q ON %q USING gin (%s);\n",
+		"idx_users_name_trgm", "users", "\"name\" gin_trgm_ops")
 	return b.String()
 }

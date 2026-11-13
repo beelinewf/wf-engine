@@ -104,28 +104,25 @@ func (r *gormWorkflowDefinitionRepository) List(ctx context.Context, q Definitio
 
 func (r *gormWorkflowDefinitionRepository) Delete(ctx context.Context, id string) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var requests int64
-		if err := tx.Model(&WorkflowRequestModel{}).
-			Where("workflow_definition_id = ?", id).Count(&requests).Error; err != nil {
-			return fmt.Errorf("workflow definition request check: %w", err)
+		var checks struct {
+			Requests  bool `gorm:"column:requests"`
+			Instances bool `gorm:"column:instances"`
+			Schedules bool `gorm:"column:schedules"`
 		}
-		if requests > 0 {
+		if err := tx.Raw(`SELECT
+			EXISTS(SELECT 1 FROM workflow_requests WHERE workflow_definition_id = ?) AS requests,
+			EXISTS(SELECT 1 FROM workflow_instances WHERE workflow_definition_id = ?) AS instances,
+			EXISTS(SELECT 1 FROM cron_schedules WHERE workflow_definition_id = ?) AS schedules`,
+			id, id, id).Scan(&checks).Error; err != nil {
+			return fmt.Errorf("workflow definition reference check: %w", err)
+		}
+		if checks.Requests {
 			return fmt.Errorf("%w: workflow definition %s is referenced by workflow requests", model.ErrConflict, id)
 		}
-		var instances int64
-		if err := tx.Model(&WorkflowInstanceModel{}).
-			Where("workflow_definition_id = ?", id).Count(&instances).Error; err != nil {
-			return fmt.Errorf("workflow definition instance check: %w", err)
-		}
-		if instances > 0 {
+		if checks.Instances {
 			return fmt.Errorf("%w: workflow definition %s is referenced by workflow instances", model.ErrConflict, id)
 		}
-		var schedules int64
-		if err := tx.Model(&CronScheduleModel{}).
-			Where("workflow_definition_id = ?", id).Count(&schedules).Error; err != nil {
-			return fmt.Errorf("workflow definition schedule check: %w", err)
-		}
-		if schedules > 0 {
+		if checks.Schedules {
 			return fmt.Errorf("%w: workflow definition %s is referenced by cron schedules", model.ErrConflict, id)
 		}
 		// The definition's own form references go with it, which is what

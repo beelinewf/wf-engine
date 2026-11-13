@@ -100,20 +100,20 @@ func (r *gormNodeDefinitionRepository) List(ctx context.Context, q DefinitionLis
 
 func (r *gormNodeDefinitionRepository) Delete(ctx context.Context, id string) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var refs int64
-		if err := tx.Model(&WorkflowDefinitionNodeRefModel{}).
-			Where("node_definition_id = ?", id).Count(&refs).Error; err != nil {
-			return fmt.Errorf("node definition refs check: %w", err)
+		var checks struct {
+			Refs      bool `gorm:"column:refs"`
+			Instances bool `gorm:"column:instances"`
 		}
-		if refs > 0 {
+		if err := tx.Raw(`SELECT
+			EXISTS(SELECT 1 FROM workflow_definition_node_refs WHERE node_definition_id = ?) AS refs,
+			EXISTS(SELECT 1 FROM node_instances WHERE node_definition_id = ?) AS instances`,
+			id, id).Scan(&checks).Error; err != nil {
+			return fmt.Errorf("node definition reference check: %w", err)
+		}
+		if checks.Refs {
 			return fmt.Errorf("%w: node definition %s is referenced by workflow definitions", model.ErrConflict, id)
 		}
-		var instances int64
-		if err := tx.Model(&NodeInstanceModel{}).
-			Where("node_definition_id = ?", id).Count(&instances).Error; err != nil {
-			return fmt.Errorf("node definition instance check: %w", err)
-		}
-		if instances > 0 {
+		if checks.Instances {
 			return fmt.Errorf("%w: node definition %s is referenced by node instances", model.ErrConflict, id)
 		}
 		// The definition's own form references go with it, which is what
