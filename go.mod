@@ -1,6 +1,6 @@
 module github.com/beelinewf/wf-engine
 
-go 1.27.3
+go 1.27.4
 
 require (
 	ariga.io/atlas-provider-gorm v0.6.1
